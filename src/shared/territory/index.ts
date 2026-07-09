@@ -54,3 +54,19 @@ export function getMunicipalityNameById(municipalityId: string): string {
   const mun = allMunicipalities.find(m => m.id === municipalityId);
   return mun ? mun.name : municipalityId;
 }
+
+export function getProvinceByName(name: string): Province | undefined {
+  if (!name) return undefined;
+  const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return allProvinces.find(p => 
+    p.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() === normalized
+  );
+}
+
+export function getMunicipalityByName(name: string): Municipality | undefined {
+  if (!name) return undefined;
+  const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return allMunicipalities.find(m => 
+    m.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() === normalized
+  );
+}

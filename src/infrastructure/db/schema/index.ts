@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean, customType, pgEnum, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, boolean, customType, pgEnum, index, real } from "drizzle-orm/pg-core";
 
 // Custom type para PostGIS geometry (Point)
 const geometry = customType<{ data: [number, number]; driverData: string }>({
@@ -69,6 +69,8 @@ export const expedientes = pgTable("expedientes", {
   actionType: actionTypeEnum("action_type"),
   locationSource: locationSourceEnum("location_source"),
   notes: text("notes"),
+  planeamiento: text("planeamiento"),
+  contextoValidadoPorTecnico: boolean("contexto_validado_por_tecnico").default(false).notNull(),
   status: text("status").default("active").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -170,4 +172,91 @@ export const normativaChunks = pgTable("normativa_chunks", {
   return {
     embeddingIdx: index("normativa_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
   };
+});
+
+export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant"]);
+
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  expedienteId: uuid("expediente_id").references(() => expedientes.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => profiles.id, { onDelete: "cascade" }).notNull(),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  sources: jsonb("sources"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    expedienteIdIdx: index("chat_messages_expediente_id_idx").on(table.expedienteId),
+    createdAtIdx: index("chat_messages_created_at_idx").on(table.createdAt),
+  };
+});
+
+// ==========================================
+// FASE 1A: Motor de Contexto Urbanístico
+// ==========================================
+
+export const planningStatusEnum = pgEnum('planning_status', ['vigente', 'en_tramitacion', 'derogado']);
+export const afeccionStatusEnum = pgEnum('afeccion_status', ['detected', 'confirmed', 'rejected', 'manual', 'pending_review']);
+
+export const municipalPlanning = pgTable('municipal_planning', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  provinceId: text('province_id').notNull(),
+  municipalityId: text('municipality_id').notNull(),
+  name: text('name').notNull(),
+  status: planningStatusEnum('status').default('vigente').notNull(),
+  approvalDate: timestamp('approval_date'),
+  sourceSystem: text('source_system'),
+  sourceUrl: text('source_url'),
+  sourceDocumentId: text('source_document_id'),
+  externalId: text('external_id'),
+  validFrom: timestamp('valid_from'),
+  validTo: timestamp('valid_to'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const planningZones = pgTable('planning_zones', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  planningId: uuid('planning_id').references(() => municipalPlanning.id, { onDelete: 'cascade' }).notNull(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  landClass: text('land_class'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const afeccionTypes = pgTable('afeccion_types', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  category: text('category').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  sourceWfs: text('source_wfs'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const expedienteAfecciones = pgTable('expediente_afecciones', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'cascade' }).notNull(),
+  afeccionTypeId: uuid('afeccion_type_id').references(() => afeccionTypes.id, { onDelete: 'cascade' }).notNull(),
+  status: afeccionStatusEnum('status').default('detected').notNull(),
+  manuallyAdded: boolean('manually_added').default(false).notNull(),
+  source: text('source'),
+  sourceUrl: text('source_url'),
+  detectionMethod: text('detection_method'),
+  rawFeatureId: text('raw_feature_id'),
+  confidence: real('confidence'),
+  detectedAt: timestamp('detected_at').defaultNow().notNull(),
+  reviewedAt: timestamp('reviewed_at'),
+  reviewedBy: uuid('reviewed_by').references(() => profiles.id),
+  notes: text('notes'),
+});
+
+export const contextDetections = pgTable('context_detections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'cascade' }).notNull(),
+  summary: jsonb('summary').notNull(),
+  rawResponse: jsonb('raw_response'),
+  geometryStored: boolean('geometry_stored').default(false).notNull(),
+  sourceApis: jsonb('source_apis').notNull(),
+  detectedAt: timestamp('detected_at').defaultNow().notNull(),
 });

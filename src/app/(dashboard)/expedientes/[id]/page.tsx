@@ -3,11 +3,12 @@ import { db } from '@/infrastructure/db/client'
 import { expedientes, organizationMembers, documents } from '@/infrastructure/db/schema'
 import { eq, and, desc } from 'drizzle-orm'
 import { authProvider } from '@/infrastructure/auth'
-import { MapPin, Settings, MessageSquare } from 'lucide-react'
+import { MapPin, Settings, MessageSquare, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DocumentList } from './DocumentList'
 import { formatLocationSource, formatLandClass, formatActionType } from '@/shared/utils/formatters'
 import { getProvinceNameById, getMunicipalityNameById } from '@/shared/territory'
+import { ChatInterface } from './ChatInterface'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -81,10 +82,21 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           
           {/* Detalles Urbanísticos */}
           <div className="p-4 border-b">
-            <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              Detalles del Proyecto
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                Detalles del Proyecto
+              </h2>
+              {expediente.contextoValidadoPorTecnico ? (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+                  Contexto revisado
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                  Pendiente de revisión
+                </span>
+              )}
+            </div>
             <div className="space-y-4 text-sm">
               {expediente.province && (
                 <div>
@@ -110,6 +122,12 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
                 <div>
                   <div className="text-xs text-muted-foreground font-medium mb-1">Parámetros Urbanísticos</div>
                   <ul className="space-y-1.5">
+                    {expediente.planeamiento && (
+                      <li className="flex flex-col">
+                        <span className="text-xs text-muted-foreground">Planeamiento:</span>
+                        <span className="font-medium">{expediente.planeamiento}</span>
+                      </li>
+                    )}
                     {expediente.urbanPlanningZone && (
                       <li className="flex flex-col">
                         <span className="text-xs text-muted-foreground">Ámbito/Ordenanza:</span>
@@ -151,31 +169,19 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         </div>
 
         {/* Right Side: Chat / Main Interaction Area */}
-        <div className="flex flex-1 flex-col relative">
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-lg mx-auto">
-            <div className="h-12 w-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-4">
-              <MessageSquare className="h-5 w-5" />
+        <div className="flex flex-1 flex-col relative bg-background">
+          {expediente.contextoValidadoPorTecnico ? (
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-center justify-center gap-2 shrink-0">
+              <MapPin className="h-4 w-4" />
+              <span>UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
             </div>
-            <h2 className="text-xl font-semibold tracking-tight mb-2">Asistente Urbanístico</h2>
-            <p className="text-sm text-muted-foreground mb-8">
-              La IA está desconectada en este momento. Pronto podrás preguntar sobre normativas, parámetros urbanísticos y compatibilidad de usos para este expediente.
-            </p>
-            
-            {/* Fake input just for the UI feel */}
-            <div className="w-full relative shadow-sm">
-              <textarea 
-                className="w-full resize-none rounded-xl border bg-background px-4 py-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-                placeholder="Pregunta sobre la normativa de este municipio..."
-                rows={1}
-                disabled
-              />
-              <div className="absolute bottom-3 right-3">
-                <Button disabled size="sm" className="h-8 w-8 rounded-lg p-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-send-horizontal"><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>
-                </Button>
-              </div>
+          ) : (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 p-2.5 text-xs text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2 shrink-0">
+              <AlertCircle className="h-4 w-4" />
+              <span>Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden realmente a este expediente antes de utilizar las respuestas de UrbanBrain.</span>
             </div>
-          </div>
+          )}
+          <ChatInterface expedienteId={expediente.id} municipio={expediente.municipio} />
         </div>
 
       </div>

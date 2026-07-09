@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send, FileText, AlertCircle } from "lucide-react"
@@ -17,14 +17,52 @@ interface Source {
   titulo_detectado: string;
   similarity: number;
   source_index: number;
+  original_path?: string;
+  pagina_detectada?: string;
+  fragmento_corto?: string;
 }
 
-export default function ChatPage() {
+interface ChatInterfaceProps {
+  expedienteId: string;
+  municipio: string;
+}
+
+export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchHistory() {
+      try {
+        const res = await fetch(`/api/chat/history?expedienteId=${expedienteId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        if (data.history && data.history.length > 0) {
+          const loadedMessages = data.history.map((h: any) => ({
+            role: h.role,
+            content: h.content
+          }));
+          setMessages(loadedMessages);
+          
+          // Recuperar fuentes del último mensaje del asistente si existen
+          const lastAssistantMsg = [...data.history].reverse().find((m: any) => m.role === 'assistant');
+          if (lastAssistantMsg && lastAssistantMsg.sources) {
+            setSources(lastAssistantMsg.sources);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching chat history", err);
+      }
+    }
+    
+    if (expedienteId) {
+      fetchHistory();
+    }
+  }, [expedienteId]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -43,7 +81,8 @@ export default function ChatPage() {
         },
         body: JSON.stringify({
           message: userMessage,
-          municipio: "Oza" // Municipio hardcodeado para la V1
+          municipio,
+          expedienteId
         })
       });
 
@@ -63,10 +102,10 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-full w-full flex-col lg:flex-row">
+    <div className="flex h-full w-full flex-col xl:flex-row bg-background">
       {/* Zona Izquierda: Chat */}
       <div className="flex flex-1 flex-col border-r relative">
-        <div className="flex-1 p-4 overflow-y-auto space-y-4 pb-20">
+        <div className="flex-1 p-4 overflow-y-auto space-y-4 pb-20 max-h-[calc(100vh-8rem)]">
           <div className="bg-muted w-3/4 rounded-lg p-3 text-sm">
             Hola, soy UrbanBrain. ¿Qué necesitas saber sobre la normativa de este expediente?
           </div>
@@ -114,7 +153,7 @@ export default function ChatPage() {
       </div>
 
       {/* Zona Derecha: Visor de Contexto/PDF (Solo Desktop) */}
-      <div className="hidden lg:flex w-[400px] xl:w-[500px] flex-col bg-muted/10 overflow-hidden">
+      <div className="hidden xl:flex w-[400px] flex-col bg-muted/10 overflow-hidden max-h-[calc(100vh-8rem)]">
         <div className="p-3 border-b flex items-center gap-2 bg-muted/20">
           <FileText className="h-4 w-4" />
           <span className="font-medium text-sm">Documentos de Referencia</span>
@@ -133,10 +172,22 @@ export default function ChatPage() {
                 <div className="text-xs text-muted-foreground mb-2 space-y-1">
                   <p><span className="font-medium">Municipio:</span> {source.municipio_nombre}</p>
                   <p><span className="font-medium">Documento:</span> {source.nombre_pdf}</p>
-                  {source.titulo_detectado && (
-                    <p><span className="font-medium">Sección:</span> {source.titulo_detectado}</p>
+                  {source.pagina_detectada && (
+                    <p><span className="font-medium">Página:</span> {source.pagina_detectada}</p>
                   )}
-                  <p><span className="font-medium">Similitud:</span> {(source.similarity * 100).toFixed(1)}%</p>
+                  {source.titulo_detectado && source.titulo_detectado.trim() !== ":" && source.titulo_detectado.trim() !== "" && (
+                    <p><span className="font-medium">Apartado:</span> {source.titulo_detectado}</p>
+                  )}
+                  {source.fragmento_corto && (
+                    <p className="mt-2 text-foreground/80 italic border-l-2 border-muted-foreground/30 pl-2">
+                      "{source.fragmento_corto}"
+                    </p>
+                  )}
+                  {source.original_path && (
+                    <p className="mt-2 text-[10px] text-muted-foreground/50 truncate" title={source.original_path}>
+                      Ruta: {source.original_path}
+                    </p>
+                  )}
                 </div>
               </div>
             ))
@@ -144,5 +195,5 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

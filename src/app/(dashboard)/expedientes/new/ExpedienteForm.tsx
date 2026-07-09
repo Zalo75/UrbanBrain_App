@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { createExpediente } from "./actions"
+import { createExpediente, detectContextAction } from "./actions"
 import Link from "next/link"
 import { Province, Municipality } from '@/shared/territory'
+import { toast } from "sonner"
+import { Sparkles, Loader2 } from "lucide-react"
 
 export function ExpedienteForm({ 
   provinces, 
@@ -17,6 +19,53 @@ export function ExpedienteForm({
   municipalities: Municipality[] 
 }) {
   const [selectedProvince, setSelectedProvince] = useState<string>('a_coruna')
+  const [selectedMunicipality, setSelectedMunicipality] = useState<string>('')
+  const [refCatastral, setRefCatastral] = useState<string>('')
+  const [address, setAddress] = useState<string>('')
+  const [isDetecting, setIsDetecting] = useState(false)
+
+  const handleDetectContext = async () => {
+    if (!refCatastral || refCatastral.length < 14) {
+      toast.error("Introduzca una referencia catastral válida (mín. 14 caracteres).")
+      return
+    }
+
+    setIsDetecting(true)
+    try {
+      const formData = new FormData()
+      formData.append('refCatastral', refCatastral)
+      
+      const result = await detectContextAction(formData)
+      
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        let changed = false
+        if (result.provinceId) {
+          setSelectedProvince(result.provinceId)
+          changed = true
+        }
+        if (result.municipalityId) {
+          setSelectedMunicipality(result.municipalityId)
+          changed = true
+        }
+        if (result.address) {
+          setAddress(result.address)
+          changed = true
+        }
+        
+        if (changed) {
+          toast.success("Datos de localización detectados automáticamente. Revise y corrija el contexto antes de confirmar.")
+        } else {
+          toast.info("No se han podido mapear los datos detectados automáticamente.")
+        }
+      }
+    } catch (error) {
+      toast.error("Error al detectar el contexto.")
+    } finally {
+      setIsDetecting(false)
+    }
+  }
 
   const availableMunicipalities = municipalities.filter(
     m => m.provinceId === selectedProvince
@@ -64,7 +113,8 @@ export function ExpedienteForm({
               id="municipio"
               name="municipio"
               required
-              defaultValue=""
+              value={selectedMunicipality}
+              onChange={(e) => setSelectedMunicipality(e.target.value)}
               className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="" disabled>Selecciona un municipio</option>
@@ -75,6 +125,16 @@ export function ExpedienteForm({
               ))}
             </select>
           </div>
+        </div>
+
+        <div className="grid gap-3">
+          <Label htmlFor="planeamiento" className="text-base font-medium">Planeamiento General</Label>
+          <Input
+            id="planeamiento"
+            name="planeamiento"
+            placeholder="Ej: PGOU 2013, NNSS..."
+            className="h-12 text-base shadow-sm"
+          />
         </div>
       </div>
 
@@ -88,18 +148,34 @@ export function ExpedienteForm({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="grid gap-3">
             <Label htmlFor="refCatastral" className="text-base font-medium">Referencia Catastral</Label>
-            <Input
-              id="refCatastral"
-              name="refCatastral"
-              placeholder="14 o 20 caracteres"
-              className="h-12 text-base shadow-sm font-mono placeholder:font-sans"
-            />
+            <div className="flex gap-2">
+              <Input
+                id="refCatastral"
+                name="refCatastral"
+                value={refCatastral}
+                onChange={(e) => setRefCatastral(e.target.value)}
+                placeholder="14 o 20 caracteres"
+                className="h-12 text-base shadow-sm font-mono placeholder:font-sans flex-1"
+              />
+              <Button 
+                type="button" 
+                variant="secondary" 
+                className="h-12 px-4"
+                onClick={handleDetectContext}
+                disabled={isDetecting}
+              >
+                {isDetecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-amber-500" />}
+                <span className="ml-2 hidden sm:inline">Detectar</span>
+              </Button>
+            </div>
           </div>
           <div className="grid gap-3">
             <Label htmlFor="address" className="text-base font-medium">Dirección aproximada</Label>
             <Input
               id="address"
               name="address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
               placeholder="Ej: Rúa do Franco 14"
               className="h-12 text-base shadow-sm"
             />
@@ -215,6 +291,21 @@ export function ExpedienteForm({
             className="min-h-[100px] resize-y"
           />
         </div>
+      </div>
+
+      <div className="pt-2">
+        <label className="flex items-start gap-3 p-4 border rounded-md bg-background shadow-sm cursor-pointer hover:bg-muted/30 transition-colors">
+          <input 
+            type="checkbox" 
+            name="contextoValidadoPorTecnico"
+            value="true"
+            required
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+          />
+          <span className="text-sm font-medium leading-tight text-foreground">
+            Confirmo que he revisado el contexto urbanístico inicial del expediente.
+          </span>
+        </label>
       </div>
 
       <div className="flex items-center gap-4 pt-6 border-t border-border/50">

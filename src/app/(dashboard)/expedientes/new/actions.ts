@@ -7,7 +7,7 @@ import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
 import { authProvider } from '@/infrastructure/auth'
 import { eq } from 'drizzle-orm'
 
-import { isMunicipalityEnabled } from '@/shared/territory'
+import { isMunicipalityEnabled, getProvinceByName, getMunicipalityByName } from '@/shared/territory'
 
 export async function createExpediente(formData: FormData) {
   const userId = await authProvider.getUserId()
@@ -45,6 +45,8 @@ export async function createExpediente(formData: FormData) {
   const actionTypeRaw = formData.get('actionType') as string | null
   const actionType = actionTypeRaw ? actionTypeRaw as 'consulta_urbanistica' | 'vivienda_unifamiliar' | 'reforma' | 'segregacion' | 'cambio_de_uso' | 'nave' | 'legalizacion' | 'demolicion' | 'parcelacion' | 'informe_urbanistico' | 'otro' : null
   const notes = formData.get('notes') as string | null
+  const planeamiento = formData.get('planeamiento') as string | null
+  const contextoValidadoPorTecnico = formData.get('contextoValidadoPorTecnico') === 'true'
 
   if (!name || name.trim() === '') {
     redirect('/expedientes/new?error=name_required')
@@ -98,6 +100,8 @@ export async function createExpediente(formData: FormData) {
       landClass,
       actionType,
       notes: notes ? notes.trim() : null,
+      planeamiento: planeamiento ? planeamiento.trim() : null,
+      contextoValidadoPorTecnico,
       status: 'active'
     }).returning({ id: expedientes.id })
 
@@ -111,4 +115,54 @@ export async function createExpediente(formData: FormData) {
   revalidatePath('/expedientes')
   
   redirect(`/expedientes/${newExpedienteId}`)
+}
+
+export async function detectContextAction(formData: FormData) {
+  const refCatastral = formData.get('refCatastral') as string | null
+  
+  if (!refCatastral || refCatastral.trim() === '') {
+    return { error: "Debe introducir una referencia catastral." }
+  }
+
+  const rc = refCatastral.trim().toUpperCase()
+  const url = `http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPRC?Provincia=&Municipio=&RC=${rc}`
+  
+  try {
+    const res = await fetch(url)
+    const xml = await res.text()
+    
+    const extract = (tag: string) => {
+      const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)<\/${tag}>`, 'i'))
+      return match ? match[1].trim() : null
+    }
+    
+    const np = extract('np')
+    const nm = extract('nm')
+    const ldt = extract('ldt')
+    
+    let address = null
+    const nv = extract('nv')
+    const tv = extract('tv')
+    const cv = extract('cv')
+    
+    if (tv && nv) {
+      address = `${tv} ${nv} ${cv ? cv : ''}`.trim()
+    } else if (ldt) {
+      address = ldt.split(' Suelo ')[0].trim()
+    }
+    
+    const prov = getProvinceByName(np || '')
+    const mun = getMunicipalityByName(nm || '')
+    
+    return {
+      provinceId: prov?.id || null,
+      municipalityId: mun?.id || null,
+      provinceName: np,
+      municipalityName: nm,
+      address
+    }
+  } catch (e) {
+    console.error('Error in detectContextAction:', e)
+    return { error: "Error de conexión con la Sede Electrónica del Catastro." }
+  }
 }
