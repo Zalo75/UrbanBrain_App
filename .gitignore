@@ -41,3 +41,16 @@ yarn-error.log*
 next-env.d.ts
 
 Presupuestos Dario Perbes/
+
+# Corpus V2 Exclusions
+corpus_v2/**/source/*.pdf
+corpus_v2/**/extracted/
+corpus_v2/**/reports/
+corpus_v2/**/consolidated/
+corpus_v2/**/conflicts/
+corpus_v2/consolidated_candidates/
+corpus_v2/official_sources/
+corpus_v2/NHG/candidato_*.md
+corpus_v2/NHG/conflicts_*.json
+corpus_v2/NHG/manifest_*.json
+public/sw.js

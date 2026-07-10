@@ -1,4 +1,17 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean, customType, pgEnum, index, real } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  jsonb,
+  boolean,
+  customType,
+  pgEnum,
+  index,
+  real,
+  integer,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 // Custom type para PostGIS geometry (Point)
 const geometry = customType<{ data: [number, number]; driverData: string }>({
@@ -14,104 +27,185 @@ const geometry = customType<{ data: [number, number]; driverData: string }>({
   },
 });
 
-export const roleEnum = pgEnum("role", ["owner", "admin", "member", "viewer"]);
-export const messageRoleEnum = pgEnum("message_role", ["user", "assistant", "system", "tool"]);
-export const verificationStatusEnum = pgEnum("verification_status", ["pending", "verified", "rejected"]);
-export const accountTypeEnum = pgEnum("account_type", ["independent_professional", "studio_company", "public_administration", "real_estate_developer", "other"]);
-export const landClassEnum = pgEnum("land_class", ["desconocido", "urbano_consolidado", "urbano_no_consolidado", "urbanizable", "rustico_no_urbanizable", "nucleo_rural"]);
-export const actionTypeEnum = pgEnum("action_type", ["consulta_urbanistica", "vivienda_unifamiliar", "reforma", "segregacion", "cambio_de_uso", "nave", "legalizacion", "demolicion", "parcelacion", "informe_urbanistico", "otro"]);
-export const locationSourceEnum = pgEnum("location_source", ["cadastral_reference", "address", "coordinates", "planning_area", "manual"]);
-export const normativeScopeEnum = pgEnum("normative_scope", ["estatal", "autonomico", "provincial", "municipal", "sectorial"]);
-export const normativeSourceEnum = pgEnum("normative_source", ["SIOTUGA", "CTE", "NHG", "sectorial", "manual"]);
+export const roleEnum = pgEnum('role', ['owner', 'admin', 'member', 'viewer']);
+export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool']);
+export const verificationStatusEnum = pgEnum('verification_status', [
+  'pending',
+  'verified',
+  'rejected',
+]);
+export const accountTypeEnum = pgEnum('account_type', [
+  'independent_professional',
+  'studio_company',
+  'public_administration',
+  'real_estate_developer',
+  'other',
+]);
+export const landClassEnum = pgEnum('land_class', [
+  'desconocido',
+  'urbano_consolidado',
+  'urbano_no_consolidado',
+  'urbanizable',
+  'rustico_no_urbanizable',
+  'nucleo_rural',
+]);
+export const actionTypeEnum = pgEnum('action_type', [
+  'consulta_urbanistica',
+  'vivienda_unifamiliar',
+  'reforma',
+  'segregacion',
+  'cambio_de_uso',
+  'nave',
+  'legalizacion',
+  'demolicion',
+  'parcelacion',
+  'informe_urbanistico',
+  'otro',
+]);
+export const locationSourceEnum = pgEnum('location_source', [
+  'cadastral_reference',
+  'address',
+  'coordinates',
+  'planning_area',
+  'manual',
+]);
+export const normativeScopeEnum = pgEnum('normative_scope', [
+  'estatal',
+  'autonomico',
+  'provincial',
+  'municipal',
+  'sectorial',
+]);
+export const normativeSourceEnum = pgEnum('normative_source', [
+  'SIOTUGA',
+  'CTE',
+  'NHG',
+  'sectorial',
+  'manual',
+]);
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").unique().notNull(),
-  plan: text("plan").default("freemium").notNull(),
-  accountType: accountTypeEnum("account_type").default("independent_professional").notNull(),
-  contactName: text("contact_name"),
-  phone: text("phone"),
-  province: text("province"),
-  verificationStatus: verificationStatusEnum("verification_status").default("pending").notNull(),
-  verifiedAt: timestamp("verified_at"),
-  verifiedBy: uuid("verified_by"), // Could reference profiles.id, but let's keep it simple for now
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const organizations = pgTable('organizations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').unique().notNull(),
+  plan: text('plan').default('freemium').notNull(),
+  accountType: accountTypeEnum('account_type').default('independent_professional').notNull(),
+  contactName: text('contact_name'),
+  phone: text('phone'),
+  province: text('province'),
+  verificationStatus: verificationStatusEnum('verification_status').default('pending').notNull(),
+  verifiedAt: timestamp('verified_at'),
+  verifiedBy: uuid('verified_by'), // Could reference profiles.id, but let's keep it simple for now
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const profiles = pgTable("profiles", {
-  id: uuid("id").primaryKey(), // Mapped from Auth Provider (e.g., Supabase auth.users)
-  fullName: text("full_name"),
-  avatarUrl: text("avatar_url"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const profiles = pgTable('profiles', {
+  id: uuid('id').primaryKey(), // Mapped from Auth Provider (e.g., Supabase auth.users)
+  fullName: text('full_name'),
+  avatarUrl: text('avatar_url'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const organizationMembers = pgTable("organization_members", {
-  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
-  profileId: uuid("profile_id").references(() => profiles.id, { onDelete: "cascade" }).notNull(),
-  role: roleEnum("role").default("member").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const organizationMembers = pgTable('organization_members', {
+  orgId: uuid('org_id')
+    .references(() => organizations.id, { onDelete: 'cascade' })
+    .notNull(),
+  profileId: uuid('profile_id')
+    .references(() => profiles.id, { onDelete: 'cascade' })
+    .notNull(),
+  role: roleEnum('role').default('member').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const expedientes = pgTable("expedientes", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
-  name: text("name").notNull(),
-  province: text("province"),
-  municipio: text("municipio").notNull(),
-  address: text("address"),
-  location: geometry("location"),
-  lat: customType<{ data: number; driverData: string | number }>({ dataType() { return 'double precision' } })("lat"),
-  lng: customType<{ data: number; driverData: string | number }>({ dataType() { return 'double precision' } })("lng"),
-  refCatastral: text("ref_catastral"),
-  urbanPlanningZone: text("urban_planning_zone"),
-  landClass: landClassEnum("land_class"),
-  actionType: actionTypeEnum("action_type"),
-  locationSource: locationSourceEnum("location_source"),
-  notes: text("notes"),
-  planeamiento: text("planeamiento"),
-  contextoValidadoPorTecnico: boolean("contexto_validado_por_tecnico").default(false).notNull(),
-  status: text("status").default("active").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const expedientes = pgTable('expedientes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orgId: uuid('org_id')
+    .references(() => organizations.id, { onDelete: 'cascade' })
+    .notNull(),
+  name: text('name').notNull(),
+  province: text('province'),
+  municipio: text('municipio').notNull(),
+  address: text('address'),
+  location: geometry('location'),
+  lat: customType<{ data: number; driverData: string | number }>({
+    dataType() {
+      return 'double precision';
+    },
+  })('lat'),
+  lng: customType<{ data: number; driverData: string | number }>({
+    dataType() {
+      return 'double precision';
+    },
+  })('lng'),
+  refCatastral: text('ref_catastral'),
+  urbanPlanningZone: text('urban_planning_zone'),
+  landClass: landClassEnum('land_class'),
+  actionType: actionTypeEnum('action_type'),
+  locationSource: locationSourceEnum('location_source'),
+  notes: text('notes'),
+  planeamiento: text('planeamiento'),
+  contextoValidadoPorTecnico: boolean('contexto_validado_por_tecnico').default(false).notNull(),
+  status: text('status').default('active').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const conversations = pgTable("conversations", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  expedienteId: uuid("expediente_id").references(() => expedientes.id, { onDelete: "cascade" }).notNull(),
-  createdBy: uuid("created_by").references(() => profiles.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const conversations = pgTable('conversations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
+  createdBy: uuid('created_by')
+    .references(() => profiles.id)
+    .notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const messages = pgTable("messages", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "cascade" }).notNull(),
-  role: messageRoleEnum("role").notNull(),
-  content: text("content").notNull(),
-  structuredResponse: jsonb("structured_response"),
-  countedAsUsage: boolean("counted_as_usage").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const messages = pgTable('messages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  conversationId: uuid('conversation_id')
+    .references(() => conversations.id, { onDelete: 'cascade' })
+    .notNull(),
+  role: messageRoleEnum('role').notNull(),
+  content: text('content').notNull(),
+  structuredResponse: jsonb('structured_response'),
+  countedAsUsage: boolean('counted_as_usage').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const messageSources = pgTable("message_sources", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  messageId: uuid("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(),
-  documentRef: text("document_ref").notNull(),
-  excerpt: text("excerpt").notNull(),
+export const messageSources = pgTable('message_sources', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  messageId: uuid('message_id')
+    .references(() => messages.id, { onDelete: 'cascade' })
+    .notNull(),
+  documentRef: text('document_ref').notNull(),
+  excerpt: text('excerpt').notNull(),
 });
 
-export const documentTypeEnum = pgEnum("document_type", ["planeamiento", "normativa", "catalogo", "ficha", "informe", "consulta", "otros"]);
+export const documentTypeEnum = pgEnum('document_type', [
+  'planeamiento',
+  'normativa',
+  'catalogo',
+  'ficha',
+  'informe',
+  'consulta',
+  'otros',
+]);
 
-export const documents = pgTable("documents", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  expedienteId: uuid("expediente_id").references(() => expedientes.id, { onDelete: "cascade" }).notNull(),
-  filename: text("filename").notNull(),
-  storagePath: text("storage_path").notNull(),
-  documentType: documentTypeEnum("document_type").notNull(),
-  uploadedBy: uuid("uploaded_by").references(() => profiles.id).notNull(),
-  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
-  processed: boolean("processed").default(false).notNull(),
-  chunked: boolean("chunked").default(false).notNull(),
-  embedded: boolean("embedded").default(false).notNull(),
+export const documents = pgTable('documents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
+  filename: text('filename').notNull(),
+  storagePath: text('storage_path').notNull(),
+  documentType: documentTypeEnum('document_type').notNull(),
+  uploadedBy: uuid('uploaded_by')
+    .references(() => profiles.id)
+    .notNull(),
+  uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+  processed: boolean('processed').default(false).notNull(),
+  chunked: boolean('chunked').default(false).notNull(),
+  embedded: boolean('embedded').default(false).notNull(),
 });
 
 // Custom type para vector(3072) de pgvector
@@ -127,76 +221,119 @@ const vector = customType<{ data: number[]; driverData: string }>({
   },
 });
 
-export const documentChunks = pgTable("document_chunks", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  documentId: uuid("document_id").references(() => documents.id, { onDelete: "cascade" }).notNull(),
-  expedienteId: uuid("expediente_id").references(() => expedientes.id, { onDelete: "cascade" }).notNull(),
-  content: text("content").notNull(),
-  pageNumber: customType<{ data: number; driverData: number }>({ dataType() { return 'integer' } })("page_number"),
-  metadata: jsonb("metadata"),
-  embedding: vector("embedding"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+export const documentChunks = pgTable('document_chunks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  documentId: uuid('document_id')
+    .references(() => documents.id, { onDelete: 'cascade' })
+    .notNull(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
+  content: text('content').notNull(),
+  pageNumber: customType<{ data: number; driverData: number }>({
+    dataType() {
+      return 'integer';
+    },
+  })('page_number'),
+  metadata: jsonb('metadata'),
+  embedding: vector('embedding'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const normativaDocuments = pgTable("normativa_documents", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  sourceId: text("source_id").unique(), // sha256
-  title: text("title").notNull(),
-  originalPath: text("original_path"),
-  scopeType: normativeScopeEnum("scope_type").notNull(),
-  ccaa: text("ccaa"),
-  province: text("province"),
-  municipalityId: text("municipality_id"), // ine_code o código interno
-  municipalityName: text("municipality_name"),
-  documentType: text("document_type"),
-  sourceSystem: normativeSourceEnum("source_system").default("manual").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => {
-  return {
-    scopeIdx: index("normativa_scope_idx").on(table.scopeType),
-    municipalityIdx: index("normativa_muni_idx").on(table.municipalityId),
-    ccaaIdx: index("normativa_ccaa_idx").on(table.ccaa),
-    sourceSystemIdx: index("normativa_source_system_idx").on(table.sourceSystem),
-  };
-});
+export const normativaDocuments = pgTable(
+  'normativa_documents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sourceId: text('source_id').unique(), // sha256
+    title: text('title').notNull(),
+    originalPath: text('original_path'),
+    scopeType: normativeScopeEnum('scope_type').notNull(),
+    ccaa: text('ccaa'),
+    province: text('province'),
+    municipalityId: text('municipality_id'), // ine_code o código interno
+    municipalityName: text('municipality_name'),
+    documentType: text('document_type'),
+    sourceSystem: normativeSourceEnum('source_system').default('manual').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => {
+    return {
+      scopeIdx: index('normativa_scope_idx').on(table.scopeType),
+      municipalityIdx: index('normativa_muni_idx').on(table.municipalityId),
+      ccaaIdx: index('normativa_ccaa_idx').on(table.ccaa),
+      sourceSystemIdx: index('normativa_source_system_idx').on(table.sourceSystem),
+    };
+  }
+);
 
-export const normativaChunks = pgTable("normativa_chunks", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  normativaDocumentId: uuid("normativa_document_id").references(() => normativaDocuments.id, { onDelete: "cascade" }).notNull(),
-  content: text("content").notNull(),
-  metadata: jsonb("metadata"),
-  embedding: vector("embedding"), // Usa el customType de vector(3072) existente
-  chunkIndex: customType<{ data: number; driverData: number }>({ dataType() { return 'integer' } })("chunk_index"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => {
-  return {
-    embeddingIdx: index("normativa_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
-  };
-});
+export const normativaChunks = pgTable(
+  'normativa_chunks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    normativaDocumentId: uuid('normativa_document_id')
+      .references(() => normativaDocuments.id, { onDelete: 'cascade' })
+      .notNull(),
+    content: text('content').notNull(),
+    metadata: jsonb('metadata'),
+    embedding: vector('embedding'), // Usa el customType de vector(3072) existente
+    chunkIndex: customType<{ data: number; driverData: number }>({
+      dataType() {
+        return 'integer';
+      },
+    })('chunk_index'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => {
+    return {
+      embeddingIdx: index('normativa_embedding_idx').using(
+        'hnsw',
+        table.embedding.op('vector_cosine_ops')
+      ),
+    };
+  }
+);
 
-export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant"]);
+export const chatRoleEnum = pgEnum('chat_role', ['user', 'assistant']);
 
-export const chatMessages = pgTable("chat_messages", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  expedienteId: uuid("expediente_id").references(() => expedientes.id, { onDelete: "cascade" }).notNull(),
-  userId: uuid("user_id").references(() => profiles.id, { onDelete: "cascade" }).notNull(),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
-  sources: jsonb("sources"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => {
-  return {
-    expedienteIdIdx: index("chat_messages_expediente_id_idx").on(table.expedienteId),
-    createdAtIdx: index("chat_messages_created_at_idx").on(table.createdAt),
-  };
-});
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    expedienteId: uuid('expediente_id')
+      .references(() => expedientes.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => profiles.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    sources: jsonb('sources'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => {
+    return {
+      expedienteIdIdx: index('chat_messages_expediente_id_idx').on(table.expedienteId),
+      createdAtIdx: index('chat_messages_created_at_idx').on(table.createdAt),
+    };
+  }
+);
 
 // ==========================================
 // FASE 1A: Motor de Contexto Urbanístico
 // ==========================================
 
-export const planningStatusEnum = pgEnum('planning_status', ['vigente', 'en_tramitacion', 'derogado']);
-export const afeccionStatusEnum = pgEnum('afeccion_status', ['detected', 'confirmed', 'rejected', 'manual', 'pending_review']);
+export const planningStatusEnum = pgEnum('planning_status', [
+  'vigente',
+  'en_tramitacion',
+  'derogado',
+]);
+export const afeccionStatusEnum = pgEnum('afeccion_status', [
+  'detected',
+  'confirmed',
+  'rejected',
+  'manual',
+  'pending_review',
+]);
 
 export const municipalPlanning = pgTable('municipal_planning', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -217,7 +354,9 @@ export const municipalPlanning = pgTable('municipal_planning', {
 
 export const planningZones = pgTable('planning_zones', {
   id: uuid('id').defaultRandom().primaryKey(),
-  planningId: uuid('planning_id').references(() => municipalPlanning.id, { onDelete: 'cascade' }).notNull(),
+  planningId: uuid('planning_id')
+    .references(() => municipalPlanning.id, { onDelete: 'cascade' })
+    .notNull(),
   code: text('code').notNull(),
   name: text('name').notNull(),
   description: text('description'),
@@ -236,8 +375,12 @@ export const afeccionTypes = pgTable('afeccion_types', {
 
 export const expedienteAfecciones = pgTable('expediente_afecciones', {
   id: uuid('id').defaultRandom().primaryKey(),
-  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'cascade' }).notNull(),
-  afeccionTypeId: uuid('afeccion_type_id').references(() => afeccionTypes.id, { onDelete: 'cascade' }).notNull(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
+  afeccionTypeId: uuid('afeccion_type_id')
+    .references(() => afeccionTypes.id, { onDelete: 'cascade' })
+    .notNull(),
   status: afeccionStatusEnum('status').default('detected').notNull(),
   manuallyAdded: boolean('manually_added').default(false).notNull(),
   source: text('source'),
@@ -253,10 +396,240 @@ export const expedienteAfecciones = pgTable('expediente_afecciones', {
 
 export const contextDetections = pgTable('context_detections', {
   id: uuid('id').defaultRandom().primaryKey(),
-  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'cascade' }).notNull(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
   summary: jsonb('summary').notNull(),
   rawResponse: jsonb('raw_response'),
   geometryStored: boolean('geometry_stored').default(false).notNull(),
   sourceApis: jsonb('source_apis').notNull(),
   detectedAt: timestamp('detected_at').defaultNow().notNull(),
 });
+
+// ==========================================
+// FASE 2A: Corpus Normativo V2 (Piloto)
+// ==========================================
+
+export const normativeScopeV2Enum = pgEnum('normative_scope_v2', [
+  'estatal',
+  'autonomico',
+  'municipal',
+  'especial',
+]);
+export const normativeCategoryV2Enum = pgEnum('normative_category_v2', [
+  'CTE',
+  'NHG',
+  'PXOM',
+  'ordenanza',
+  'urbanismo_general',
+  'accesibilidad',
+  'incendios',
+]);
+export const normativeStatusV2Enum = pgEnum('normative_status_v2', [
+  'vigente',
+  'derogada',
+  'en_tramitacion',
+  'en_revision',
+]);
+export const authorityTypeV2Enum = pgEnum('authority_type_v2', [
+  'estado',
+  'comunidad_autonoma',
+  'ayuntamiento',
+  'diputacion',
+  'confederacion_hidrografica',
+  'organismo_publico',
+  'empresa_publica',
+  'otro',
+]);
+export const languageV2Enum = pgEnum('language_v2', ['es', 'gl', 'pt', 'ca', 'eu', 'en']);
+export const legalReviewStatusEnum = pgEnum('legal_review_status', [
+  'pending',
+  'reviewed',
+  'rejected',
+]);
+export const updateTypeEnum = pgEnum('update_type', [
+  'modification',
+  'derogation',
+  'correction',
+  'addition',
+]);
+
+// 1. FAMILIAS NORMATIVAS (Agrupador lógico)
+export const normativeFamilies = pgTable('normative_families', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  code: text('code').unique().notNull(),
+  name: text('name').notNull(),
+  jurisdiction: text('jurisdiction').notNull(),
+  category: normativeCategoryV2Enum('category').notNull(),
+  authority: text('authority').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 2. VERSIONES DOCUMENTALES (Artefactos Inmutables)
+export const normativeDocumentsV2 = pgTable('normative_documents_v2', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  normativeFamilyId: uuid('normative_family_id').references(() => normativeFamilies.id), // Nullable temporally for migration
+
+  title: text('title').notNull(),
+  scopeType: normativeScopeV2Enum('scope_type').notNull(),
+  category: normativeCategoryV2Enum('category').notNull(),
+  jurisdiction: text('jurisdiction').notNull(),
+  municipalityId: text('municipality_id'),
+  authority: text('authority').notNull(),
+  authorityType: authorityTypeV2Enum('authority_type').notNull(),
+  officialIdentifier: text('official_identifier'),
+
+  // Temporal validity & Versioning
+  versionLabel: text('version_label'),
+  validFrom: timestamp('valid_from'),
+  validTo: timestamp('valid_to'),
+  currentVersion: boolean('current_version').default(false).notNull(),
+  status: normativeStatusV2Enum('status').default('vigente').notNull(),
+
+  // Origin and Audit
+  sourceUrl: text('source_url'),
+  sourcePublicationDate: timestamp('source_publication_date'),
+
+  // Consolidation
+  isConsolidated: boolean('is_consolidated').default(false).notNull(),
+  consolidationDate: timestamp('consolidation_date'),
+  amendmentNotes: text('amendment_notes'),
+  legalReviewStatus: legalReviewStatusEnum('legal_review_status').default('pending').notNull(),
+
+  // Hashes and Quality
+  fileHash: text('file_hash').unique().notNull(),
+  contentHash: text('content_hash').unique().notNull(),
+  language: languageV2Enum('language').default('es').notNull(),
+  priority: customType<{ data: number; driverData: number }>({
+    dataType() {
+      return 'integer';
+    },
+  })('priority')
+    .default(0)
+    .notNull(),
+  confidence: real('confidence').default(1.0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Custom type para vector(768)
+const vector768 = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(768)';
+  },
+  toDriver(value) {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value) {
+    return JSON.parse(value as string);
+  },
+});
+
+export const normativeChunksV2 = pgTable(
+  'normative_chunks_v2',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .references(() => normativeDocumentsV2.id, { onDelete: 'cascade' })
+      .notNull(),
+    content: text('content').notNull(),
+    embedding: vector768('embedding'),
+    page: customType<{ data: number; driverData: number }>({
+      dataType() {
+        return 'integer';
+      },
+    })('page'),
+    article: text('article'),
+    chapter: text('chapter'),
+    tokenCount: customType<{ data: number; driverData: number }>({
+      dataType() {
+        return 'integer';
+      },
+    })('token_count').notNull(),
+    chunkIndex: customType<{ data: number; driverData: number }>({
+      dataType() {
+        return 'integer';
+      },
+    })('chunk_index').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => {
+    return {
+      embeddingIdx: index('normative_v2_embedding_idx').using(
+        'hnsw',
+        table.embedding.op('vector_cosine_ops')
+      ),
+      documentIdIdx: index('normative_v2_doc_idx').on(table.documentId),
+    };
+  }
+);
+
+export const expNormativeStatusEnum = pgEnum('exp_normative_status', [
+  'pending_review',
+  'active',
+  'rejected',
+]);
+export const expNormativeOriginEnum = pgEnum('exp_normative_origin', ['manual', 'automatic']);
+
+export const expedienteNormativeContext = pgTable('expediente_normative_context', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id')
+    .references(() => expedientes.id, { onDelete: 'cascade' })
+    .notNull(),
+  scopeType: normativeScopeV2Enum('scope_type').notNull(),
+  category: normativeCategoryV2Enum('category').notNull(),
+  status: expNormativeStatusEnum('status').default('pending_review').notNull(),
+  origin: expNormativeOriginEnum('origin').default('automatic').notNull(),
+  reviewedBy: uuid('reviewed_by').references(() => profiles.id),
+  reviewedAt: timestamp('reviewed_at'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 3. ACTUALIZACIONES LEGALES (Grafo de Transiciones)
+export const legalUpdates = pgTable(
+  'legal_updates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+
+    // Relación de Derivación
+    sourceVersionId: uuid('source_version_id')
+      .references(() => normativeDocumentsV2.id)
+      .notNull(),
+    targetVersionId: uuid('target_version_id').references(() => normativeDocumentsV2.id), // Nullable hasta que se consolide
+
+    updateType: updateTypeEnum('update_type').notNull(),
+
+    // Fuente Jurídica del Cambio
+    officialPublication: text('official_publication').notNull(),
+    officialIdentifier: text('official_identifier').notNull(),
+    sourceUrl: text('source_url').notNull(),
+    sourceHash: text('source_hash').notNull(),
+
+    publicationDate: timestamp('publication_date').notNull(),
+    effectiveDate: timestamp('effective_date'),
+    appliesFrom: timestamp('applies_from').notNull(),
+    appliesUntil: timestamp('applies_until'),
+
+    // El Parche
+    affectedSection: text('affected_section').notNull(),
+    previousText: text('previous_text'),
+    replacementText: text('replacement_text').notNull(),
+
+    // Flujo
+    consolidationOrder: integer('consolidation_order').notNull(),
+    summary: text('summary'),
+
+    processingStatus: legalReviewStatusEnum('processing_status').default('pending').notNull(),
+    reviewedBy: uuid('reviewed_by').references(() => profiles.id),
+    reviewedAt: timestamp('reviewed_at'),
+  },
+  (table) => {
+    return {
+      uniqueConsolidation: uniqueIndex('unique_consolidation').on(
+        table.sourceVersionId,
+        table.officialIdentifier,
+        table.affectedSection
+      ),
+    };
+  }
+);
