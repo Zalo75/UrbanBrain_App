@@ -106,6 +106,18 @@ export async function createExpediente(formData: FormData) {
     }).returning({ id: expedientes.id })
 
     newExpedienteId = newExpediente.id
+    
+    // Guardar la detección en context_detections usando el motor
+    try {
+      const { ContextDetectionEngine } = await import('@/application/context-engine/ContextDetectionEngine')
+      const engine = new ContextDetectionEngine()
+      // Se ejecuta en background (no usamos await para no bloquear la redirección de inmediato)
+      // O usamos await si queremos garantizar que termine antes de redirigir
+      await engine.detectContext(newExpedienteId)
+    } catch (engineError) {
+      console.error('Error in ContextDetectionEngine during creation:', engineError)
+      // No interrumpimos la creación del expediente por un fallo en el motor
+    }
   } catch (error) {
     console.error('Error creating expediente:', error)
     redirect('/expedientes/new?error=creation_failed')
@@ -125,44 +137,26 @@ export async function detectContextAction(formData: FormData) {
   }
 
   const rc = refCatastral.trim().toUpperCase()
-  const url = `http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPRC?Provincia=&Municipio=&RC=${rc}`
   
   try {
-    const res = await fetch(url)
-    const xml = await res.text()
+    const { ContextDetectionEngine } = await import('@/application/context-engine/ContextDetectionEngine')
+    const engine = new ContextDetectionEngine()
+    const result = await engine.detectStateless(rc)
     
-    const extract = (tag: string) => {
-      const match = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)<\/${tag}>`, 'i'))
-      return match ? match[1].trim() : null
+    // Si hay error en catastro (detector principal de momento)
+    if (result.errors['catastro']) {
+      return { error: result.errors['catastro'] }
     }
-    
-    const np = extract('np')
-    const nm = extract('nm')
-    const ldt = extract('ldt')
-    
-    let address = null
-    const nv = extract('nv')
-    const tv = extract('tv')
-    const cv = extract('cv')
-    
-    if (tv && nv) {
-      address = `${tv} ${nv} ${cv ? cv : ''}`.trim()
-    } else if (ldt) {
-      address = ldt.split(' Suelo ')[0].trim()
-    }
-    
-    const prov = getProvinceByName(np || '')
-    const mun = getMunicipalityByName(nm || '')
     
     return {
-      provinceId: prov?.id || null,
-      municipalityId: mun?.id || null,
-      provinceName: np,
-      municipalityName: nm,
-      address
+      provinceId: result.summary.provinceId || null,
+      municipalityId: result.summary.municipalityId || null,
+      provinceName: result.summary.provinceName || null,
+      municipalityName: result.summary.municipalityName || null,
+      address: result.summary.address || null
     }
   } catch (e) {
     console.error('Error in detectContextAction:', e)
-    return { error: "Error de conexión con la Sede Electrónica del Catastro." }
+    return { error: "Error interno al detectar contexto urbanístico." }
   }
 }

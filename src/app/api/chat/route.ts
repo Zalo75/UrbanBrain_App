@@ -35,7 +35,6 @@ export async function POST(req: NextRequest) {
     }
 
     let userId = await authProvider.getUserId();
-    userId = "af97677f-8ee6-4a3d-82a0-b907c6010957";
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -59,6 +58,25 @@ export async function POST(req: NextRequest) {
       role: 'user',
       content: message,
     });
+
+    // --- FASE 1B: Integración Observacional de Motores ---
+    try {
+      const { QuestionAnalyzer } = await import('@/application/intent-engine/QuestionAnalyzer')
+      const analyzer = new QuestionAnalyzer()
+      const analysis = await analyzer.analyze(message)
+      
+      console.log("[QuestionAnalyzer Observacional] Resultado:", {
+        intent: analysis.intent,
+        required_scopes: analysis.required_scopes,
+        required_categories: analysis.required_categories,
+        needs_context: analysis.needs_context,
+        needs_sources: analysis.needs_sources,
+        extracted_parameters: analysis.extracted_parameters
+      })
+    } catch (analyzerError) {
+      console.error("[QuestionAnalyzer] Error en modo observacional:", analyzerError)
+    }
+    // --------------------------------------------------------
 
     // Generar embedding con Gemini
     // El modelo disponible es 'gemini-embedding-001'
