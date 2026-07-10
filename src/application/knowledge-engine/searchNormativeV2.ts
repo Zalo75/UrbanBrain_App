@@ -7,6 +7,7 @@ export interface SearchV2Params {
   scopes: string[];
   categories: string[];
   municipalityId?: string;
+  documentCodes?: string[];
   limit?: number;
 }
 
@@ -15,7 +16,7 @@ export async function searchNormativeV2(params: SearchV2Params) {
     const { query_embedding, scopes = [], categories = [], municipalityId, limit = 8 } = params;
 
     let docFilters;
-    
+
     if (process.env.KNOWLEDGE_V2_TEST_VERSION_ID) {
       // historical_test mode
       docFilters = [
@@ -39,13 +40,19 @@ export async function searchNormativeV2(params: SearchV2Params) {
     if (scopes.length > 0) {
       docFilters.push(inArray(normativeDocumentsV2.scopeType, scopes as any[]));
     }
-    
+
     if (safeCategories.length > 0) {
       docFilters.push(inArray(normativeDocumentsV2.category, safeCategories as any[]));
     }
 
     if (municipalityId) {
       docFilters.push(eq(normativeDocumentsV2.municipalityId, municipalityId));
+    }
+
+    if (params.documentCodes && params.documentCodes.length > 0) {
+      // Create ILIKE conditions for each DB code (e.g., 'DB-SI') on officialIdentifier
+      const conditions = params.documentCodes.map(code => sql`${normativeDocumentsV2.officialIdentifier} ILIKE ${'%' + code + '%'}`);
+      docFilters.push(sql`(${sql.join(conditions, sql` OR `)})`);
     }
 
     const embeddingString = `[${query_embedding.join(',')}]`;
@@ -61,7 +68,9 @@ export async function searchNormativeV2(params: SearchV2Params) {
       category: normativeDocumentsV2.category,
       page: normativeChunksV2.page,
       article: normativeChunksV2.article,
-      chapter: normativeChunksV2.chapter
+      chapter: normativeChunksV2.chapter,
+      sourceUrl: normativeDocumentsV2.sourceUrl,
+      officialIdentifier: normativeDocumentsV2.officialIdentifier
     })
     .from(normativeChunksV2)
     .innerJoin(normativeDocumentsV2, eq(normativeChunksV2.documentId, normativeDocumentsV2.id))

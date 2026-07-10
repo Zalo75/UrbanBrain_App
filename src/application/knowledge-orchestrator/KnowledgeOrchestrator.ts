@@ -3,6 +3,7 @@ export interface KnowledgePlan {
   scopes: string[];
   categories: string[];
   specialNormatives: string[];
+  documentCodes?: string[];
   confidence: number;
 }
 
@@ -26,7 +27,7 @@ export class KnowledgeOrchestrator {
     // Extract scopes and categories from QuestionAnalyzer
     const scopes = new Set<string>(questionAnalysis?.required_scopes || []);
     const categories = new Set<string>(questionAnalysis?.required_categories || []);
-    
+
     // Add scopes and categories from existingContext if any
     if (existingContext && existingContext.length > 0) {
       for (const ctx of existingContext) {
@@ -41,11 +42,34 @@ export class KnowledgeOrchestrator {
       specialNormatives.push(questionAnalysis.extracted_parameters.norma);
     }
 
+    // Explicit DB routing
+    const documentCodes: string[] = [];
+    const textToAnalyze = input.userMessage.toLowerCase();
+
+    // Explicit priority mentions
+    if (textToAnalyze.includes('db-si') || textToAnalyze.includes('db si')) documentCodes.push('DB-SI');
+    if (textToAnalyze.includes('db-sua') || textToAnalyze.includes('db sua')) documentCodes.push('DB-SUA');
+    if (textToAnalyze.includes('db-hs') || textToAnalyze.includes('db hs')) documentCodes.push('DB-HS');
+    if (textToAnalyze.includes('db-he') || textToAnalyze.includes('db he')) documentCodes.push('DB-HE');
+    if (textToAnalyze.includes('db-hr') || textToAnalyze.includes('db hr')) documentCodes.push('DB-HR');
+    if (textToAnalyze.includes('db-se') || textToAnalyze.includes('db se')) documentCodes.push('DB-SE');
+
+    // Semantic heuristic routing (only if no explicit DB is provided, or we just append them? the prompt says "si hay ambigüedad, permitir más de un DB". So we just check all conditions)
+    if (documentCodes.length === 0) {
+      if (/incendio|evacuaci|extintor|resistencia al fuego/i.test(textToAnalyze)) documentCodes.push('DB-SI');
+      if (/accesibilidad|rampa|resbaladicidad|aseo.*accesible/i.test(textToAnalyze)) documentCodes.push('DB-SUA');
+      if (/salubridad|ventilaci|humedad|agua/i.test(textToAnalyze)) documentCodes.push('DB-HS');
+      if (/energ|envolvente|consumo|demanda/i.test(textToAnalyze)) documentCodes.push('DB-HE');
+      if (/ruido|ac[uú]stica|aislamiento/i.test(textToAnalyze)) documentCodes.push('DB-HR');
+      if (/estructura|acci[oó]n|cimentaci|resistencia/i.test(textToAnalyze)) documentCodes.push('DB-SE');
+    }
+
     const plan: KnowledgePlan = {
       corpus,
       scopes: Array.from(scopes),
       categories: Array.from(categories),
       specialNormatives,
+      documentCodes,
       confidence: 0.97 // As requested by example, or derived heuristically
     };
 
@@ -66,6 +90,9 @@ ${plan.categories.length > 0 ? plan.categories.map(c => '- ' + c).join('\n') : '
 
 Normativa especial:
 ${plan.specialNormatives.length > 0 ? plan.specialNormatives.map(n => '- ' + n).join('\n') : '- ninguna'}
+
+Documentos Base:
+${plan.documentCodes && plan.documentCodes.length > 0 ? plan.documentCodes.map(d => '- ' + d).join('\n') : '- todos'}
 
 Confianza:
 ${plan.confidence}

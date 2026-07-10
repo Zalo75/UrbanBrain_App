@@ -138,107 +138,186 @@ export async function POST(req: NextRequest) {
       (c: any) => (c.municipio_nombre || '').toLowerCase().trim() === normalizedMunicipio
     );
 
-    // --- SPRINT 3.2: Shadow Mode V2 ---
+    // --- SPRINT 3.12: Laboratorio CTE V2 ---
+    let v2FinalContext = '';
+    let usedV2 = false;
+    let fallbackReason = '';
+    let v2_time_ms = 0;
+    let v2LLMTime = 0;
+    let top3Citas = '';
+    let v2Citas = '';
+    let v2Results: any[] = [];
+
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
       try {
-        const { searchNormativeV2 } =
-          await import('@/application/knowledge-engine/searchNormativeV2');
+        const { searchNormativeV2 } = await import('@/application/knowledge-engine/searchNormativeV2');
 
-        // Execute shadow V2 with timeout
         const t0_v2 = performance.now();
         const v2Promise = searchNormativeV2({
           query_embedding,
           scopes: plan?.scopes || [],
           categories: plan?.categories || [],
+          documentCodes: plan?.documentCodes || [],
           limit: 8,
         });
 
-        const timeoutPromise = new Promise<any[]>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 3000)
-        );
+        const timeoutPromise = new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
+        v2Results = await Promise.race([v2Promise, timeoutPromise]);
+        v2_time_ms = Math.round(performance.now() - t0_v2);
 
-        const v2Results = await Promise.race([v2Promise, timeoutPromise]);
-        const t1_v2 = performance.now();
-        const v2_time_ms = Math.round(t1_v2 - t0_v2);
+        // Validation for V2 usage
+        const CTE_V2_MIN_SIMILARITY = process.env.CTE_V2_MIN_SIMILARITY ? parseFloat(process.env.CTE_V2_MIN_SIMILARITY) : 0.65;
+        const validDBs = ['DB-SE', 'DB-SI', 'DB-SUA', 'DB-HS', 'DB-HE', 'DB-HR'];
 
-        // Calculate comparison stats
-        const v1DocSet = new Set(filteredChunks.map((c: any) => c.nombre_pdf));
-        const v2DocSet = new Set(v2Results.map((c: any) => c.title));
-        const v1MuniSet = new Set(filteredChunks.map((c: any) => c.municipio_nombre));
-        const v2ScopeSet = new Set(v2Results.map((c: any) => c.scope));
-        const v2CatSet = new Set(v2Results.map((c: any) => c.category));
+        const hasCTECategory = plan?.categories?.includes('CTE');
+        const hasValidDBCode = plan?.documentCodes?.some(code => validDBs.includes(code));
+        const isDBAmbiguous = !plan?.documentCodes || plan.documentCodes.length === 0;
 
-        let resultType = 'v2_empty';
-        if (v2Results.length > 0) {
-          resultType =
-            v2Results.length >= filteredChunks.length ? 'v2_better_candidate' : 'v2_partial';
+        if (process.env.ENABLE_CTE_V2_RESPONSES !== 'true') {
+          fallbackReason = 'Feature flag desactivado';
+        } else if (!hasCTECategory) {
+          fallbackReason = 'Consulta no categorizada como CTE';
+        } else if (isDBAmbiguous || !hasValidDBCode) {
+          fallbackReason = 'DocumentCodes ambiguo o inválido';
+        } else if (v2Results.length === 0) {
+          fallbackReason = 'Cero resultados V2';
+        } else if (v2Results[0].similarity < CTE_V2_MIN_SIMILARITY) {
+          fallbackReason = `Similitud insuficiente (${v2Results[0].similarity.toFixed(4)} < ${CTE_V2_MIN_SIMILARITY})`;
+        } else {
+          // Success! Build V2 Context
+          usedV2 = true;
+
+          // Filter valid chunks above threshold, matching the plan's documentCodes, and MUST have sourceUrl
+          let validChunks = v2Results.filter(r => r.similarity >= CTE_V2_MIN_SIMILARITY && r.sourceUrl);
+          // Limit to Top 5
+          validChunks = validChunks.slice(0, 5);
+
+          if (validChunks.length === 0) {
+             usedV2 = false;
+             fallbackReason = 'Cero resultados V2 tras filtro estricto (similitud o falta URL oficial)';
+          } else {
+            v2FinalContext = 'NORMATIVA APLICABLE (CTE):\n\n';
+            let cIndex = 1;
+
+            // Collect unique chunks
+            const seenContent = new Set<string>();
+
+            for (const r of validChunks) {
+              if (seenContent.has(r.content)) continue;
+              seenContent.add(r.content);
+
+              let citaParts = [`CTE ${r.title?.split(' - ')[0] || ''}`];
+              if (r.chapter) citaParts.push(`Capítulo ${r.chapter}`);
+              if (r.article) citaParts.push(`apartado ${r.article}`);
+              citaParts.push(`página ${r.page}`);
+              const citaString = citaParts.join(', ');
+
+              v2FinalContext += `[Fuente ${cIndex}]\n`;
+              v2FinalContext += `Documento: ${r.title}\n`;
+              v2FinalContext += `Identificador Oficial: ${r.officialIdentifier || 'N/A'}\n`;
+              v2FinalContext += `Versión: ${r.version || 'N/A'}\n`;
+              v2FinalContext += `Sección/Capítulo: ${r.chapter || 'N/A'}\n`;
+              v2FinalContext += `Apartado: ${r.article || 'N/A'}\n`;
+              v2FinalContext += `Páginas: ${r.page || 'N/A'}\n`;
+              v2FinalContext += `URL Oficial: ${r.sourceUrl}\n`;
+              v2FinalContext += `Fragmento:\n${r.content}\n\n`;
+
+              v2Citas += `- ${citaString}. Fuente oficial: ${r.sourceUrl}\n`;
+              cIndex++;
+            }
+          }
         }
-
-        console.log(`\n========== SHADOW V2 ==========
-Pregunta: ${message}
-
-Corpus V1:
-- número de chunks: ${filteredChunks.length}
-- documentos: ${Array.from(v1DocSet).join(', ') || '0'}
-- municipios: ${Array.from(v1MuniSet).join(', ') || '0'}
-- tiempo: ${v1_time_ms}ms
-
-Corpus V2:
-- número de chunks: ${v2Results.length}
-- documentos: ${Array.from(v2DocSet).join(', ') || '0'}
-- scopes: ${Array.from(v2ScopeSet).join(', ') || '0'}
-- categories: ${Array.from(v2CatSet).join(', ') || '0'}
-- tiempo: ${v2_time_ms}ms
-
-Coincidencias temáticas: ${v2CatSet.size > 0 ? Array.from(v2CatSet).join(', ') : 'Ninguna'}
-Documentos ausentes: ${
-          Array.from(v1DocSet)
-            .filter((x) => !v2DocSet.has(x))
-            .join(', ') || 'Ninguno'
-        }
-Resultado: ${resultType}
-================================\n`);
-      } catch (shadowError) {
-        console.error('[Shadow V2] Falla silenciosa (no afecta a V1):', shadowError);
+      } catch (err) {
+        fallbackReason = `V2 Exception: ${(err as Error).message}`;
+        usedV2 = false;
       }
     }
     // ----------------------------------
 
-    if (filteredChunks.length === 0) {
+    if (!usedV2 && filteredChunks.length === 0) {
       return NextResponse.json({
-        answer:
-          'No he encontrado información suficiente en la normativa del municipio seleccionado.',
+        answer: 'No he encontrado información suficiente en la normativa del municipio seleccionado.',
         sources: [],
       });
     }
 
     // Construir contexto
     let contextText = '';
+    let systemPrompt = '';
 
-    contextText += '\n[NORMATIVA MUNICIPAL - ' + municipio + ']\n';
-    filteredChunks.forEach((c: any, index: number) => {
-      const sourceNum = index + 1;
-      contextText += `[Fuente ${sourceNum}]\n`;
-      contextText += `Municipio: ${c.municipio_nombre || municipio}\n`;
-      contextText += `Documento: ${c.nombre_pdf || 'Desconocido'}\n`;
-      contextText += `Título detectado: ${c.titulo_detectado || 'N/A'}\n`;
-      contextText += `Texto:\n${c.texto}\n\n`;
-    });
+    if (usedV2) {
+      contextText = v2FinalContext;
+      systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente a partir de los fragmentos suministrados.
+No inventes requisitos, cifras ni apartados.
 
-    // Enviar a DeepSeek
-    const systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente usando el contexto proporcionado. Si el contexto no contiene información suficiente, dilo claramente. Cita las fuentes usando exactamente el formato de corchetes proporcionado, por ejemplo: [Fuente 1], [Fuente 2]. No inventes normativa.
+Reglas:
+1. Diferencia entre exigencia normativa, interpretación técnica, e información insuficiente.
+2. Cita cada afirmación relevante usando los corchetes provistos [Fuente 1], [Fuente 2].
+3. Si los fragmentos no permiten responder la pregunta de forma completa, dilo expresamente. No completes con conocimiento general.
+4. No presentes tu interpretación como si fuese texto literal de la norma.
+5. Advierte al usuario cuando la respuesta pueda depender además de normativa autonómica o municipal.
+
+FORMATO DE RESPUESTA REQUERIDO:
+
+CONCLUSIÓN
+[Respuesta clara y directa]
+
+FUNDAMENTO NORMATIVO
+[Explicación basada en los fragmentos recuperados, citando las fuentes con corchetes]
+
+FUENTES
+[Lista de las fuentes utilizadas en formato: - CTE DB-XX, Capítulo X, apartado Y, página Z. Fuente oficial: URL]`;
+    } else {
+      contextText += '\n[NORMATIVA MUNICIPAL - ' + municipio + ']\n';
+      filteredChunks.forEach((c: any, index: number) => {
+        const sourceNum = index + 1;
+        contextText += `[Fuente ${sourceNum}]\n`;
+        contextText += `Municipio: ${c.municipio_nombre || municipio}\n`;
+        contextText += `Documento: ${c.nombre_pdf || 'Desconocido'}\n`;
+        contextText += `Título detectado: ${c.titulo_detectado || 'N/A'}\n`;
+        contextText += `Texto:\n${c.texto}\n\n`;
+      });
+
+      systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente usando el contexto proporcionado. Si el contexto no contiene información suficiente, dilo claramente. Cita las fuentes usando exactamente el formato de corchetes proporcionado, por ejemplo: [Fuente 1], [Fuente 2]. No inventes normativa.
 
 CONTEXTO RECUPERADO:
 ${contextText}`;
+    }
 
+    // Logging for CTE V2 Response Mode
+    if (process.env.KNOWLEDGE_ENGINE === 'v2') {
+      console.log(`\n========== CTE V2 RESPONSE MODE ==========
+Pregunta: ${message}
+Feature flag: ${process.env.ENABLE_CTE_V2_RESPONSES || 'false'}
+DocumentCodes: ${plan?.documentCodes?.join(', ') || 'Ninguno'}
+Chunks recuperados: ${v2Results?.length || 0}
+Chunks válidos por umbral: ${usedV2 ? (v2FinalContext.match(/\[Fuente \d+\]/g) || []).length : 0}
+Similitud Top 1: ${v2Results && v2Results.length > 0 ? v2Results[0].similarity.toFixed(4) : 'N/A'}
+Fuente de respuesta visible:
+- ${usedV2 ? 'V2_CTE' : 'V1_FALLBACK'}
+
+Motivo: ${usedV2 ? 'Condiciones V2 superadas' : fallbackReason}
+Tiempo búsqueda: ${usedV2 ? v2_time_ms : v1_time_ms}ms
+Citas generadas:
+${usedV2 ? v2Citas : 'N/A'}
+==========================================\n`);
+    }
+
+    const t0_llm = performance.now();
     const completion = await openai.chat.completions.create({
       model: 'deepseek-chat',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: message },
+        { role: 'user', content: usedV2 ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}` : message },
       ],
       temperature: 0.1,
     });
+    const t1_llm = performance.now();
+    v2LLMTime = Math.round(t1_llm - t0_llm);
+
+    if (usedV2 && process.env.KNOWLEDGE_ENGINE === 'v2') {
+       console.log(`Tiempo LLM (V2): ${v2LLMTime}ms\n`);
+    }
 
     const answer = completion.choices[0].message.content || '';
 

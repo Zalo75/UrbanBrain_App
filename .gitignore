@@ -54,3 +54,6 @@ corpus_v2/NHG/candidato_*.md
 corpus_v2/NHG/conflicts_*.json
 corpus_v2/NHG/manifest_*.json
 public/sw.js
+corpus_v2/*.pdf
+scripts/*.md
+scripts/*.txt

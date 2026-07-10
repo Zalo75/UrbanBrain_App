@@ -40,7 +40,8 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
     }
     
     // Quick retry logic for transient API issues
-    let retries = 3;
+    let retries = 5;
+    let delay = 2000;
     while (retries > 0) {
       try {
         const result = await this.model.embedContent(text);
@@ -51,8 +52,12 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
         return vals;
       } catch (e: any) {
         retries--;
-        if (retries === 0) throw new Error(`Gemini embedding failed: ${e.message}`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (retries === 0) throw new Error(`Gemini embedding failed after retries: ${e.message}`);
+        const isRateLimit = e.message && e.message.includes('429');
+        const currentDelay = isRateLimit ? 10000 : delay;
+        console.warn(`[EmbeddingProvider] Error: ${e.message}. Retrying in ${currentDelay}ms... (${retries} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, currentDelay));
+        delay *= 1.5;
       }
     }
     return [];
