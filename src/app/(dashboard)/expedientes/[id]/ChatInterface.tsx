@@ -24,10 +24,9 @@ interface Source {
 
 interface ChatInterfaceProps {
   expedienteId: string;
-  municipio: string;
 }
 
-export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
+export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -83,7 +82,6 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
         },
         body: JSON.stringify({
           message: userMessage,
-          municipio,
           expedienteId,
         }),
       });

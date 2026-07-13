@@ -1,6 +1,10 @@
 export type ParcelContextSource =
   | 'expediente'
   | 'catastro'
+  | 'cartociudad'
+  | 'siotuga'
+  | 'ideg'
+  | 'urbanbrain'
   | 'conversation'
   | 'territory_catalogue'
 

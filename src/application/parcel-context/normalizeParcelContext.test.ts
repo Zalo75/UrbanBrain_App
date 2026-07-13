@@ -21,6 +21,39 @@ describe('buildNormalizedParcelContext', () => {
     expect(context.municipality?.value.name).toBe('A Coruña')
   })
 
+  it('conserva una referencia completa de 18 caracteres admitida por Catastro', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { refCatastral: '8424001NJ4082S0001' },
+    })
+
+    expect(context.cadastralReference?.value).toBe('8424001NJ4082S0001')
+  })
+
+  it('conserva procedencia aproximada de CartoCiudad sin marcarla como confirmada', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        address: 'Rúa Real 1',
+        lat: 43.37,
+        lng: -8.4,
+        municipalityName: 'A Coruña',
+        locationSource: 'cartociudad',
+      },
+    })
+
+    expect(context.address).toMatchObject({ source: 'cartociudad', verification: 'inferred' })
+    expect(context.coordinates).toMatchObject({ source: 'cartociudad', verification: 'inferred' })
+  })
+
+  it('no convierte un planeamiento no determinado en vigencia confirmada', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: { planningStatus: null },
+    })
+
+    expect(context.validity).toBeUndefined()
+  })
+
   it('conserva dirección y municipio resuelto desde el catálogo territorial', () => {
     const context = buildNormalizedParcelContext({
       expediente: { address: 'Rúa Real 1', municipio: 'arteixo', province: 'a_coruna' },

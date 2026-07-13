@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => ({
-  getUserId: vi.fn(),
+  getExpedienteAccess: vi.fn(),
   loadAuthorizedParcelInputs: vi.fn(),
   insert: vi.fn(),
 }))
 
-vi.mock('@/infrastructure/auth', () => ({
-  authProvider: { getUserId: mocks.getUserId },
+vi.mock('@/application/authorization/expedienteAccess', () => ({
+  getExpedienteAccess: mocks.getExpedienteAccess,
 }))
 vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
   loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
@@ -38,7 +38,12 @@ import { POST } from './route'
 describe('POST /api/chat parcel context boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.getUserId.mockResolvedValue('user-org-a')
+    mocks.getExpedienteAccess.mockResolvedValue({
+      ok: true,
+      userId: 'user-org-a',
+      orgId: 'org-a',
+      expediente: { id: 'expediente-org-b', orgId: 'org-a' },
+    })
     mocks.loadAuthorizedParcelInputs.mockResolvedValue(null)
   })
 
@@ -56,7 +61,7 @@ describe('POST /api/chat parcel context boundary', () => {
     const response = await POST(request)
 
     expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({ error: 'Expediente not found' })
+    expect(await response.json()).toEqual({ error: 'Not found' })
     expect(mocks.loadAuthorizedParcelInputs).toHaveBeenCalledWith(
       'expediente-org-b',
       'user-org-a'

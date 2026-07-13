@@ -36,6 +36,8 @@ export interface DetectedParcelInput {
   planningArea?: string | null
   planningInstrument?: string | null
   planningStatus?: string | null
+  locationSource?: 'catastro' | 'cartociudad' | null
+  planningSource?: 'siotuga' | 'urbanbrain' | null
 }
 
 export interface KnownConstraintInput {
@@ -82,7 +84,7 @@ export function normalizeComparable(value: string): string {
 export function normalizeCadastralReference(value: string | null | undefined): string | null {
   if (!value) return null
   const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '')
-  return normalized.length === 14 || normalized.length === 20 ? normalized : null
+  return [14, 18, 20].includes(normalized.length) ? normalized : null
 }
 
 function field<T>(
@@ -188,6 +190,10 @@ export function buildNormalizedParcelContext(
     ? 'confirmed'
     : 'unverified'
   const expedienteConfidence = technicallyValidated ? 0.98 : 0.78
+  const detectedLocationSource = detected?.locationSource ?? 'catastro'
+  const detectedLocationConfidence = detectedLocationSource === 'catastro' ? 0.92 : 0.76
+  const detectedLocationVerification: ParcelContextVerification =
+    detectedLocationSource === 'catastro' ? 'confirmed' : 'inferred'
 
   const context: NormalizedParcelContext = {
     knownConstraints: [],
@@ -219,7 +225,12 @@ export function buildNormalizedParcelContext(
       expedienteVerification
     )
   } else if (detected?.address?.trim()) {
-    context.address = field(detected.address.trim(), 'catastro', 0.92, 'confirmed')
+    context.address = field(
+      detected.address.trim(),
+      detectedLocationSource,
+      detectedLocationConfidence,
+      detectedLocationVerification
+    )
   } else if (conversation.address) {
     context.address = field(conversation.address, 'conversation', 0.65, 'unverified')
   }
@@ -252,9 +263,9 @@ export function buildNormalizedParcelContext(
   } else if (detected && validCoordinates(detected.lat, detected.lng)) {
     context.coordinates = field(
       { lat: detected.lat!, lng: detected.lng! },
-      'catastro',
-      0.92,
-      'confirmed'
+      detectedLocationSource,
+      detectedLocationConfidence,
+      detectedLocationVerification
     )
   } else if (conversation.coordinates) {
     context.coordinates = field(conversation.coordinates, 'conversation', 0.7, 'unverified')
@@ -294,9 +305,9 @@ export function buildNormalizedParcelContext(
         id: detected.municipalityId ?? undefined,
         name: detected.municipalityName.trim(),
       },
-      'catastro',
-      0.95,
-      'confirmed'
+      detectedLocationSource,
+      detectedLocationSource === 'catastro' ? 0.95 : 0.78,
+      detectedLocationVerification
     )
   } else if (conversation.municipalityName) {
     context.municipality = field(
@@ -337,9 +348,9 @@ export function buildNormalizedParcelContext(
   } else if (detected?.provinceName?.trim()) {
     context.province = field(
       { id: detected.provinceId ?? undefined, name: detected.provinceName.trim() },
-      'catastro',
-      0.95,
-      'confirmed'
+      detectedLocationSource,
+      detectedLocationSource === 'catastro' ? 0.95 : 0.78,
+      detectedLocationVerification
     )
   }
   if (provinceId && detected?.provinceName) {
@@ -439,9 +450,10 @@ export function buildNormalizedParcelContext(
   const planningInstrument =
     expediente.planeamiento?.trim() || detected?.planningInstrument?.trim()
   if (planningInstrument) {
+    const detectedPlanningSource = detected?.planningSource ?? 'urbanbrain'
     context.planningInstrument = field(
       planningInstrument,
-      expediente.planeamiento ? 'expediente' : 'catastro',
+      expediente.planeamiento ? 'expediente' : detectedPlanningSource,
       expediente.planeamiento ? expedienteConfidence : 0.9,
       expediente.planeamiento ? expedienteVerification : 'confirmed'
     )
@@ -457,7 +469,12 @@ export function buildNormalizedParcelContext(
   }
 
   if (detected?.planningStatus?.trim()) {
-    context.validity = field(detected.planningStatus.trim(), 'catastro', 0.85, 'confirmed')
+    context.validity = field(
+      detected.planningStatus.trim(),
+      detected.planningSource ?? 'urbanbrain',
+      0.85,
+      'confirmed'
+    )
   } else if (technicallyValidated && context.planningInstrument) {
     context.validity = field(
       'vigencia confirmada por técnico',
