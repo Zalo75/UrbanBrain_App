@@ -1,40 +1,31 @@
 import { redirect } from 'next/navigation'
 import { db } from '@/infrastructure/db/client'
-import { expedientes, organizationMembers, documents } from '@/infrastructure/db/schema'
-import { eq, and, desc } from 'drizzle-orm'
-import { authProvider } from '@/infrastructure/auth'
+import { documents } from '@/infrastructure/db/schema'
+import { eq, desc } from 'drizzle-orm'
 import { MapPin, Settings, MessageSquare, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DocumentList } from './DocumentList'
 import { formatLocationSource, formatLandClass, formatActionType } from '@/shared/utils/formatters'
 import { getProvinceNameById, getMunicipalityNameById } from '@/shared/territory'
 import { ChatInterface } from './ChatInterface'
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
-  const [expediente] = await db.select().from(expedientes).where(eq(expedientes.id, resolvedParams.id))
-  if (!expediente) return { title: 'Expediente no encontrado - UrbanBrain' }
-  return { title: `${expediente.name} - UrbanBrain` }
+  const access = await getExpedienteAccess(resolvedParams.id)
+  if (!access.ok) return { title: 'Expediente - UrbanBrain' }
+  return { title: `${access.expediente.name} - UrbanBrain` }
 }
 
 export default async function ExpedienteWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
-  const userId = await authProvider.getUserId()
-  if (!userId) redirect('/login')
-
-  const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
-  if (memberships.length === 0) redirect('/onboarding')
-  
-  const orgId = memberships[0].orgId
-
-  const [expediente] = await db
-    .select()
-    .from(expedientes)
-    .where(and(eq(expedientes.id, resolvedParams.id), eq(expedientes.orgId, orgId)))
-
-  if (!expediente) {
+  const access = await getExpedienteAccess(resolvedParams.id)
+  if (!access.ok && access.reason === 'unauthenticated') redirect('/login')
+  if (!access.ok) {
     redirect('/dashboard')
   }
+
+  const { expediente, orgId } = access
 
   const expedienteDocs = await db
     .select()
@@ -184,7 +175,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
               <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden a este expediente.</span>
             </div>
           )}
-          <ChatInterface expedienteId={expediente.id} municipio={expediente.municipio} />
+          <ChatInterface expedienteId={expediente.id} />
         </div>
 
       </div>

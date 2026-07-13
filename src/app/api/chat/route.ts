@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
-import { authProvider } from '@/infrastructure/auth';
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -23,25 +23,26 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    let { message, municipio, expedienteId } = body;
+    const { message, expedienteId } = body;
 
-    municipio = municipio?.trim() || '';
-    if (municipio === 'oza_cesuras') {
-      municipio = 'Oza-Cesuras';
-    }
-
-    if (!expedienteId) {
+    if (typeof expedienteId !== 'string' || !expedienteId) {
       return NextResponse.json({ error: 'expedienteId is required' }, { status: 400 });
     }
 
-    let userId = await authProvider.getUserId();
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const access = await getExpedienteAccess(expedienteId);
+    if (!access.ok) {
+      const status = access.reason === 'unauthenticated' ? 401 : 404;
+      return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Not found' }, { status });
     }
 
-    if (!message) {
+    if (typeof message !== 'string' || !message.trim()) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+    }
+
+    const userId = access.userId;
+    let municipio = access.expediente.municipio.trim();
+    if (municipio === 'oza_cesuras') {
+      municipio = 'Oza-Cesuras';
     }
 
     if (!municipio) {
