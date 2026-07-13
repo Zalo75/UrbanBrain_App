@@ -113,7 +113,7 @@ export async function createExpediente(formData: FormData) {
       const engine = new ContextDetectionEngine()
       // Se ejecuta en background (no usamos await para no bloquear la redirección de inmediato)
       // O usamos await si queremos garantizar que termine antes de redirigir
-      await engine.detectContext(newExpedienteId)
+      await engine.detectContext(newExpedienteId, userId)
     } catch (engineError) {
       console.error('Error in ContextDetectionEngine during creation:', engineError)
       // No interrumpimos la creación del expediente por un fallo en el motor
@@ -130,6 +130,10 @@ export async function createExpediente(formData: FormData) {
 }
 
 export async function detectContextAction(formData: FormData) {
+  const userId = await authProvider.getUserId()
+  if (!userId) {
+    return { error: "Debe iniciar sesión para consultar fuentes territoriales." }
+  }
   const refCatastral = formData.get('refCatastral') as string | null
   
   if (!refCatastral || refCatastral.trim() === '') {
@@ -143,17 +147,20 @@ export async function detectContextAction(formData: FormData) {
     const engine = new ContextDetectionEngine()
     const result = await engine.detectStateless(rc)
     
-    // Si hay error en catastro (detector principal de momento)
-    if (result.errors['catastro']) {
-      return { error: result.errors['catastro'] }
+    if (result.status === 'unresolved') {
+      return {
+        error:
+          result.warnings[0]?.message ??
+          "No se ha podido resolver la referencia catastral.",
+      }
     }
     
     return {
-      provinceId: result.summary.provinceId || null,
-      municipalityId: result.summary.municipalityId || null,
-      provinceName: result.summary.provinceName || null,
-      municipalityName: result.summary.municipalityName || null,
-      address: result.summary.address || null
+      provinceId: getProvinceByName(result.province ?? '')?.id ?? null,
+      municipalityId: getMunicipalityByName(result.municipality ?? '')?.id ?? null,
+      provinceName: result.province ?? null,
+      municipalityName: result.municipality ?? null,
+      address: result.normalizedAddress ?? null
     }
   } catch (e) {
     console.error('Error in detectContextAction:', e)

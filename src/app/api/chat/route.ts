@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
-import { authProvider } from '@/infrastructure/auth';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
 import { buildNormalizedParcelContext } from '@/application/parcel-context/normalizeParcelContext';
 import {
@@ -18,6 +17,7 @@ import {
   validateGeneratedAnswer,
 } from '@/application/parcel-context/responseSafety';
 import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -93,23 +93,24 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { message, expedienteId } = body;
 
-    if (!expedienteId) {
+    if (typeof expedienteId !== 'string' || !expedienteId) {
       return NextResponse.json({ error: 'expedienteId is required' }, { status: 400 });
     }
 
-    const userId = await authProvider.getUserId();
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const access = await getExpedienteAccess(expedienteId);
+    if (!access.ok) {
+      const status = access.reason === 'unauthenticated' ? 401 : 404;
+      return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Not found' }, { status });
     }
 
     if (typeof message !== 'string' || !message.trim()) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
+    const userId = access.userId;
     const parcelInputs = await loadAuthorizedParcelInputs(expedienteId, userId);
     if (!parcelInputs) {
-      return NextResponse.json({ error: 'Expediente not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     const parcelContext = buildNormalizedParcelContext({
