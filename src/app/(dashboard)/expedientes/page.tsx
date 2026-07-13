@@ -54,7 +54,8 @@ export default async function ExpedientesListPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8">
+    <div className="h-full overflow-y-auto">
+      <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Expedientes</h1>
@@ -119,6 +120,7 @@ export default async function ExpedientesListPage() {
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   )

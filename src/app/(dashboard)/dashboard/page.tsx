@@ -78,51 +78,53 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Actividad Reciente</h1>
-          <p className="text-sm text-muted-foreground">Tus últimos expedientes modificados.</p>
+    <div className="h-full overflow-y-auto">
+      <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Actividad Reciente</h1>
+            <p className="text-sm text-muted-foreground">Tus últimos expedientes modificados.</p>
+          </div>
+          <Link href="/expedientes/new">
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Nuevo
+            </Button>
+          </Link>
         </div>
-        <Link href="/expedientes/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Nuevo
-          </Button>
-        </Link>
-      </div>
 
-      <div className="grid gap-4">
-        {recentExpedientes.map((exp) => (
-          <div key={exp.id} className="flex items-center justify-between p-4 rounded-xl border bg-card hover:bg-accent/40 transition-colors cursor-pointer">
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-900 border">
-                <FolderOpen className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <div>
-                <h3 className="font-medium text-sm">{exp.name}</h3>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                  <span>{getMunicipalityNameById(exp.municipio)}{exp.province ? `, ${getProvinceNameById(exp.province)}` : ''}</span>
-                  {exp.refCatastral && (
-                    <>
-                      <span>•</span>
-                      <span className="font-mono">{exp.refCatastral}</span>
-                    </>
-                  )}
-                  {exp.actionType && (
-                    <>
-                      <span>•</span>
-                      <span className="bg-muted px-1.5 py-0.5 rounded-sm">{formatActionType(exp.actionType)}</span>
-                    </>
-                  )}
+        <div className="grid gap-4">
+          {recentExpedientes.map((exp) => (
+            <div key={exp.id} className="flex items-center justify-between p-4 rounded-xl border bg-card hover:bg-accent/40 transition-colors cursor-pointer">
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-900 border">
+                  <FolderOpen className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm">{exp.name}</h3>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                    <span>{getMunicipalityNameById(exp.municipio)}{exp.province ? `, ${getProvinceNameById(exp.province)}` : ''}</span>
+                    {exp.refCatastral && (
+                      <>
+                        <span>•</span>
+                        <span className="font-mono">{exp.refCatastral}</span>
+                      </>
+                    )}
+                    {exp.actionType && (
+                      <>
+                        <span>•</span>
+                        <span className="bg-muted px-1.5 py-0.5 rounded-sm">{formatActionType(exp.actionType)}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
+              <div className="text-xs font-medium px-2.5 py-1 rounded-md bg-secondary text-secondary-foreground">
+                {exp.status === 'active' ? 'Activo' : exp.status}
+              </div>
             </div>
-            <div className="text-xs font-medium px-2.5 py-1 rounded-md bg-secondary text-secondary-foreground">
-              {exp.status === 'active' ? 'Activo' : exp.status}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -45,31 +45,34 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
   return (
     <div className="flex h-full w-full flex-col bg-background">
       {/* Workspace Header */}
-      <div className="flex items-center justify-between border-b px-6 py-3 bg-zinc-50/50 dark:bg-zinc-950/20">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col">
-            <h1 className="text-lg font-semibold tracking-tight">{expediente.name}</h1>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-              <span className="flex items-center gap-1">
+      <div className="flex items-center justify-between border-b px-4 lg:px-6 py-3 bg-zinc-50/50 dark:bg-zinc-950/20 gap-2 min-w-0">
+        <div className="flex items-center gap-4 min-w-0 flex-1">
+          <div className="flex flex-col min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight truncate">{expediente.name}</h1>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 truncate">
+              <span className="flex items-center gap-1 shrink-0">
                 <MapPin className="h-3 w-3" />
-                {getMunicipalityNameById(expediente.municipio)}
+                <span className="truncate">{getMunicipalityNameById(expediente.municipio)}</span>
               </span>
               {expediente.refCatastral && (
                 <>
-                  <span>•</span>
-                  <span className="font-mono">{expediente.refCatastral}</span>
+                  <span className="shrink-0">•</span>
+                  <span className="font-mono truncate">{expediente.refCatastral}</span>
                 </>
               )}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-xs font-medium px-2.5 py-1 rounded-md bg-secondary text-secondary-foreground mr-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="text-[10px] sm:text-xs font-medium px-2 py-1 rounded-md bg-secondary text-secondary-foreground whitespace-nowrap">
             {expediente.status === 'active' ? 'En progreso' : expediente.status}
           </div>
-          <Button variant="outline" size="sm" className="h-8">
+          <Button variant="outline" size="sm" className="h-8 hidden sm:flex">
             <Settings className="h-4 w-4 mr-2" />
             Ajustes
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8 sm:hidden shrink-0">
+            <Settings className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -169,16 +172,16 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         </div>
 
         {/* Right Side: Chat / Main Interaction Area */}
-        <div className="flex flex-1 flex-col relative bg-background">
+        <div className="flex flex-1 flex-col relative bg-background min-w-0">
           {expediente.contextoValidadoPorTecnico ? (
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-center justify-center gap-2 shrink-0">
-              <MapPin className="h-4 w-4" />
-              <span>UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
+              <MapPin className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
+              <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
             </div>
           ) : (
-            <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 p-2.5 text-xs text-amber-800 dark:text-amber-400 flex items-center justify-center gap-2 shrink-0">
-              <AlertCircle className="h-4 w-4" />
-              <span>Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden realmente a este expediente antes de utilizar las respuestas de UrbanBrain.</span>
+            <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 p-2.5 text-xs text-amber-800 dark:text-amber-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
+              <AlertCircle className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
+              <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden a este expediente.</span>
             </div>
           )}
           <ChatInterface expedienteId={expediente.id} municipio={expediente.municipio} />
