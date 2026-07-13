@@ -9,6 +9,7 @@ import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRep
 import { CatastroOfficialAdapter } from '@/infrastructure/territorial-resolver/CatastroOfficialAdapter'
 import { CartoCiudadOfficialAdapter } from '@/infrastructure/territorial-resolver/CartoCiudadOfficialAdapter'
 import { DatabasePlanningAdapter } from '@/infrastructure/territorial-resolver/DatabasePlanningAdapter'
+import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/BetanzosPlanningAdapter'
 import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
 import { getMunicipalityByName, getProvinceByName } from '@/shared/territory'
 
@@ -18,7 +19,7 @@ function officialResolver(): Resolver {
   const dependencies = {
     catastro: new CatastroOfficialAdapter(),
     geocoder: new CartoCiudadOfficialAdapter(),
-    planning: new DatabasePlanningAdapter(),
+    planning: new BetanzosPlanningAdapter(new DatabasePlanningAdapter()),
     affects: new IdegAffectAdapter(),
   }
   return (input) => resolveParcelLocation(input, dependencies)
@@ -27,6 +28,14 @@ function officialResolver(): Resolver {
 function detectionSummary(result: TerritorialResolution) {
   const province = getProvinceByName(result.province ?? '')
   const municipality = getMunicipalityByName(result.municipality ?? '')
+  const landClass =
+    result.planning.classification?.code === 'SU'
+      ? 'urbano'
+      : result.planning.classification?.code === 'SNR'
+        ? 'nucleo_rural'
+        : result.planning.classification?.code === 'SR'
+          ? 'rustico'
+          : undefined
   return {
     cadastralReference: result.cadastralReference,
     provinceId: province?.id,
@@ -47,13 +56,28 @@ function detectionSummary(result: TerritorialResolution) {
         ? 'cartociudad'
         : undefined,
     planningInstrument: result.planning.instrument,
-    planningStatus: result.planning.status === 'determined' ? 'vigente' : undefined,
+    planningStatus: result.planning.applicableInstruments?.some(
+      (instrument) => instrument.status === 'current'
+    )
+      ? 'vigente'
+      : result.planning.status === 'determined'
+        ? 'vigente'
+        : undefined,
+    planningApplicabilityStatus: result.planning.status,
+    planningCanAnswerConcreteParameters: result.planning.canAnswerConcreteParameters ?? false,
+    planningWarnings: result.planning.warnings,
+    planningConflicts: result.planning.conflicts ?? [],
     planningSource: result.planning.evidence.some((item) => item.source === 'siotuga')
       ? 'siotuga'
       : result.planning.status === 'determined'
         ? 'urbanbrain'
         : undefined,
-    warnings: result.warnings,
+    landClass,
+    planningArea:
+      result.planning.status !== 'conflict' && result.planning.areas?.length === 1
+        ? result.planning.areas[0].name
+        : undefined,
+    warnings: [...result.warnings, ...result.planning.warnings, ...result.affects.warnings],
     conflicts: result.conflicts,
     affects: result.affects,
     resolvedAt: result.resolvedAt,
@@ -63,10 +87,7 @@ function detectionSummary(result: TerritorialResolution) {
 export class ContextDetectionEngine {
   constructor(private readonly resolver: Resolver = officialResolver()) {}
 
-  async detectContext(
-    expedienteId: string,
-    userId: string
-  ): Promise<TerritorialResolution | null> {
+  async detectContext(expedienteId: string, userId: string): Promise<TerritorialResolution | null> {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
 
@@ -98,8 +119,6 @@ export class ContextDetectionEngine {
   async detectStateless(
     input: ResolveParcelLocationInput | string
   ): Promise<TerritorialResolution> {
-    return this.resolver(
-      typeof input === 'string' ? { cadastralReference: input } : input
-    )
+    return this.resolver(typeof input === 'string' ? { cadastralReference: input } : input)
   }
 }

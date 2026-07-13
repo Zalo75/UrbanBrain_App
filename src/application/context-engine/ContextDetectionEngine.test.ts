@@ -149,4 +149,62 @@ describe('ContextDetectionEngine tenant boundary', () => {
     expect(mocks.values.mock.calls[0][0].sourceApis).toEqual(['catastro', 'siotuga', 'ideg'])
     expect(mocks.values.mock.calls[0][0].summary.planningStatus).toBe('vigente')
   })
+
+  it('persiste la clase y el núcleo de Betanzos sin inventar una ordenanza', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a', municipio: 'betanzos' },
+      detected: null,
+      userMessages: [],
+      constraints: [],
+    })
+    const betanzosResolution: TerritorialResolution = {
+      ...resolution,
+      municipality: 'Betanzos',
+      municipalityCode: '15009',
+      planning: {
+        status: 'partial',
+        instrument: 'Texto refundido de las Normas Subsidiarias',
+        classification: {
+          code: 'SNR',
+          categoryCode: 'SNRSC',
+          label: 'Suelo de núcleo rural',
+          sourceFeatureIds: ['22221_1'],
+        },
+        areas: [{ type: 'nucleus', name: 'O CASTRO', sourceFeatureIds: ['22221_1'] }],
+        applicableInstruments: [
+          {
+            id: '22221',
+            name: 'Texto refundido de las Normas Subsidiarias',
+            kind: 'Normas Subsidiarias',
+            status: 'current',
+            sourceUrl: 'https://siotuga.xunta.gal/',
+          },
+        ],
+        canAnswerConcreteParameters: false,
+        warnings: [],
+        evidence: [
+          {
+            source: 'siotuga',
+            sourceUrl: 'https://siotuga.xunta.gal/',
+            retrievedAt: resolution.resolvedAt,
+            method: 'fixture',
+          },
+        ],
+      },
+    }
+
+    await new ContextDetectionEngine(vi.fn(async () => betanzosResolution)).detectContext(
+      'expediente-org-a',
+      'usuario-org-a'
+    )
+
+    expect(mocks.values.mock.calls[0][0].summary).toMatchObject({
+      planningStatus: 'vigente',
+      planningApplicabilityStatus: 'partial',
+      planningCanAnswerConcreteParameters: false,
+      landClass: 'nucleo_rural',
+      planningArea: 'O CASTRO',
+    })
+    expect(mocks.values.mock.calls[0][0].summary.qualification).toBeUndefined()
+  })
 })

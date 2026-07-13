@@ -36,12 +36,12 @@ function parcelReference(reference: string) {
 function isValidCoordinates(value: TerritorialCoordinates | null | undefined) {
   return Boolean(
     value &&
-      Number.isFinite(value.lat) &&
-      Number.isFinite(value.lng) &&
-      value.lat >= -90 &&
-      value.lat <= 90 &&
-      value.lng >= -180 &&
-      value.lng <= 180
+    Number.isFinite(value.lat) &&
+    Number.isFinite(value.lng) &&
+    value.lat >= -90 &&
+    value.lat <= 90 &&
+    value.lng >= -180 &&
+    value.lng <= 180
   )
 }
 
@@ -69,8 +69,7 @@ function distanceMetres(a: TerritorialCoordinates, b: TerritorialCoordinates) {
   const dLng = radians(b.lng - a.lng)
   const lat1 = radians(a.lat)
   const lat2 = radians(b.lat)
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
 
@@ -149,7 +148,11 @@ async function addApplicability(
   if (result.status === 'unresolved' || result.status === 'ambiguous') return
 
   const [planning, affects] = await Promise.allSettled([
-    dependencies.planning.findApplicablePlanning(result.municipalityCode),
+    dependencies.planning.findApplicablePlanning({
+      municipalityCode: result.municipalityCode,
+      coordinates: result.coordinates,
+      geometry: result.parcelGeometry,
+    }),
     dependencies.affects.findAffects({
       coordinates: result.coordinates,
       geometry: result.parcelGeometry,
@@ -161,7 +164,9 @@ async function addApplicability(
   }
   if (affects.status === 'fulfilled') result.affects = affects.value
   else {
-    result.affects = emptyAffects('La consulta oficial de afecciones no está disponible temporalmente.')
+    result.affects = emptyAffects(
+      'La consulta oficial de afecciones no está disponible temporalmente.'
+    )
   }
 }
 
@@ -183,7 +188,10 @@ async function resolveByReference(
   }
   if (!parcel) {
     result.warnings.push(
-      warning('cadastral_reference_not_found', 'Catastro no devolvió una parcela para la referencia.')
+      warning(
+        'cadastral_reference_not_found',
+        'Catastro no devolvió una parcela para la referencia.'
+      )
     )
     return result
   }
@@ -250,7 +258,10 @@ async function resolveByCoordinates(
   }
   if (!isInGalicia(coordinates)) {
     result.warnings.push(
-      warning('outside_galicia_coverage', 'Las coordenadas están fuera de la cobertura beta de Galicia.')
+      warning(
+        'outside_galicia_coverage',
+        'Las coordenadas están fuera de la cobertura beta de Galicia.'
+      )
     )
     return result
   }
@@ -260,16 +271,14 @@ async function resolveByCoordinates(
     reference = await dependencies.catastro.resolveCoordinates(coordinates)
   } catch {
     result.warnings.push(
-      warning('catastro_coordinates_unavailable', 'No se pudo consultar la parcela por coordenadas.')
+      warning(
+        'catastro_coordinates_unavailable',
+        'No se pudo consultar la parcela por coordenadas.'
+      )
     )
   }
   if (reference) {
-    const resolved = await resolveByReference(
-      reference,
-      { coordinates },
-      dependencies,
-      now
-    )
+    const resolved = await resolveByReference(reference, { coordinates }, dependencies, now)
     if (resolved.status !== 'unresolved') {
       resolved.inputMethod = 'coordinates'
       return resolved
@@ -282,7 +291,10 @@ async function resolveByCoordinates(
     candidate = await dependencies.geocoder.reverse(coordinates)
   } catch {
     result.warnings.push(
-      warning('geocoder_unavailable', 'La geocodificación inversa no está disponible temporalmente.')
+      warning(
+        'geocoder_unavailable',
+        'La geocodificación inversa no está disponible temporalmente.'
+      )
     )
   }
   result.coordinates = coordinates
@@ -349,7 +361,10 @@ async function resolveByAddress(
       )
     } catch {
       result.warnings.push(
-        warning('catastro_confirmation_unavailable', 'No se pudo confirmar el candidato contra Catastro.')
+        warning(
+          'catastro_confirmation_unavailable',
+          'No se pudo confirmar el candidato contra Catastro.'
+        )
       )
     }
     if (parcel) {

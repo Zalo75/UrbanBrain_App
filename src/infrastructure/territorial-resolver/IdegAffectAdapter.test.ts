@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { IdegAffectAdapter } from './IdegAffectAdapter'
+import { IdegAffectAdapter, VERIFIED_AFFECT_LAYERS } from './IdegAffectAdapter'
 
 const layer = {
   id: 'test-layer',
@@ -10,11 +10,33 @@ const layer = {
 }
 
 describe('IdegAffectAdapter', () => {
+  it('incluye las coberturas oficiales verificadas para el piloto de Betanzos', () => {
+    expect(VERIFIED_AFFECT_LAYERS.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        'bic_integral_area',
+        'natura_2000_zec',
+        'water_channel_police',
+        'water_preferential_flow',
+        'water_public_domain',
+        'road_autonomic_domain_cc',
+        'road_autonomic_domain_vac',
+        'road_autonomic_affect_cc',
+        'road_autonomic_affect_vac',
+        'road_state_provincial_area',
+        'approved_road_project',
+      ])
+    )
+  })
+
   it('conserva una intersección positiva con evidencia oficial', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ features: [{ attributes: { OBJECTID: 7, NOMBRE: 'BIC' } }] }), {
-        status: 200,
-      })
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ features: [{ attributes: { OBJECTID: 7, NOMBRE: 'BIC' } }] }),
+          {
+            status: 200,
+          }
+        )
     )
     const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date('2026-07-13'), [
       layer,
@@ -30,8 +52,12 @@ describe('IdegAffectAdapter', () => {
   })
 
   it('no interpreta cero resultados como ausencia de afecciones', async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ features: [] }), { status: 200 }))
-    const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date(), [layer]).findAffects({
+    const fetcher = vi.fn(
+      async () => new Response(JSON.stringify({ features: [] }), { status: 200 })
+    )
+    const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date(), [
+      layer,
+    ]).findAffects({
       coordinates: { lat: 43.37, lng: -8.4 },
     })
     expect(result.detected).toEqual([])
@@ -44,7 +70,9 @@ describe('IdegAffectAdapter', () => {
     const fetcher = vi.fn(async () => {
       throw new Error('timeout')
     })
-    const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date(), [layer]).findAffects({
+    const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date(), [
+      layer,
+    ]).findAffects({
       coordinates: { lat: 43.37, lng: -8.4 },
     })
     expect(result.warnings.map((warning) => warning.code)).toContain('affect_sources_unavailable')

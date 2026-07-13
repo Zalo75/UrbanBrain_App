@@ -44,11 +44,51 @@ export interface TerritorialLocationCandidate {
   evidence: TerritorialEvidence[]
 }
 
+export interface PlanningClassification {
+  code: string
+  categoryCode?: string
+  label: string
+  categoryLabel?: string
+  sourceFeatureIds: string[]
+}
+
+export interface PlanningArea {
+  type: 'nucleus' | 'sector' | 'unit' | 'zone'
+  name: string
+  sourceFeatureIds: string[]
+}
+
+export interface PlanningInstrumentReference {
+  id: string
+  name: string
+  kind: string
+  status: 'current' | 'historical' | 'catalogued_pending_spatial_validation'
+  approvalDate?: string
+  consolidatedTextDate?: string
+  normativePublicationDate?: string
+  sourceUrl: string
+}
+
+export interface PlanningDocumentReference {
+  id: string
+  instrumentId?: string
+  title: string
+  sourceUrl: string
+  binding: 'general' | 'area_specific' | 'unverified_for_detected_area'
+}
+
 export interface PlanningApplicability {
-  status: 'determined' | 'not_determined'
+  status: 'determined' | 'partial' | 'conflict' | 'not_determined'
   instrument?: string
   approvalDate?: string
   sourceUrl?: string
+  classification?: PlanningClassification
+  areas?: PlanningArea[]
+  applicableInstruments?: PlanningInstrumentReference[]
+  cataloguedInstruments?: PlanningInstrumentReference[]
+  documents?: PlanningDocumentReference[]
+  canAnswerConcreteParameters?: boolean
+  conflicts?: string[]
   evidence: TerritorialEvidence[]
   warnings: TerritorialWarning[]
 }
@@ -120,7 +160,11 @@ export interface GeocoderPort {
 }
 
 export interface PlanningPort {
-  findApplicablePlanning(municipalityCode: string | undefined): Promise<PlanningApplicability>
+  findApplicablePlanning(location: {
+    municipalityCode?: string
+    coordinates?: TerritorialCoordinates
+    geometry?: ParcelGeometry
+  }): Promise<PlanningApplicability>
 }
 
 export interface AffectPort {

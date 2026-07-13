@@ -1,11 +1,8 @@
-import {
-  allMunicipalities,
-  getMunicipalityNameById,
-  getProvinceNameById,
-} from '@/shared/territory'
+import { allMunicipalities, getMunicipalityNameById, getProvinceNameById } from '@/shared/territory'
 import type {
   NormalizedParcelContext,
   ParcelContextField,
+  ParcelContextSource,
   ParcelContextVerification,
   ParcelCoordinates,
 } from '@/domain/parcel-context/types'
@@ -38,11 +35,22 @@ export interface DetectedParcelInput {
   planningStatus?: string | null
   locationSource?: 'catastro' | 'cartociudad' | null
   planningSource?: 'siotuga' | 'urbanbrain' | null
+  planningApplicabilityStatus?: 'determined' | 'partial' | 'conflict' | 'not_determined' | null
+  planningCanAnswerConcreteParameters?: boolean | null
+  planningWarnings?: Array<{ code: string; message: string }> | null
+  planningConflicts?: string[] | null
+  affects?: {
+    detected?: Array<{
+      category: string
+      name: string
+      confidence?: 'high' | 'medium' | 'low'
+    }>
+  } | null
 }
 
 export interface KnownConstraintInput {
   name: string
-  source?: string | null
+  source?: ParcelContextSource | string | null
   confidence?: number | null
   confirmed?: boolean
 }
@@ -119,49 +127,58 @@ function extractConversationFacts(messages: string[]): ConversationFacts {
       const message = statement.trim()
       if (!message || message.includes('?')) continue
 
-    const rcMatch = message.toUpperCase().match(/(?:referencia\s+catastral|ref\.?\s*catastral|rc)\s*(?:es|:)?\s*([A-Z0-9\s-]{14,24})/i)
-    const rc = normalizeCadastralReference(rcMatch?.[1])
-    if (rc) facts.cadastralReference = rc
+      const rcMatch = message
+        .toUpperCase()
+        .match(
+          /(?:referencia\s+catastral|ref\.?\s*catastral|rc)\s*(?:es|:)?\s*([A-Z0-9\s-]{14,24})/i
+        )
+      const rc = normalizeCadastralReference(rcMatch?.[1])
+      if (rc) facts.cadastralReference = rc
 
-    const coordinateMatch = message.match(
-      /coordenadas?\s*(?:son|es|:)?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)/i
-    )
-    if (coordinateMatch) {
-      const lat = Number(coordinateMatch[1].replace(',', '.'))
-      const lng = Number(coordinateMatch[2].replace(',', '.'))
-      if (validCoordinates(lat, lng)) facts.coordinates = { lat, lng }
-    }
-
-    const municipalityMatch = message.match(
-      /(?:municipio|concello)\s*(?:es|:|confirmado(?:\s+es)?)\s*([\p{L}\s-]{2,80})/iu
-    )
-    if (municipalityMatch) {
-      const candidate = municipalityMatch[1].trim().replace(/[.,;].*$/, '')
-      const known = allMunicipalities.find(
-        (municipality) => normalizeComparable(municipality.name) === normalizeComparable(candidate)
+      const coordinateMatch = message.match(
+        /coordenadas?\s*(?:son|es|:)?\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)/i
       )
-      if (known) facts.municipalityName = known.name
-    }
+      if (coordinateMatch) {
+        const lat = Number(coordinateMatch[1].replace(',', '.'))
+        const lng = Number(coordinateMatch[2].replace(',', '.'))
+        if (validCoordinates(lat, lng)) facts.coordinates = { lat, lng }
+      }
 
-    const addressMatch = message.match(/direcci[oó]n\s*(?:es|:|confirmada(?:\s+es)?)\s*([^.;\n]{5,160})/i)
-    if (addressMatch) facts.address = addressMatch[1].trim()
+      const municipalityMatch = message.match(
+        /(?:municipio|concello)\s*(?:es|:|confirmado(?:\s+es)?)\s*([\p{L}\s-]{2,80})/iu
+      )
+      if (municipalityMatch) {
+        const candidate = municipalityMatch[1].trim().replace(/[.,;].*$/, '')
+        const known = allMunicipalities.find(
+          (municipality) =>
+            normalizeComparable(municipality.name) === normalizeComparable(candidate)
+        )
+        if (known) facts.municipalityName = known.name
+      }
 
-    const landClassStatement = message.match(
-      /(?:clasificaci[oó]n|clase\s+de\s+suelo)\s*(?:es|:|confirmada(?:\s+es)?)\s*([^.;\n]{3,80})/i
-    )
-    if (landClassStatement) {
-      const landClass = LAND_CLASS_PATTERNS.find(([pattern]) => pattern.test(landClassStatement[1]))
-      if (landClass) facts.landClass = landClass[1]
-    }
+      const addressMatch = message.match(
+        /direcci[oó]n\s*(?:es|:|confirmada(?:\s+es)?)\s*([^.;\n]{5,160})/i
+      )
+      if (addressMatch) facts.address = addressMatch[1].trim()
 
-    const zoningMatch = message.match(
-      /(?:calificaci[oó]n|ordenanza)\s*(?:es|:|confirmada(?:\s+es)?)\s*([\p{L}0-9][\p{L}0-9 ._/-]{0,60})/iu
-    )
-    if (zoningMatch) facts.qualification = zoningMatch[1].trim().replace(/[.,;].*$/, '')
+      const landClassStatement = message.match(
+        /(?:clasificaci[oó]n|clase\s+de\s+suelo)\s*(?:es|:|confirmada(?:\s+es)?)\s*([^.;\n]{3,80})/i
+      )
+      if (landClassStatement) {
+        const landClass = LAND_CLASS_PATTERNS.find(([pattern]) =>
+          pattern.test(landClassStatement[1])
+        )
+        if (landClass) facts.landClass = landClass[1]
+      }
 
-    const areaMatch = message.match(
-      /(?:[aá]mbito|sector|ficha)\s*(?:es|:|confirmad[oa](?:\s+es)?)\s*([\p{L}0-9][\p{L}0-9 ._/-]{0,60})/iu
-    )
+      const zoningMatch = message.match(
+        /(?:calificaci[oó]n|ordenanza)\s*(?:es|:|confirmada(?:\s+es)?)\s*([\p{L}0-9][\p{L}0-9 ._/-]{0,60})/iu
+      )
+      if (zoningMatch) facts.qualification = zoningMatch[1].trim().replace(/[.,;].*$/, '')
+
+      const areaMatch = message.match(
+        /(?:[aá]mbito|sector|ficha)\s*(?:es|:|confirmad[oa](?:\s+es)?)\s*([\p{L}0-9][\p{L}0-9 ._/-]{0,60})/iu
+      )
       if (areaMatch) facts.planningArea = areaMatch[1].trim().replace(/[.,;].*$/, '')
     }
   }
@@ -214,7 +231,13 @@ export function buildNormalizedParcelContext(
     context.cadastralReference = field(conversationRc, 'conversation', 0.72, 'unverified')
   }
   if (expedienteRc && conversationRc) {
-    addConflict(context, 'cadastralReference', expedienteRc, conversationRc, 'La conversación y el expediente indican referencias distintas.')
+    addConflict(
+      context,
+      'cadastralReference',
+      expedienteRc,
+      conversationRc,
+      'La conversación y el expediente indican referencias distintas.'
+    )
   }
 
   if (expediente.address?.trim()) {
@@ -279,11 +302,9 @@ export function buildNormalizedParcelContext(
   ) {
     context.conflicts.push({
       field: 'coordinates',
-      values: [
-        `${expediente.lat}, ${expediente.lng}`,
-        `${detected.lat}, ${detected.lng}`,
-      ],
-      reason: 'La detección territorial y el expediente indican coordenadas materialmente distintas.',
+      values: [`${expediente.lat}, ${expediente.lng}`, `${detected.lat}, ${detected.lng}`],
+      reason:
+        'La detección territorial y el expediente indican coordenadas materialmente distintas.',
     })
   }
 
@@ -368,13 +389,17 @@ export function buildNormalizedParcelContext(
     const source = expediente.landClass
       ? 'expediente'
       : detected?.landClass
-        ? 'catastro'
+        ? (detected.planningSource ?? 'urbanbrain')
         : 'conversation'
     context.landClass = field(
       landClass,
       source,
-      source === 'catastro' ? 0.9 : expedienteConfidence,
-      source === 'catastro' ? 'confirmed' : source === 'expediente' ? expedienteVerification : 'unverified'
+      source === 'siotuga' ? 0.9 : expedienteConfidence,
+      source === 'siotuga'
+        ? 'confirmed'
+        : source === 'expediente'
+          ? expedienteVerification
+          : 'unverified'
     )
   }
   if (expediente.landClass && detected?.landClass) {
@@ -397,18 +422,24 @@ export function buildNormalizedParcelContext(
   }
 
   const qualification =
-    expediente.urbanPlanningZone?.trim() || detected?.qualification?.trim() || conversation.qualification
+    expediente.urbanPlanningZone?.trim() ||
+    detected?.qualification?.trim() ||
+    conversation.qualification
   if (qualification) {
     const source = expediente.urbanPlanningZone
       ? 'expediente'
       : detected?.qualification
-        ? 'catastro'
+        ? (detected.planningSource ?? 'urbanbrain')
         : 'conversation'
     context.qualification = field(
       qualification,
       source,
-      source === 'catastro' ? 0.9 : expedienteConfidence,
-      source === 'catastro' ? 'confirmed' : source === 'expediente' ? expedienteVerification : 'unverified'
+      source === 'siotuga' ? 0.9 : expedienteConfidence,
+      source === 'siotuga'
+        ? 'confirmed'
+        : source === 'expediente'
+          ? expedienteVerification
+          : 'unverified'
     )
   }
   if (expediente.urbanPlanningZone?.trim() && detected?.qualification?.trim()) {
@@ -434,7 +465,7 @@ export function buildNormalizedParcelContext(
   if (planningArea) {
     context.planningArea = field(
       planningArea,
-      detected?.planningArea ? 'catastro' : 'conversation',
+      detected?.planningArea ? (detected.planningSource ?? 'urbanbrain') : 'conversation',
       detected?.planningArea ? 0.9 : 0.7,
       detected?.planningArea ? 'confirmed' : 'unverified'
     )
@@ -447,8 +478,7 @@ export function buildNormalizedParcelContext(
     )
   }
 
-  const planningInstrument =
-    expediente.planeamiento?.trim() || detected?.planningInstrument?.trim()
+  const planningInstrument = expediente.planeamiento?.trim() || detected?.planningInstrument?.trim()
   if (planningInstrument) {
     const detectedPlanningSource = detected?.planningSource ?? 'urbanbrain'
     context.planningInstrument = field(
@@ -488,7 +518,18 @@ export function buildNormalizedParcelContext(
   context.knownConstraints = constraints.map((constraint) =>
     field(
       constraint.name,
-      constraint.source === 'catastro' ? 'catastro' : 'expediente',
+      [
+        'expediente',
+        'catastro',
+        'cartociudad',
+        'siotuga',
+        'ideg',
+        'urbanbrain',
+        'conversation',
+        'territory_catalogue',
+      ].includes(constraint.source ?? '')
+        ? (constraint.source as ParcelContextSource)
+        : 'expediente',
       constraint.confidence ?? 0.7,
       constraint.confirmed ? 'confirmed' : 'unverified',
       constraint.source ?? undefined
@@ -507,13 +548,28 @@ export function buildNormalizedParcelContext(
     context.pendingValidation.push('Falta confirmar la clasificación del suelo.')
   }
   if (!context.qualification && !context.planningArea) {
-    context.pendingValidation.push('Falta confirmar la calificación, ordenanza, ámbito o ficha aplicable.')
+    context.pendingValidation.push(
+      'Falta confirmar la calificación, ordenanza, ámbito o ficha aplicable.'
+    )
   }
   if (!context.planningInstrument) {
     context.pendingValidation.push('Falta identificar el instrumento de planeamiento vigente.')
   }
   if (!context.validity) {
     context.pendingValidation.push('Falta verificar la vigencia del instrumento aplicable.')
+  }
+
+  for (const planningWarning of detected?.planningWarnings ?? []) {
+    if (!context.pendingValidation.includes(planningWarning.message)) {
+      context.pendingValidation.push(planningWarning.message)
+    }
+  }
+  for (const planningConflict of detected?.planningConflicts ?? []) {
+    context.conflicts.push({
+      field: 'planning',
+      values: [],
+      reason: planningConflict,
+    })
   }
 
   return context

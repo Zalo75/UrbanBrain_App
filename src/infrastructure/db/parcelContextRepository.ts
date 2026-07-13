@@ -73,20 +73,38 @@ export async function loadAuthorizedParcelInputs(
       .where(
         and(
           eq(expedienteAfecciones.expedienteId, expedienteId),
-          inArray(expedienteAfecciones.status, ['detected', 'confirmed', 'manual', 'pending_review'])
+          inArray(expedienteAfecciones.status, [
+            'detected',
+            'confirmed',
+            'manual',
+            'pending_review',
+          ])
         )
       ),
   ])
 
+  const detected = (latestDetection[0]?.summary as DetectedParcelInput | undefined) ?? null
+  const detectedAffects: KnownConstraintInput[] =
+    detected?.affects?.detected?.map((affect) => ({
+      name: `${affect.category}: ${affect.name}`,
+      source: 'ideg',
+      confidence:
+        affect.confidence === 'high' ? 0.95 : affect.confidence === 'medium' ? 0.75 : 0.55,
+      confirmed: affect.confidence === 'high',
+    })) ?? []
+
   return {
     expediente: authorized.expediente,
-    detected: (latestDetection[0]?.summary as DetectedParcelInput | undefined) ?? null,
+    detected,
     userMessages: history.map((message) => message.content),
-    constraints: constraints.map((constraint) => ({
-      name: constraint.name,
-      source: constraint.source,
-      confidence: constraint.confidence,
-      confirmed: constraint.status === 'confirmed' || constraint.status === 'manual',
-    })),
+    constraints: [
+      ...constraints.map((constraint) => ({
+        name: constraint.name,
+        source: constraint.source,
+        confidence: constraint.confidence,
+        confirmed: constraint.status === 'confirmed' || constraint.status === 'manual',
+      })),
+      ...detectedAffects,
+    ],
   }
 }
