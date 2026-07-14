@@ -180,7 +180,7 @@ export class IdegAffectAdapter implements AffectPort {
     const states = await Promise.allSettled(
       this.layers.map(async (layer) => {
         const url = new URL(layer.url)
-        url.search = new URLSearchParams({
+        const body = new URLSearchParams({
           f: 'json',
           where: '1=1',
           geometry: spatial.geometry,
@@ -189,8 +189,12 @@ export class IdegAffectAdapter implements AffectPort {
           spatialRel: 'esriSpatialRelIntersects',
           outFields: '*',
           returnGeometry: 'false',
-        }).toString()
-        const response = await fetchOfficial(this.fetcher, 'IDEG', url, this.timeoutMs)
+        })
+        const response = await fetchOfficial(this.fetcher, 'IDEG', url, this.timeoutMs, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body,
+        })
         const payload = (await response.json()) as ArcGisResponse
         if (payload.error) throw new Error(payload.error.message || 'IDEG query error')
         return { layer, url, features: payload.features ?? [] }

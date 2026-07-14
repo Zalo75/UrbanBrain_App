@@ -123,6 +123,7 @@ describe('BetanzosPlanningAdapter', () => {
     expect(Number(maxLat)).toBeCloseTo(43.28002, 6);
     expect(Number(maxLng)).toBeCloseTo(-8.25998, 6);
     expect(crs).toBe('EPSG:4326');
+    expect(requestedUrl.searchParams.get('SRSNAME')).toBe('EPSG:4326');
   });
 
   it('no clasifica un punto situado dentro de un hueco del polígono oficial', async () => {

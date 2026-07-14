@@ -304,6 +304,7 @@ export class BetanzosPlanningAdapter implements PlanningPort {
       REQUEST: 'GetFeature',
       TYPENAME: BETANZOS_REGISTRY.layers.classification,
       MAXFEATURES: '1000',
+      SRSNAME: 'EPSG:4326',
       // WFS 1.1 + EPSG:4326 usa latitud/longitud, verificado contra el servicio oficial.
       BBOX: `${bbox.minLat},${bbox.minLng},${bbox.maxLat},${bbox.maxLng},EPSG:4326`,
     }).toString();
