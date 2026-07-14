@@ -49,6 +49,32 @@ export interface DetectedParcelInput {
       confidence?: 'high' | 'medium' | 'low'
     }>
   } | null
+  manualContext?: {
+    cadastralReference?: string | null
+    municipality?: string | null
+    address?: string | null
+    coordinates?: ParcelCoordinates | null
+    classification?: string | null
+    category?: string | null
+    area?: string | null
+    ordinance?: string | null
+    provenance: 'manual'
+    verification: 'unverified' | 'technician_validated'
+    recordedAt: string
+  } | null
+  reliability?: {
+    mode:
+      | 'current_official'
+      | 'partial_official'
+      | 'previous_official'
+      | 'manual_unverified'
+      | 'technician_validated_manual'
+      | 'unresolved'
+    latestAttemptAt?: string | null
+    officialContextResolvedAt?: string | null
+    usingPreviousOfficialContext?: boolean | null
+    sourceChecks?: Array<{ status: string; message: string }> | null
+  } | null
 }
 
 export interface KnownConstraintInput {
@@ -203,7 +229,13 @@ function addConflict(
 export function buildNormalizedParcelContext(
   input: BuildParcelContextInput
 ): NormalizedParcelContext {
-  const { expediente, detected, constraints = [] } = input
+  const { detected, constraints = [] } = input
+  const manualWithoutMatchingOfficial = Boolean(
+    detected?.manualContext && !detected.reliability?.usingPreviousOfficialContext
+  )
+  const expediente: ParcelExpedienteInput = manualWithoutMatchingOfficial
+    ? { contextoValidadoPorTecnico: false }
+    : input.expediente
   const conversation = extractConversationFacts(input.userMessages ?? [])
   const technicallyValidated = Boolean(expediente.contextoValidadoPorTecnico)
   const expedienteVerification: ParcelContextVerification = technicallyValidated
@@ -232,6 +264,22 @@ export function buildNormalizedParcelContext(
     knownConstraints: [],
     conflicts: [],
     pendingValidation: [],
+    reliability: detected?.reliability
+      ? {
+          mode: detected.reliability.mode,
+          latestAttemptAt: detected.reliability.latestAttemptAt ?? undefined,
+          officialContextResolvedAt:
+            detected.reliability.officialContextResolvedAt ?? undefined,
+          usingPreviousOfficialContext:
+            detected.reliability.usingPreviousOfficialContext ?? false,
+          sourceIssues:
+            detected.reliability.sourceChecks
+              ?.filter((check) =>
+                ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
+              )
+              .map((check) => check.message) ?? [],
+        }
+      : undefined,
   }
 
   const detectedRc = normalizeCadastralReference(detected?.cadastralReference)
@@ -587,6 +635,7 @@ export function buildNormalizedParcelContext(
         'urbanbrain',
         'conversation',
         'territory_catalogue',
+        'manual',
       ].includes(constraint.source ?? '')
         ? (constraint.source as ParcelContextSource)
         : 'expediente',
@@ -595,6 +644,136 @@ export function buildNormalizedParcelContext(
       constraint.source ?? undefined
     )
   )
+
+  const manual = detected?.manualContext
+  const manualVerification: ParcelContextVerification =
+    manual?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
+  const manualConfidence = manual?.verification === 'technician_validated' ? 0.85 : 0.55
+  const manualRc = normalizeCadastralReference(manual?.cadastralReference)
+  if (manualRc && context.cadastralReference) {
+    addConflict(
+      context,
+      'cadastralReference',
+      context.cadastralReference.value,
+      manualRc,
+      'El dato manual no coincide con la referencia del contexto oficial conservado.'
+    )
+  }
+  if (manual?.municipality?.trim() && context.municipality) {
+    addConflict(
+      context,
+      'municipality',
+      context.municipality.value.name,
+      manual.municipality.trim(),
+      'El municipio manual no coincide con el contexto oficial conservado.'
+    )
+  }
+  if (manual?.classification?.trim() && context.landClass) {
+    addConflict(
+      context,
+      'landClass',
+      context.landClass.value,
+      manual.classification.trim(),
+      'La clasificacion manual no coincide con el contexto oficial conservado.'
+    )
+  }
+  if (manual?.ordinance?.trim() && context.qualification) {
+    addConflict(
+      context,
+      'qualification',
+      context.qualification.value,
+      manual.ordinance.trim(),
+      'La ordenanza manual no coincide con el contexto oficial conservado.'
+    )
+  }
+  if (manual?.area?.trim() && context.planningArea) {
+    addConflict(
+      context,
+      'planningArea',
+      context.planningArea.value,
+      manual.area.trim(),
+      'El ambito manual no coincide con el contexto oficial conservado.'
+    )
+  }
+  if (!context.cadastralReference && manualRc) {
+    context.cadastralReference = field(
+      manualRc,
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual?.recordedAt
+    )
+  }
+  if (!context.address && manual?.address?.trim()) {
+    context.address = field(
+      manual.address.trim(),
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (!context.coordinates && manual?.coordinates) {
+    context.coordinates = field(
+      manual.coordinates,
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (!context.municipality && manual?.municipality?.trim()) {
+    context.municipality = field(
+      { name: manual.municipality.trim() },
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (!context.landClass && manual?.classification?.trim()) {
+    context.landClass = field(
+      manual.category?.trim()
+        ? `${manual.classification.trim()} (${manual.category.trim()})`
+        : manual.classification.trim(),
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (!context.qualification && manual?.ordinance?.trim()) {
+    context.qualification = field(
+      manual.ordinance.trim(),
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (!context.planningArea && manual?.area?.trim()) {
+    context.planningArea = field(
+      manual.area.trim(),
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (manual?.verification === 'unverified') {
+    context.canAnswerConcreteParameters = false
+    context.pendingValidation.push(
+      'El contexto incluye datos manuales no verificados; no pueden habilitar parametros urbanisticos concretos.'
+    )
+  }
+  if (context.reliability?.usingPreviousOfficialContext) {
+    context.pendingValidation.push(
+      `Se utiliza el ultimo contexto oficial valido de ${context.reliability.officialContextResolvedAt ?? 'fecha no disponible'} porque el intento mas reciente no pudo completarse.`
+    )
+  }
+  for (const issue of context.reliability?.sourceIssues ?? []) {
+    if (!context.pendingValidation.includes(issue)) context.pendingValidation.push(issue)
+  }
 
   if (!context.cadastralReference && !context.address && !context.coordinates) {
     context.pendingValidation.push(

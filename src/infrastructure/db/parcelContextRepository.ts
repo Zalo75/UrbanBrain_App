@@ -20,6 +20,7 @@ export interface AuthorizedParcelInputs {
   detected: DetectedParcelInput | null
   userMessages: string[]
   constraints: KnownConstraintInput[]
+  latestDetectionRaw?: unknown
 }
 
 export function buildAuthorizedExpedienteQuery(
@@ -50,7 +51,7 @@ export async function loadAuthorizedParcelInputs(
 
   const [latestDetection, history, constraints] = await Promise.all([
     db
-      .select({ summary: contextDetections.summary })
+      .select({ summary: contextDetections.summary, rawResponse: contextDetections.rawResponse })
       .from(contextDetections)
       .where(eq(contextDetections.expedienteId, expedienteId))
       .orderBy(desc(contextDetections.detectedAt))
@@ -106,5 +107,6 @@ export async function loadAuthorizedParcelInputs(
       })),
       ...detectedAffects,
     ],
+    latestDetectionRaw: latestDetection[0]?.rawResponse,
   }
 }

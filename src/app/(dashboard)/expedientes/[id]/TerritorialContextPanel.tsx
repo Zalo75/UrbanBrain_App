@@ -38,6 +38,7 @@ const statusCopy = {
   approximate: { label: 'Aproximado', className: 'bg-sky-100 text-sky-800' },
   conflict: { label: 'Conflictivo', className: 'bg-amber-100 text-amber-900' },
   undetermined: { label: 'No determinado', className: 'bg-zinc-200 text-zinc-800' },
+  provisional: { label: 'Provisional', className: 'bg-violet-100 text-violet-900' },
 } as const;
 
 function confidenceLabel(confidence: TerritorialContextView['confidence']) {
@@ -95,6 +96,67 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 placeholder="14, 18 o 20 caracteres"
               />
             </div>
+            <details className="rounded-md border border-dashed p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                Continuar con datos manuales
+              </summary>
+              <p className="text-muted-foreground mt-2 text-xs">
+                Se guardar&aacute;n como manuales y nunca se presentar&aacute;n como una comprobaci&oacute;n oficial.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2 sm:col-span-2">
+                  <Label htmlFor="territorial-manual-municipality">Municipio conocido</Label>
+                  <Input
+                    id="territorial-manual-municipality"
+                    name="manualMunicipality"
+                    defaultValue={context?.manualContext?.municipality ?? ''}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="territorial-manual-classification">Clasificaci&oacute;n</Label>
+                  <Input
+                    id="territorial-manual-classification"
+                    name="manualClassification"
+                    defaultValue={context?.manualContext?.classification ?? ''}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="territorial-manual-category">Categor&iacute;a</Label>
+                  <Input
+                    id="territorial-manual-category"
+                    name="manualCategory"
+                    defaultValue={context?.manualContext?.category ?? ''}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="territorial-manual-area">N&uacute;cleo o &aacute;mbito</Label>
+                  <Input
+                    id="territorial-manual-area"
+                    name="manualArea"
+                    defaultValue={context?.manualContext?.area ?? ''}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="territorial-manual-ordinance">Ordenanza conocida</Label>
+                  <Input
+                    id="territorial-manual-ordinance"
+                    name="manualOrdinance"
+                    defaultValue={context?.manualContext?.ordinance ?? ''}
+                  />
+                </div>
+                <label className="flex items-start gap-2 text-xs sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    name="technicianValidated"
+                    defaultChecked={
+                      context?.manualContext?.verification === 'technician_validated'
+                    }
+                    className="mt-0.5"
+                  />
+                  Confirmo que un t&eacute;cnico ha revisado expresamente estos datos manuales.
+                </label>
+              </div>
+            </details>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="territorial-lat">Latitud</Label>
@@ -136,14 +198,32 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 {state.message}
               </p>
             )}
-            <Button type="submit" disabled={pending} className="w-full sm:w-auto">
-              {pending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-              {context ? 'Volver a resolver' : 'Resolver contexto'}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                type="submit"
+                name="intent"
+                value="resolve"
+                disabled={pending}
+                className="w-full sm:w-auto"
+              >
+                {pending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+                {context ? 'Reintentar comprobaci\u00f3n' : 'Resolver contexto'}
+              </Button>
+              <Button
+                type="submit"
+                name="intent"
+                value="manual"
+                variant="outline"
+                disabled={pending}
+                className="w-full sm:w-auto"
+              >
+                Guardar manual y continuar
+              </Button>
+            </div>
           </form>
 
           <div className="space-y-4">
@@ -154,6 +234,18 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
               </div>
             ) : (
               <>
+                {(context.usingPreviousOfficialContext || context.manualContext) && (
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 text-violet-950">
+                    <h3 className="text-sm font-semibold">Contexto provisional</h3>
+                    <p className="mt-1 text-xs">
+                      {context.usingPreviousOfficialContext
+                        ? 'La comprobaci\u00f3n m\u00e1s reciente no pudo completarse. Se mantiene el \u00faltimo contexto oficial v\u00e1lido para esta misma parcela.'
+                        : context.manualContext?.verification === 'technician_validated'
+                          ? 'Se muestran datos manuales validados por un t\u00e9cnico, diferenciados de la comprobaci\u00f3n oficial.'
+                          : 'Se muestran datos manuales no verificados. No habilitan par\u00e1metros urban\u00edsticos concretos.'}
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <div className="bg-background rounded-lg border p-3">
                     <p className="text-muted-foreground text-xs">Ubicación</p>
@@ -206,7 +298,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                     </ul>
                   ) : (
                     <p className="text-muted-foreground mt-2 text-sm">
-                      No se detectaron intersecciones positivas.
+                      No hay afecciones positivas confirmadas en las comprobaciones completadas.
                     </p>
                   )}
                   {!context.canRuleOutUndetectedAffects && (
@@ -230,6 +322,20 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                   </div>
                 )}
 
+                {context.sourceChecks.length > 0 && (
+                  <div className="bg-background rounded-lg border p-4">
+                    <h3 className="text-sm font-semibold">Estado de las fuentes oficiales</h3>
+                    <ul className="mt-2 space-y-2 text-xs">
+                      {context.sourceChecks.map((check, index) => (
+                        <li key={`${check.source}-${check.checkedAt}-${index}`}>
+                          <span className="font-medium">{check.source.toUpperCase()}:</span>{' '}
+                          {check.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="bg-background rounded-lg border p-4">
                   <h3 className="text-sm font-semibold">Procedencia</h3>
                   <ul className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
@@ -246,12 +352,30 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                           </span>
                           <ExternalLink className="mt-0.5 h-3 w-3 shrink-0" />
                         </a>
+                        <p className="text-muted-foreground mt-0.5">
+                          Consultado: {new Date(source.retrievedAt).toLocaleString('es-ES')}
+                        </p>
                       </li>
                     ))}
                   </ul>
                   <p className="text-muted-foreground mt-3 text-xs">
-                    Resuelto: {new Date(context.resolvedAt).toLocaleString('es-ES')}
+                    &Uacute;ltimo intento: {new Date(context.latestAttemptAt).toLocaleString('es-ES')}
                   </p>
+                  {context.officialContextResolvedAt && (
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      Contexto oficial utilizado:{' '}
+                      {new Date(context.officialContextResolvedAt).toLocaleString('es-ES')}
+                    </p>
+                  )}
+                  {context.manualContext && (
+                    <p className="mt-2 text-xs text-violet-800">
+                      Procedencia manual · registrado el{' '}
+                      {new Date(context.manualContext.recordedAt).toLocaleString('es-ES')} ·{' '}
+                      {context.manualContext.verification === 'technician_validated'
+                        ? 'validado por t\u00e9cnico'
+                        : 'no verificado'}
+                    </p>
+                  )}
                 </div>
 
                 {!context.canAnswerConcreteParameters && (
