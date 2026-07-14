@@ -1,80 +1,124 @@
-import { db } from '@/infrastructure/db/client';
-import { expedientes, contextDetections } from '@/infrastructure/db/schema';
-import { eq } from 'drizzle-orm';
-import { ContextDetectionResult, IContextDetector, Expediente } from '@/domain/context-engine/types';
-import { CatastroDetector } from './detectors/CatastroDetector';
+import { resolveParcelLocation } from '@/application/territorial-resolver/resolveParcelLocation'
+import type {
+  ResolveParcelLocationInput,
+  TerritorialResolution,
+} from '@/domain/territorial-resolver/types'
+import { db } from '@/infrastructure/db/client'
+import { contextDetections } from '@/infrastructure/db/schema'
+import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository'
+import { CatastroOfficialAdapter } from '@/infrastructure/territorial-resolver/CatastroOfficialAdapter'
+import { CartoCiudadOfficialAdapter } from '@/infrastructure/territorial-resolver/CartoCiudadOfficialAdapter'
+import { DatabasePlanningAdapter } from '@/infrastructure/territorial-resolver/DatabasePlanningAdapter'
+import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/BetanzosPlanningAdapter'
+import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
+import { getMunicipalityByName, getProvinceByName } from '@/shared/territory'
+
+type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
+
+function officialResolver(): Resolver {
+  const dependencies = {
+    catastro: new CatastroOfficialAdapter(),
+    geocoder: new CartoCiudadOfficialAdapter(),
+    planning: new BetanzosPlanningAdapter(new DatabasePlanningAdapter()),
+    affects: new IdegAffectAdapter(),
+  }
+  return (input) => resolveParcelLocation(input, dependencies)
+}
+
+function detectionSummary(result: TerritorialResolution) {
+  const province = getProvinceByName(result.province ?? '')
+  const municipality = getMunicipalityByName(result.municipality ?? '')
+  const landClass =
+    result.planning.classification?.code === 'SU'
+      ? 'urbano'
+      : result.planning.classification?.code === 'SNR'
+        ? 'nucleo_rural'
+        : result.planning.classification?.code === 'SR'
+          ? 'rustico'
+          : undefined
+  return {
+    cadastralReference: result.cadastralReference,
+    provinceId: province?.id,
+    provinceName: result.province,
+    provinceCode: result.provinceCode,
+    municipalityId: municipality?.id,
+    municipalityName: result.municipality,
+    municipalityCode: result.municipalityCode,
+    address: result.normalizedAddress,
+    lat: result.coordinates?.lat,
+    lng: result.coordinates?.lng,
+    parcelGeometry: result.parcelGeometry,
+    locationStatus: result.status,
+    locationConfidence: result.confidence,
+    locationSource: result.evidence.some((item) => item.source === 'catastro')
+      ? 'catastro'
+      : result.evidence.some((item) => item.source === 'cartociudad')
+        ? 'cartociudad'
+        : undefined,
+    planningInstrument: result.planning.instrument,
+    planningStatus: result.planning.applicableInstruments?.some(
+      (instrument) => instrument.status === 'current'
+    )
+      ? 'vigente'
+      : result.planning.status === 'determined'
+        ? 'vigente'
+        : undefined,
+    planningApplicabilityStatus: result.planning.status,
+    planningCanAnswerConcreteParameters: result.planning.canAnswerConcreteParameters ?? false,
+    planningWarnings: result.planning.warnings,
+    planningConflicts: result.planning.conflicts ?? [],
+    planningSource: result.planning.evidence.some((item) => item.source === 'siotuga')
+      ? 'siotuga'
+      : result.planning.status === 'determined'
+        ? 'urbanbrain'
+        : undefined,
+    landClass,
+    planningArea:
+      result.planning.status !== 'conflict' && result.planning.areas?.length === 1
+        ? result.planning.areas[0].name
+        : undefined,
+    warnings: [...result.warnings, ...result.planning.warnings, ...result.affects.warnings],
+    conflicts: result.conflicts,
+    affects: result.affects,
+    resolvedAt: result.resolvedAt,
+  }
+}
 
 export class ContextDetectionEngine {
-  private detectors: IContextDetector[];
+  constructor(private readonly resolver: Resolver = officialResolver()) {}
 
-  constructor() {
-    this.detectors = [
-      new CatastroDetector()
-    ];
+  async detectContext(expedienteId: string, userId: string): Promise<TerritorialResolution | null> {
+    const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
+    if (!authorized) return null
+
+    const result = await this.resolver({
+      cadastralReference: authorized.expediente.refCatastral,
+      coordinates:
+        authorized.expediente.lat !== null && authorized.expediente.lng !== null
+          ? { lat: authorized.expediente.lat!, lng: authorized.expediente.lng! }
+          : undefined,
+      address: authorized.expediente.address,
+      declaredMunicipality: authorized.expediente.municipio,
+    })
+
+    const allEvidence = [
+      ...result.evidence,
+      ...result.planning.evidence,
+      ...result.affects.detected.map((affect) => affect.evidence),
+    ]
+    await db.insert(contextDetections).values({
+      expedienteId,
+      summary: detectionSummary(result),
+      rawResponse: result,
+      geometryStored: Boolean(result.parcelGeometry),
+      sourceApis: [...new Set(allEvidence.map((item) => item.source))],
+    })
+    return result
   }
 
-  // Ejecuta la detección y guarda en base de datos (Para expedientes existentes)
-  public async detectContext(expedienteId: string): Promise<ContextDetectionResult | null> {
-    console.log(`[ContextDetectionEngine] Iniciando motor para expediente: ${expedienteId}`);
-    
-    const [expediente] = await db.select().from(expedientes).where(eq(expedientes.id, expedienteId));
-    
-    if (!expediente) {
-      console.error(`[ContextDetectionEngine] Error: Expediente ${expedienteId} no encontrado.`);
-      return null;
-    }
-
-    const result = await this.runDetectors(expediente as any);
-
-    try {
-      await db.insert(contextDetections).values({
-        expedienteId: expedienteId,
-        summary: result.summary,
-        rawResponse: result.rawResponses,
-        geometryStored: result.geometryStored,
-        sourceApis: result.sourceApis
-      });
-      console.log(`[ContextDetectionEngine] Registro guardado en context_detections correctamente.`);
-    } catch (dbError) {
-      console.error(`[ContextDetectionEngine] Error guardando en base de datos:`, dbError);
-    }
-
-    return result;
-  }
-
-  // Ejecuta la detección al vuelo sin guardar en base de datos (Para previsualización en UI)
-  public async detectStateless(refCatastral: string): Promise<ContextDetectionResult> {
-    console.log(`[ContextDetectionEngine] Iniciando motor stateless para RC: ${refCatastral}`);
-    // Creamos un dummy de expediente para engañar al detector temporalmente
-    const dummyExpediente = { refCatastral } as any;
-    return await this.runDetectors(dummyExpediente);
-  }
-
-  private async runDetectors(expediente: Expediente): Promise<ContextDetectionResult> {
-    let result: ContextDetectionResult = {
-      summary: {},
-      rawResponses: {},
-      errors: {},
-      geometryStored: false,
-      sourceApis: []
-    };
-
-    for (const detector of this.detectors) {
-      console.log(`[ContextDetectionEngine] Ejecutando detector: ${detector.name}...`);
-      const startTime = performance.now();
-      
-      try {
-        result = await detector.detect(expediente, result);
-      } catch (err: any) {
-        console.error(`[ContextDetectionEngine] Fallo catastrófico en detector ${detector.name}:`, err);
-        result.errors[detector.name] = `Fallo crítico: ${err.message}`;
-      }
-      
-      const endTime = performance.now();
-      console.log(`[ContextDetectionEngine] Detector ${detector.name} finalizado en ${(endTime - startTime).toFixed(2)}ms`);
-    }
-
-    console.log(`[ContextDetectionEngine] Pipeline completado. Fuentes consultadas: ${result.sourceApis.join(', ')}`);
-    return result;
+  async detectStateless(
+    input: ResolveParcelLocationInput | string
+  ): Promise<TerritorialResolution> {
+    return this.resolver(typeof input === 'string' ? { cadastralReference: input } : input)
   }
 }
