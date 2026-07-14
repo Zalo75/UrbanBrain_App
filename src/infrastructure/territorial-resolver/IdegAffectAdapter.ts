@@ -7,14 +7,14 @@ import type {
 } from '@/domain/territorial-resolver/types'
 import { fetchOfficial, type FetchLike } from '@/infrastructure/territorial-resolver/officialHttp'
 
-interface LayerDefinition {
+export interface LayerDefinition {
   id: string
   category: string
   name: string
   url: string
 }
 
-const VERIFIED_LAYERS: LayerDefinition[] = [
+export const VERIFIED_AFFECT_LAYERS: LayerDefinition[] = [
   {
     id: 'bic_integral_area',
     category: 'patrimonio_cultural',
@@ -50,6 +50,66 @@ const VERIFIED_LAYERS: LayerDefinition[] = [
     category: 'patrimonio_cultural',
     name: 'Camino de Santiago: ámbito delimitado',
     url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_PatrimonioCultural/MapServer/15/query',
+  },
+  {
+    id: 'natura_2000_zec',
+    category: 'medio_ambiente',
+    name: 'Red Natura 2000: ZEC',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_MedioAmbiente_CN/MapServer/7/query',
+  },
+  {
+    id: 'water_channel_police',
+    category: 'aguas',
+    name: 'Policía de cauces',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Augas/MapServer/1/query',
+  },
+  {
+    id: 'water_preferential_flow',
+    category: 'aguas',
+    name: 'Zona de flujo preferente',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Augas/MapServer/2/query',
+  },
+  {
+    id: 'water_public_domain',
+    category: 'aguas',
+    name: 'Dominio público hidráulico cartografiado',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Augas/MapServer/7/query',
+  },
+  {
+    id: 'road_autonomic_domain_cc',
+    category: 'transporte',
+    name: 'Carretera autonómica: dominio público viario CC',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/7/query',
+  },
+  {
+    id: 'road_autonomic_domain_vac',
+    category: 'transporte',
+    name: 'Carretera autonómica: dominio público viario VAC',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/8/query',
+  },
+  {
+    id: 'road_autonomic_affect_cc',
+    category: 'transporte',
+    name: 'Carretera autonómica: zona de afección CC',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/10/query',
+  },
+  {
+    id: 'road_autonomic_affect_vac',
+    category: 'transporte',
+    name: 'Carretera autonómica: zona de afección VAC',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/11/query',
+  },
+  {
+    id: 'road_state_provincial_area',
+    category: 'transporte',
+    name: 'Área de carretera estatal o provincial',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/16/query',
+  },
+  {
+    id: 'approved_road_project',
+    category: 'transporte',
+    name: 'Proyecto viario aprobado (AXI)',
+    url: 'https://ideg.xunta.gal/servizos/rest/services/PBA/Afeccions_Transporte/MapServer/5/query',
   },
 ]
 
@@ -95,7 +155,7 @@ export class IdegAffectAdapter implements AffectPort {
     private readonly fetcher: FetchLike = fetch,
     private readonly timeoutMs = 8_000,
     private readonly now: () => Date = () => new Date(),
-    private readonly layers: LayerDefinition[] = VERIFIED_LAYERS
+    private readonly layers: LayerDefinition[] = VERIFIED_AFFECT_LAYERS
   ) {}
 
   async findAffects(location: {
@@ -120,7 +180,7 @@ export class IdegAffectAdapter implements AffectPort {
     const states = await Promise.allSettled(
       this.layers.map(async (layer) => {
         const url = new URL(layer.url)
-        url.search = new URLSearchParams({
+        const body = new URLSearchParams({
           f: 'json',
           where: '1=1',
           geometry: spatial.geometry,
@@ -129,8 +189,12 @@ export class IdegAffectAdapter implements AffectPort {
           spatialRel: 'esriSpatialRelIntersects',
           outFields: '*',
           returnGeometry: 'false',
-        }).toString()
-        const response = await fetchOfficial(this.fetcher, 'IDEG', url, this.timeoutMs)
+        })
+        const response = await fetchOfficial(this.fetcher, 'IDEG', url, this.timeoutMs, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body,
+        })
         const payload = (await response.json()) as ArcGisResponse
         if (payload.error) throw new Error(payload.error.message || 'IDEG query error')
         return { layer, url, features: payload.features ?? [] }
@@ -166,7 +230,7 @@ export class IdegAffectAdapter implements AffectPort {
         {
           code: 'partial_affect_coverage',
           message:
-            'La consulta automática sólo cubre capas verificadas de patrimonio cultural; no descarta otras afecciones.',
+            'La consulta automática cubre capas verificadas de patrimonio cultural, Red Natura 2000 ZEC, aguas y transporte; no descarta otras afecciones ni sustituye informes sectoriales.',
         },
         ...(location.geometry
           ? []

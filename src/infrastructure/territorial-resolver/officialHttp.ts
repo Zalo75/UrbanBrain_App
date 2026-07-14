@@ -15,11 +15,12 @@ export async function fetchOfficial(
   fetcher: FetchLike,
   service: string,
   url: URL,
-  timeoutMs: number
+  timeoutMs: number,
+  init: RequestInit = {}
 ) {
   let response: Response
   try {
-    response = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) })
+    response = await fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === 'TimeoutError'
     throw new OfficialServiceError(

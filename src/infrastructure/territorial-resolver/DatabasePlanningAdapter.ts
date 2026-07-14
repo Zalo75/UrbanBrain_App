@@ -4,10 +4,7 @@ import type { PlanningApplicability, PlanningPort } from '@/domain/territorial-r
 import { db } from '@/infrastructure/db/client'
 import { municipalPlanning } from '@/infrastructure/db/schema'
 
-export function buildApplicablePlanningQuery(
-  database: typeof db,
-  municipalityCode: string
-) {
+export function buildApplicablePlanningQuery(database: typeof db, municipalityCode: string) {
   return database
     .select({
       name: municipalPlanning.name,
@@ -26,9 +23,10 @@ export function buildApplicablePlanningQuery(
 }
 
 export class DatabasePlanningAdapter implements PlanningPort {
-  async findApplicablePlanning(
-    municipalityCode: string | undefined
-  ): Promise<PlanningApplicability> {
+  async findApplicablePlanning(location: {
+    municipalityCode?: string
+  }): Promise<PlanningApplicability> {
+    const municipalityCode = location.municipalityCode
     if (!municipalityCode) {
       return {
         status: 'not_determined',

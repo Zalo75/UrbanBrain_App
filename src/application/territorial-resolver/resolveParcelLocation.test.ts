@@ -32,7 +32,15 @@ function parcel(overrides: Partial<CatastroParcel> = {}): CatastroParcel {
     coordinates: { lat: 43.371045, lng: -8.404096 },
     geometry: {
       type: 'MultiPolygon',
-      coordinates: [[[[-8.405, 43.37], [-8.404, 43.37], [-8.405, 43.37]]]],
+      coordinates: [
+        [
+          [
+            [-8.405, 43.37],
+            [-8.404, 43.37],
+            [-8.405, 43.37],
+          ],
+        ],
+      ],
       crs: 'EPSG:4326',
     },
     evidence: [evidence],
@@ -115,6 +123,11 @@ describe('resolveParcelLocation', () => {
     expect(result.parcelGeometry?.type).toBe('MultiPolygon')
     expect(deps.catastro.resolveCoordinates).not.toHaveBeenCalled()
     expect(result.evidence).toEqual([evidence])
+    expect(deps.planning.findApplicablePlanning).toHaveBeenCalledWith({
+      municipalityCode: '15030',
+      coordinates: { lat: 43.371045, lng: -8.404096 },
+      geometry: parcel().geometry,
+    })
   })
 
   it('rechaza una referencia inválida sin consultar servicios externos', async () => {
@@ -157,10 +170,7 @@ describe('resolveParcelLocation', () => {
         reverse: vi.fn(async () => cartoCandidate()),
       },
     })
-    const result = await resolveParcelLocation(
-      { coordinates: { lat: 43.371, lng: -8.404 } },
-      deps
-    )
+    const result = await resolveParcelLocation({ coordinates: { lat: 43.371, lng: -8.404 } }, deps)
     expect(result.status).toBe('probable')
     expect(result.parcelGeometry).toBeUndefined()
     expect(result.warnings.map((item) => item.code)).toContain('point_only_location')
@@ -188,9 +198,7 @@ describe('resolveParcelLocation', () => {
     const result = await resolveParcelLocation({ address: 'dirección exacta' }, deps)
     expect(result.status).toBe('probable')
     expect(result.confidence).toBe('medium')
-    expect(result.warnings.map((item) => item.code)).toContain(
-      'address_not_cadastrally_confirmed'
-    )
+    expect(result.warnings.map((item) => item.code)).toContain('address_not_cadastrally_confirmed')
   })
 
   it('mantiene ambiguos múltiples candidatos y no consulta Catastro', async () => {
@@ -241,10 +249,7 @@ describe('resolveParcelLocation', () => {
         resolveCoordinates: vi.fn(async () => null),
       },
     })
-    const result = await resolveParcelLocation(
-      { cadastralReference: '8424001NJ4082S' },
-      deps
-    )
+    const result = await resolveParcelLocation({ cadastralReference: '8424001NJ4082S' }, deps)
     expect(result.status).toBe('unresolved')
     expect(result.warnings[0].code).toBe('provenance_missing')
   })
@@ -260,10 +265,7 @@ describe('resolveParcelLocation', () => {
           resolveCoordinates: vi.fn(async () => null),
         },
       })
-      const result = await resolveParcelLocation(
-        { cadastralReference: '8424001NJ4082S' },
-        deps
-      )
+      const result = await resolveParcelLocation({ cadastralReference: '8424001NJ4082S' }, deps)
       expect(result.status).toBe('unresolved')
       expect(result.warnings[0].code).toBe('official_service_unavailable')
     }
@@ -282,14 +284,9 @@ describe('resolveParcelLocation', () => {
         reverse: vi.fn(async () => cartoCandidate()),
       },
     })
-    const result = await resolveParcelLocation(
-      { coordinates: { lat: 43.371, lng: -8.404 } },
-      deps
-    )
+    const result = await resolveParcelLocation({ coordinates: { lat: 43.371, lng: -8.404 } }, deps)
     expect(result.status).toBe('probable')
-    expect(result.warnings.map((item) => item.code)).toContain(
-      'catastro_coordinates_unavailable'
-    )
+    expect(result.warnings.map((item) => item.code)).toContain('catastro_coordinates_unavailable')
   })
 
   it('conserva la abstención si no puede determinar planeamiento o zona', async () => {

@@ -54,6 +54,60 @@ describe('buildNormalizedParcelContext', () => {
     expect(context.validity).toBeUndefined()
   })
 
+  it('atribuye clasificación y ámbito detectados a SIOTUGA, no a Catastro', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        landClass: 'nucleo_rural',
+        planningArea: 'O CASTRO DE SAN FIZ',
+        planningSource: 'siotuga',
+      },
+    })
+
+    expect(context.landClass).toMatchObject({ source: 'siotuga', verification: 'confirmed' })
+    expect(context.planningArea).toMatchObject({ source: 'siotuga', verification: 'confirmed' })
+  })
+
+  it('conserva la procedencia IDEG de una afección oficial positiva', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      constraints: [
+        {
+          name: 'aguas: Zona de flujo preferente',
+          source: 'ideg',
+          confidence: 0.95,
+          confirmed: true,
+        },
+      ],
+    })
+
+    expect(context.knownConstraints[0]).toMatchObject({
+      source: 'ideg',
+      verification: 'confirmed',
+      confidence: 0.95,
+    })
+  })
+
+  it('propaga al chat los bloqueos y conflictos del resolver de planeamiento', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        planningApplicabilityStatus: 'conflict',
+        planningWarnings: [
+          { code: 'zoning_missing', message: 'Falta vincular la ordenanza oficial.' },
+        ],
+        planningConflicts: ['La parcela intersecta dos clasificaciones incompatibles.'],
+      },
+    })
+
+    expect(context.pendingValidation).toContain('Falta vincular la ordenanza oficial.')
+    expect(context.conflicts).toContainEqual({
+      field: 'planning',
+      values: [],
+      reason: 'La parcela intersecta dos clasificaciones incompatibles.',
+    })
+  })
+
   it('conserva dirección y municipio resuelto desde el catálogo territorial', () => {
     const context = buildNormalizedParcelContext({
       expediente: { address: 'Rúa Real 1', municipio: 'arteixo', province: 'a_coruna' },
