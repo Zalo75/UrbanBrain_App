@@ -81,6 +81,8 @@ alter table public.expedientes force row level security;
 
 -- RAG storage is not a browser API. V1 remains available through the RPC and
 -- V2 through the server database connection only.
+alter table public.normativa_documents enable row level security;
+alter table public.normativa_documents force row level security;
 alter table public.normativa_chunks enable row level security;
 alter table public.normativa_chunks force row level security;
 alter table public.normative_documents_v2 enable row level security;
@@ -157,6 +159,8 @@ revoke all privileges on table public.organization_members
   from public, anon, authenticated;
 revoke all privileges on table public.expedientes
   from public, anon, authenticated;
+revoke all privileges on table public.normativa_documents
+  from public, anon, authenticated;
 revoke all privileges on table public.normativa_chunks
   from public, anon, authenticated;
 revoke all privileges on table public.normative_documents_v2
@@ -187,6 +191,8 @@ grant select, insert, update, delete on table public.profiles
 grant select, insert, update, delete on table public.organization_members
   to service_role;
 grant select, insert, update, delete on table public.expedientes
+  to service_role;
+grant select, insert, update, delete on table public.normativa_documents
   to service_role;
 grant select, insert, update, delete on table public.normativa_chunks
   to service_role;

@@ -158,6 +158,10 @@ select extensions.ok(
   'authenticated users cannot bypass server-side expediente authorization'
 );
 select extensions.ok(
+  not has_table_privilege('authenticated', 'public.normativa_documents', 'SELECT'),
+  'authenticated users cannot read V1 document metadata directly'
+);
+select extensions.ok(
   not has_table_privilege('authenticated', 'public.normativa_chunks', 'SELECT'),
   'authenticated users cannot read V1 chunks directly'
 );
@@ -233,7 +237,7 @@ select set_config(
   true
 );
 select extensions.results_eq(
-  $$select array_agg(content order by content) from public.chat_messages$$,
+  $$select content from public.chat_messages order by content$$,
   array['fixture B'::text],
   'user B cannot read A chat'
 );
@@ -265,6 +269,10 @@ select extensions.ok(
 select extensions.ok(
   has_table_privilege('service_role', 'public.expediente_afecciones', 'SELECT,INSERT,UPDATE,DELETE'),
   'service_role keeps constraint DML'
+);
+select extensions.ok(
+  has_table_privilege('service_role', 'public.normativa_documents', 'SELECT'),
+  'service_role keeps V1 document metadata access'
 );
 select extensions.ok(
   has_table_privilege('service_role', 'public.normativa_chunks', 'SELECT'),

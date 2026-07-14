@@ -15,6 +15,7 @@ const sensitiveTables = [
   'expediente_afecciones',
   'municipal_planning',
   'afeccion_types',
+  'normativa_documents',
   'normativa_chunks',
   'normative_documents_v2',
   'normative_chunks_v2',
@@ -84,6 +85,7 @@ describe('territorial beta RLS hardening migration', () => {
 
   it('keeps physical RAG storage off the browser Data API', () => {
     for (const table of [
+      'normativa_documents',
       'normativa_chunks',
       'normative_documents_v2',
       'normative_chunks_v2',

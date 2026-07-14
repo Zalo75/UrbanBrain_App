@@ -34,6 +34,8 @@ revoke all privileges on table public.organization_members
   from public, anon, authenticated;
 revoke all privileges on table public.expedientes
   from public, anon, authenticated;
+revoke all privileges on table public.normativa_documents
+  from public, anon, authenticated;
 revoke all privileges on table public.normativa_chunks
   from public, anon, authenticated;
 revoke all privileges on table public.normative_documents_v2

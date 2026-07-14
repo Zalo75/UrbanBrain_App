@@ -20,7 +20,7 @@ The application performs authenticated server actions through `DATABASE_URL`. Th
 | `municipal_planning` | none | global `SELECT` | DML |
 | `afeccion_types` | none | global `SELECT` | DML |
 | authorization roots | none | none | DML |
-| physical RAG tables | none | none | DML/read |
+| physical RAG tables and V1 document metadata | none | none | DML/read |
 | `match_normativa_chunks` | no execute | no execute | execute |
 
 All messages, detections, constraints, catalogue maintenance, updates, and deletes remain server-only. This avoids allowing a client to bypass `/api/chat`, forge generated evidence, or move a row by changing `expediente_id`.
@@ -35,7 +35,7 @@ All messages, detections, constraints, catalogue maintenance, updates, and delet
 - `match_normativa_chunks` remains `SECURITY INVOKER`, receives a fixed safe `search_path`, and is executable only by `service_role`.
 - The migration revokes grants from both `PUBLIC` and the explicit Data API roles before granting the minimum permissions.
 - Authorization roots cannot be mutated through the Data API, preventing fabricated memberships or expedientes.
-- V1/V2 chunks and document metadata cannot be read directly; RAG remains behind the server channel.
+- V1/V2 chunks and document metadata cannot be read directly; the server role retains the V1 metadata access required by `match_normativa_chunks`, and RAG remains behind the server channel.
 
 ## Validation before any production application
 
