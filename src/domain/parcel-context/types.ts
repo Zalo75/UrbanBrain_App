@@ -40,6 +40,7 @@ export interface NormalizedParcelContext {
   planningArea?: ParcelContextField<string>
   planningInstrument?: ParcelContextField<string>
   validity?: ParcelContextField<string>
+  canAnswerConcreteParameters?: boolean
   knownConstraints: Array<ParcelContextField<string>>
   conflicts: ParcelConflict[]
   pendingValidation: string[]

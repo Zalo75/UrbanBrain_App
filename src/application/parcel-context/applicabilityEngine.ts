@@ -178,6 +178,7 @@ export function evaluateApplicability(
 
   const determiningZone = context.qualification ?? context.planningArea
   const requiredFieldsAreConfirmed = Boolean(
+    context.canAnswerConcreteParameters &&
     context.municipality?.verification === 'confirmed' &&
       context.landClass?.verification === 'confirmed' &&
       determiningZone?.verification === 'confirmed' &&
