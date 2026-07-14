@@ -15,7 +15,19 @@ function completeContext(): NormalizedParcelContext {
       planeamiento: 'PXOM de Arteixo',
       contextoValidadoPorTecnico: true,
     },
-    detected: { planningStatus: 'vigente' },
+    detected: {
+      municipalityName: 'Arteixo',
+      municipalityId: 'arteixo',
+      locationSource: 'catastro',
+      locationStatus: 'confirmed',
+      locationConfidence: 'high',
+      landClass: 'urbano_consolidado',
+      planningInstrument: 'PXOM de Arteixo',
+      planningSource: 'siotuga',
+      planningStatus: 'vigente',
+      planningApplicabilityStatus: 'determined',
+      planningCanAnswerConcreteParameters: true,
+    },
   })
 }
 
@@ -83,6 +95,32 @@ describe('evaluateApplicability', () => {
 
     expect(result.status).toBe('PARCIAL')
     expect(result.missingData).toContain('confirmación técnica del régimen urbanístico aplicable')
+    expect(result.canAnswerConcreteParameters).toBe(false)
+  })
+
+  it('mantiene el bloqueo del resolver aunque los campos manuales parezcan completos', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: '1234567NH4913S0001AB',
+        municipio: 'arteixo',
+        landClass: 'urbano_consolidado',
+        urbanPlanningZone: 'Z-4',
+        planeamiento: 'PXOM de Arteixo',
+        contextoValidadoPorTecnico: true,
+      },
+      detected: {
+        municipalityName: 'Arteixo',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: false,
+      },
+    })
+
+    const result = evaluateApplicability(context, [candidate()], true)
+
+    expect(result.status).toBe('PARCIAL')
     expect(result.canAnswerConcreteParameters).toBe(false)
   })
 

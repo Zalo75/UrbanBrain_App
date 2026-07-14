@@ -5,7 +5,10 @@ import OpenAI from 'openai';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
-import { buildNormalizedParcelContext } from '@/application/parcel-context/normalizeParcelContext';
+import {
+  buildNormalizedParcelContext,
+  trustedMunicipalityFilter,
+} from '@/application/parcel-context/normalizeParcelContext';
 import {
   evaluateApplicability,
   requiresDeterminedParcelRegime,
@@ -117,7 +120,9 @@ export async function POST(req: NextRequest) {
       ...parcelInputs,
       userMessages: [...parcelInputs.userMessages, message],
     });
-    const municipio = parcelContext.municipality?.value.name ?? '';
+    // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
+    const municipio =
+      trustedMunicipalityFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
 
     // Guardar mensaje del usuario

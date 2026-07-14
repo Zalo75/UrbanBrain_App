@@ -21,6 +21,7 @@ export interface ParcelExpedienteInput {
 }
 
 export interface DetectedParcelInput {
+  cadastralReference?: string | null
   provinceId?: string | null
   provinceName?: string | null
   municipalityId?: string | null
@@ -37,6 +38,8 @@ export interface DetectedParcelInput {
   planningSource?: 'siotuga' | 'urbanbrain' | null
   planningApplicabilityStatus?: 'determined' | 'partial' | 'conflict' | 'not_determined' | null
   planningCanAnswerConcreteParameters?: boolean | null
+  locationStatus?: 'confirmed' | 'probable' | 'ambiguous' | 'unresolved' | null
+  locationConfidence?: 'high' | 'medium' | 'low' | null
   planningWarnings?: Array<{ code: string; message: string }> | null
   planningConflicts?: string[] | null
   affects?: {
@@ -208,19 +211,35 @@ export function buildNormalizedParcelContext(
     : 'unverified'
   const expedienteConfidence = technicallyValidated ? 0.98 : 0.78
   const detectedLocationSource = detected?.locationSource ?? 'catastro'
-  const detectedLocationConfidence = detectedLocationSource === 'catastro' ? 0.92 : 0.76
+  const detectedLocationConfidence =
+    detected?.locationConfidence === 'high'
+      ? 0.95
+      : detected?.locationConfidence === 'medium'
+        ? 0.78
+        : detectedLocationSource === 'catastro'
+          ? 0.82
+          : 0.68
+  const hasConfirmedOfficialLocation = Boolean(
+    detectedLocationSource === 'catastro' &&
+      detected?.locationStatus === 'confirmed' &&
+      detected?.locationConfidence === 'high'
+  )
   const detectedLocationVerification: ParcelContextVerification =
-    detectedLocationSource === 'catastro' ? 'confirmed' : 'inferred'
+    hasConfirmedOfficialLocation ? 'confirmed' : 'inferred'
 
   const context: NormalizedParcelContext = {
+    canAnswerConcreteParameters: detected?.planningCanAnswerConcreteParameters === true,
     knownConstraints: [],
     conflicts: [],
     pendingValidation: [],
   }
 
+  const detectedRc = normalizeCadastralReference(detected?.cadastralReference)
   const expedienteRc = normalizeCadastralReference(expediente.refCatastral)
   const conversationRc = conversation.cadastralReference
-  if (expedienteRc) {
+  if (detectedRc && hasConfirmedOfficialLocation) {
+    context.cadastralReference = field(detectedRc, 'catastro', 0.98, 'confirmed')
+  } else if (expedienteRc) {
     context.cadastralReference = field(
       expedienteRc,
       'expediente',
@@ -237,6 +256,15 @@ export function buildNormalizedParcelContext(
       expedienteRc,
       conversationRc,
       'La conversación y el expediente indican referencias distintas.'
+    )
+  }
+  if (detectedRc && expedienteRc) {
+    addConflict(
+      context,
+      'cadastralReference',
+      detectedRc,
+      expedienteRc,
+      'Catastro y el expediente indican referencias catastrales distintas.'
     )
   }
 
@@ -313,12 +341,22 @@ export function buildNormalizedParcelContext(
   const knownMunicipality = municipalityId
     ? allMunicipalities.find((municipality) => municipality.id === municipalityId)
     : undefined
-  if (municipalityName) {
+  if (detected?.municipalityName?.trim() && hasConfirmedOfficialLocation) {
+    context.municipality = field(
+      {
+        id: detected.municipalityId ?? undefined,
+        name: detected.municipalityName.trim(),
+      },
+      'catastro',
+      detectedLocationConfidence,
+      'confirmed'
+    )
+  } else if (municipalityName) {
     context.municipality = field(
       { id: municipalityId, name: municipalityName, ineCode: knownMunicipality?.ineCode },
       'expediente',
-      expedienteConfidence,
-      expedienteVerification
+      Math.min(expedienteConfidence, 0.78),
+      'unverified'
     )
   } else if (detected?.municipalityName?.trim()) {
     context.municipality = field(
@@ -384,13 +422,22 @@ export function buildNormalizedParcelContext(
     )
   }
 
-  const landClass = expediente.landClass || detected?.landClass || conversation.landClass
+  const hasOfficialPlanningClass = Boolean(
+    detected?.landClass &&
+      detected.planningSource === 'siotuga' &&
+      detected.planningApplicabilityStatus !== 'conflict'
+  )
+  const landClass = hasOfficialPlanningClass
+    ? detected?.landClass
+    : expediente.landClass || detected?.landClass || conversation.landClass
   if (landClass && landClass !== 'desconocido') {
-    const source = expediente.landClass
-      ? 'expediente'
-      : detected?.landClass
-        ? (detected.planningSource ?? 'urbanbrain')
-        : 'conversation'
+    const source = hasOfficialPlanningClass
+      ? 'siotuga'
+      : expediente.landClass
+        ? 'expediente'
+        : detected?.landClass
+          ? (detected.planningSource ?? 'urbanbrain')
+          : 'conversation'
     context.landClass = field(
       landClass,
       source,
@@ -478,14 +525,27 @@ export function buildNormalizedParcelContext(
     )
   }
 
-  const planningInstrument = expediente.planeamiento?.trim() || detected?.planningInstrument?.trim()
+  const hasOfficialPlanningInstrument = Boolean(
+    detected?.planningInstrument?.trim() && detected.planningSource === 'siotuga'
+  )
+  const planningInstrument = hasOfficialPlanningInstrument
+    ? detected?.planningInstrument?.trim()
+    : expediente.planeamiento?.trim() || detected?.planningInstrument?.trim()
   if (planningInstrument) {
     const detectedPlanningSource = detected?.planningSource ?? 'urbanbrain'
     context.planningInstrument = field(
       planningInstrument,
-      expediente.planeamiento ? 'expediente' : detectedPlanningSource,
-      expediente.planeamiento ? expedienteConfidence : 0.9,
-      expediente.planeamiento ? expedienteVerification : 'confirmed'
+      hasOfficialPlanningInstrument
+        ? detectedPlanningSource
+        : expediente.planeamiento
+          ? 'expediente'
+          : detectedPlanningSource,
+      hasOfficialPlanningInstrument ? 0.9 : expediente.planeamiento ? expedienteConfidence : 0.9,
+      hasOfficialPlanningInstrument
+        ? 'confirmed'
+        : expediente.planeamiento
+          ? expedienteVerification
+          : 'confirmed'
     )
   }
   if (expediente.planeamiento?.trim() && detected?.planningInstrument?.trim()) {
@@ -558,6 +618,11 @@ export function buildNormalizedParcelContext(
   if (!context.validity) {
     context.pendingValidation.push('Falta verificar la vigencia del instrumento aplicable.')
   }
+  if (!context.canAnswerConcreteParameters) {
+    context.pendingValidation.push(
+      'El resolver territorial no ha confirmado un régimen inequívoco para responder parámetros urbanísticos concretos.'
+    )
+  }
 
   for (const planningWarning of detected?.planningWarnings ?? []) {
     if (!context.pendingValidation.includes(planningWarning.message)) {
@@ -573,4 +638,16 @@ export function buildNormalizedParcelContext(
   }
 
   return context
+}
+
+export function trustedMunicipalityFilter(context: NormalizedParcelContext): string | null {
+  const municipality = context.municipality
+  if (
+    municipality?.source !== 'catastro' ||
+    municipality.verification !== 'confirmed' ||
+    municipality.confidence < 0.9
+  ) {
+    return null
+  }
+  return municipality.value.name
 }

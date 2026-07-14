@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildNormalizedParcelContext } from './normalizeParcelContext'
+import {
+  buildNormalizedParcelContext,
+  trustedMunicipalityFilter,
+} from './normalizeParcelContext'
 
 describe('buildNormalizedParcelContext', () => {
   it('normaliza una referencia catastral válida y conserva su procedencia', () => {
@@ -161,5 +164,37 @@ describe('buildNormalizedParcelContext', () => {
     expect(context.conflicts).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'municipality' })])
     )
+  })
+
+  it('prioriza el municipio confirmado por Catastro sobre el seleccionado en el navegador', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { municipio: 'a_coruna', contextoValidadoPorTecnico: true },
+      detected: {
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+      },
+    })
+
+    expect(context.municipality).toMatchObject({
+      value: { name: 'Betanzos' },
+      source: 'catastro',
+      verification: 'confirmed',
+    })
+    expect(trustedMunicipalityFilter(context)).toBe('Betanzos')
+    expect(context.conflicts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'municipality' })])
+    )
+  })
+
+  it('no usa un municipio manual como filtro RAG autorizado', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { municipio: 'a_coruna', contextoValidadoPorTecnico: true },
+    })
+
+    expect(context.municipality?.verification).toBe('unverified')
+    expect(trustedMunicipalityFilter(context)).toBeNull()
   })
 })

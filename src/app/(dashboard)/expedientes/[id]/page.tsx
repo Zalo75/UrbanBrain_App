@@ -1,14 +1,16 @@
 import { redirect } from 'next/navigation'
 import { db } from '@/infrastructure/db/client'
-import { documents } from '@/infrastructure/db/schema'
+import { contextDetections, documents } from '@/infrastructure/db/schema'
 import { eq, desc } from 'drizzle-orm'
-import { MapPin, Settings, MessageSquare, AlertCircle } from 'lucide-react'
+import { MapPin, Settings, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DocumentList } from './DocumentList'
 import { formatLocationSource, formatLandClass, formatActionType } from '@/shared/utils/formatters'
 import { getProvinceNameById, getMunicipalityNameById } from '@/shared/territory'
 import { ChatInterface } from './ChatInterface'
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
+import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
+import { TerritorialContextPanel } from './TerritorialContextPanel'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -27,11 +29,22 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
   const { expediente, orgId } = access
 
-  const expedienteDocs = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.expedienteId, expediente.id))
-    .orderBy(desc(documents.uploadedAt))
+  const [expedienteDocs, latestDetections] = await Promise.all([
+    db
+      .select()
+      .from(documents)
+      .where(eq(documents.expedienteId, expediente.id))
+      .orderBy(desc(documents.uploadedAt)),
+    db
+      .select({ rawResponse: contextDetections.rawResponse })
+      .from(contextDetections)
+      .where(eq(contextDetections.expedienteId, expediente.id))
+      .orderBy(desc(contextDetections.detectedAt))
+      .limit(1),
+  ])
+  const territorialContext = buildTerritorialContextView(
+    latestDetections[0]?.rawResponse ?? null
+  )
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
@@ -67,6 +80,17 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           </Button>
         </div>
       </div>
+
+      <TerritorialContextPanel
+        expedienteId={expediente.id}
+        initialInput={{
+          cadastralReference: expediente.refCatastral,
+          address: expediente.address,
+          lat: expediente.lat,
+          lng: expediente.lng,
+        }}
+        context={territorialContext}
+      />
 
       {/* Workspace Layout: Split Screen */}
       <div className="flex flex-1 overflow-hidden">
