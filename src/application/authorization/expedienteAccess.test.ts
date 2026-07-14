@@ -74,7 +74,7 @@ describe('getExpedienteAccess', () => {
       municipio: 'a_coruna',
     }
     mocks.getUserId.mockResolvedValue('user-org-a')
-    mocks.limit.mockResolvedValue([{ expediente }])
+    mocks.limit.mockResolvedValue([{ expediente, membershipRole: 'member' }])
 
     const result = await getExpedienteAccess('expediente-org-a')
 
@@ -82,6 +82,7 @@ describe('getExpedienteAccess', () => {
       ok: true,
       userId: 'user-org-a',
       orgId: 'org-a',
+      membershipRole: 'member',
       expediente,
     })
   })

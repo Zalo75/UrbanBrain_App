@@ -114,4 +114,19 @@ describe('IdegAffectAdapter', () => {
     })
     expect(result.warnings.map((warning) => warning.code)).toContain('affect_sources_unavailable')
   })
+
+  it('no convierte una respuesta malformada en ausencia de afecciones', async () => {
+    const fetcher = vi.fn(
+      async () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 })
+    )
+    const result = await new IdegAffectAdapter(fetcher, 1000, () => new Date(), [
+      layer,
+    ]).findAffects({ coordinates: { lat: 43.37, lng: -8.4 } })
+
+    expect(result.detected).toEqual([])
+    expect(result.canRuleOutUndetectedAffects).toBe(false)
+    expect(result.sourceChecks).toContainEqual(
+      expect.objectContaining({ source: 'ideg', status: 'malformed' })
+    )
+  })
 })

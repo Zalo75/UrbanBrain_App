@@ -5,7 +5,12 @@ import type {
   TerritorialAffect,
   TerritorialCoordinates,
 } from '@/domain/territorial-resolver/types'
-import { fetchOfficial, type FetchLike } from '@/infrastructure/territorial-resolver/officialHttp'
+import {
+  fetchOfficial,
+  OfficialServiceError,
+  officialFailureKind,
+  type FetchLike,
+} from '@/infrastructure/territorial-resolver/officialHttp'
 
 export interface LayerDefinition {
   id: string
@@ -195,9 +200,20 @@ export class IdegAffectAdapter implements AffectPort {
           headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },
           body,
         })
-        const payload = (await response.json()) as ArcGisResponse
-        if (payload.error) throw new Error(payload.error.message || 'IDEG query error')
-        return { layer, url, features: payload.features ?? [] }
+        let payload: ArcGisResponse
+        try {
+          payload = (await response.json()) as ArcGisResponse
+        } catch {
+          throw new OfficialServiceError('IDEG', 'malformed', 'IDEG devolvio una respuesta no valida.')
+        }
+        if (payload.error || !Array.isArray(payload.features)) {
+          throw new OfficialServiceError(
+            'IDEG',
+            'malformed',
+            'IDEG devolvio una respuesta con estructura inesperada.'
+          )
+        }
+        return { layer, url, features: payload.features }
       })
     )
 
@@ -221,11 +237,37 @@ export class IdegAffectAdapter implements AffectPort {
       }))
     })
     const failures = states.filter((state) => state.status === 'rejected').length
+    const failureKinds = states.flatMap((state) =>
+      state.status === 'rejected' ? [officialFailureKind(state.reason)] : []
+    )
+    const sourceStatus =
+      failures === 0
+        ? 'available'
+        : failures < states.length
+          ? 'partial'
+          : failureKinds.every((kind) => kind === 'timeout')
+            ? 'timeout'
+            : failureKinds.some((kind) => kind === 'malformed')
+              ? 'malformed'
+              : 'unavailable'
 
     return {
       analysisGeometry: location.geometry ? 'parcel' : 'point',
       detected,
       canRuleOutUndetectedAffects: false,
+      sourceChecks: [
+        {
+          source: 'ideg',
+          status: sourceStatus,
+          checkedAt: retrievedAt,
+          message:
+            failures === 0
+              ? 'IDEG respondio correctamente para las capas verificadas.'
+              : failures < states.length
+                ? 'IDEG solo pudo comprobar parte de las capas oficiales; el resultado es incompleto.'
+                : 'IDEG no esta respondiendo correctamente; no puede descartarse ninguna afeccion.',
+        },
+      ],
       warnings: [
         {
           code: 'partial_affect_coverage',

@@ -7,6 +7,7 @@ export type ParcelContextSource =
   | 'urbanbrain'
   | 'conversation'
   | 'territory_catalogue'
+  | 'manual'
 
 export type ParcelContextVerification = 'confirmed' | 'unverified' | 'inferred'
 
@@ -44,6 +45,19 @@ export interface NormalizedParcelContext {
   knownConstraints: Array<ParcelContextField<string>>
   conflicts: ParcelConflict[]
   pendingValidation: string[]
+  reliability?: {
+    mode:
+      | 'current_official'
+      | 'partial_official'
+      | 'previous_official'
+      | 'manual_unverified'
+      | 'technician_validated_manual'
+      | 'unresolved'
+    latestAttemptAt?: string
+    officialContextResolvedAt?: string
+    usingPreviousOfficialContext?: boolean
+    sourceIssues: string[]
+  }
 }
 
 export type ApplicabilityStatus =

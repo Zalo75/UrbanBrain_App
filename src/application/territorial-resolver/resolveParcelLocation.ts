@@ -6,12 +6,16 @@ import type {
   PlanningApplicability,
   PlanningPort,
   ResolveParcelLocationInput,
+  OfficialSource,
+  OfficialSourceCheck,
+  OfficialSourceCheckStatus,
   TerritorialAffect,
   TerritorialCoordinates,
   TerritorialLocationCandidate,
   TerritorialResolution,
   TerritorialWarning,
 } from '@/domain/territorial-resolver/types'
+import { officialFailureKind } from '@/infrastructure/territorial-resolver/officialHttp'
 
 const GALICIA_BOUNDS = { minLat: 41.8, maxLat: 43.9, minLng: -9.4, maxLng: -6.7 }
 
@@ -77,6 +81,46 @@ function warning(code: string, message: string): TerritorialWarning {
   return { code, message }
 }
 
+const SOURCE_LABELS: Record<OfficialSource, string> = {
+  catastro: 'Catastro',
+  cartociudad: 'CartoCiudad',
+  siotuga: 'SIOTUGA',
+  ideg: 'IDEG',
+}
+
+function sourceCheck(
+  source: OfficialSource,
+  status: OfficialSourceCheckStatus,
+  checkedAt: string,
+  message?: string
+): OfficialSourceCheck {
+  const label = SOURCE_LABELS[source]
+  const defaultMessage: Record<OfficialSourceCheckStatus, string> = {
+    available: `${label} respondio correctamente.`,
+    partial: `${label} solo pudo completar parte de la comprobacion.`,
+    timeout: `${label} esta tardando mas de lo esperado. La comprobacion queda pendiente.`,
+    unavailable: `${label} no esta respondiendo correctamente en este momento.`,
+    malformed: `${label} devolvio una respuesta que no puede validarse con suficiente fiabilidad.`,
+    not_found: `${label} respondio correctamente, pero no encontro el dato consultado.`,
+    ambiguous: `${label} devolvio varios resultados posibles que requieren seleccion.`,
+    conflict: `${label} devolvio datos incompatibles que requieren revision.`,
+  }
+  return { source, status, checkedAt, message: message ?? defaultMessage[status] }
+}
+
+function failedSourceCheck(
+  source: OfficialSource,
+  error: unknown,
+  checkedAt: string
+): OfficialSourceCheck {
+  const kind = officialFailureKind(error)
+  return sourceCheck(
+    source,
+    kind === 'timeout' ? 'timeout' : kind === 'malformed' ? 'malformed' : 'unavailable',
+    checkedAt
+  )
+}
+
 function emptyPlanning(message: string): PlanningApplicability {
   return {
     status: 'not_determined',
@@ -106,6 +150,7 @@ function baseResolution(
     evidence: [],
     warnings: [],
     conflicts: [],
+    sourceChecks: [],
     planning: emptyPlanning('No se ha resuelto un municipio oficial.'),
     affects: emptyAffects('No se ha resuelto una localización consultable.'),
     resolvedAt: now.toISOString(),
@@ -120,7 +165,9 @@ function applyParcel(result: TerritorialResolution, parcel: CatastroParcel) {
     return false
   }
   result.status = 'confirmed'
-  result.confidence = 'high'
+  result.confidence = parcel.sourceChecks?.some((check) => check.status !== 'available')
+    ? 'medium'
+    : 'high'
   result.cadastralReference = parcel.cadastralReference
   result.normalizedAddress = parcel.normalizedAddress
   result.municipality = parcel.municipality
@@ -130,6 +177,9 @@ function applyParcel(result: TerritorialResolution, parcel: CatastroParcel) {
   result.coordinates = parcel.coordinates
   result.parcelGeometry = parcel.geometry
   result.evidence.push(...parcel.evidence)
+  result.sourceChecks!.push(
+    ...(parcel.sourceChecks ?? [sourceCheck('catastro', 'available', result.resolvedAt)])
+  )
   if (!parcel.geometry) {
     result.warnings.push(
       warning(
@@ -162,11 +212,17 @@ async function addApplicability(
   else {
     result.planning = emptyPlanning('La consulta de planeamiento no está disponible temporalmente.')
   }
+  if (planning.status === 'rejected') {
+    result.planning.sourceChecks = [failedSourceCheck('siotuga', planning.reason, result.resolvedAt)]
+  }
   if (affects.status === 'fulfilled') result.affects = affects.value
   else {
     result.affects = emptyAffects(
       'La consulta oficial de afecciones no está disponible temporalmente.'
     )
+  }
+  if (affects.status === 'rejected') {
+    result.affects.sourceChecks = [failedSourceCheck('ideg', affects.reason, result.resolvedAt)]
   }
 }
 
@@ -180,13 +236,16 @@ async function resolveByReference(
   let parcel: CatastroParcel | null
   try {
     parcel = await dependencies.catastro.resolveReference(parcelReference(reference))
-  } catch {
+  } catch (error) {
+    const check = failedSourceCheck('catastro', error, result.resolvedAt)
+    result.sourceChecks!.push(check)
     result.warnings.push(
       warning('official_service_unavailable', 'Catastro no está disponible temporalmente.')
     )
     return result
   }
   if (!parcel) {
+    result.sourceChecks!.push(sourceCheck('catastro', 'not_found', result.resolvedAt))
     result.warnings.push(
       warning(
         'cadastral_reference_not_found',
@@ -238,6 +297,7 @@ async function resolveByReference(
   }
 
   if (result.conflicts.length) {
+    result.sourceChecks!.push(sourceCheck('catastro', 'conflict', result.resolvedAt))
     result.warnings.push(
       warning('input_conflict', 'Existen discrepancias que requieren revisión técnica.')
     )
@@ -269,7 +329,9 @@ async function resolveByCoordinates(
   let reference: string | null = null
   try {
     reference = await dependencies.catastro.resolveCoordinates(coordinates)
-  } catch {
+  } catch (error) {
+    const check = failedSourceCheck('catastro', error, result.resolvedAt)
+    result.sourceChecks!.push(check)
     result.warnings.push(
       warning(
         'catastro_coordinates_unavailable',
@@ -284,12 +346,17 @@ async function resolveByCoordinates(
       return resolved
     }
     result.warnings.push(...resolved.warnings)
+    result.sourceChecks!.push(...(resolved.sourceChecks ?? []))
+  } else if (!result.sourceChecks!.some((check) => check.source === 'catastro')) {
+    result.sourceChecks!.push(sourceCheck('catastro', 'not_found', result.resolvedAt))
   }
 
   let candidate: TerritorialLocationCandidate | null = null
   try {
     candidate = await dependencies.geocoder.reverse(coordinates)
-  } catch {
+  } catch (error) {
+    const check = failedSourceCheck('cartociudad', error, result.resolvedAt)
+    result.sourceChecks!.push(check)
     result.warnings.push(
       warning(
         'geocoder_unavailable',
@@ -301,6 +368,7 @@ async function resolveByCoordinates(
   result.status = candidate ? 'probable' : 'unresolved'
   result.confidence = candidate ? 'medium' : 'low'
   if (candidate) {
+    result.sourceChecks!.push(sourceCheck('cartociudad', 'available', result.resolvedAt))
     result.normalizedAddress = candidate.normalizedAddress
     result.municipality = candidate.municipality
     result.municipalityCode = candidate.municipalityCode
@@ -330,7 +398,9 @@ async function resolveByAddress(
     candidates = (await dependencies.geocoder.geocode(address)).filter(
       (candidate) => !candidate.coordinates || isInGalicia(candidate.coordinates)
     )
-  } catch {
+  } catch (error) {
+    const check = failedSourceCheck('cartociudad', error, result.resolvedAt)
+    result.sourceChecks!.push(check)
     result.warnings.push(
       warning('geocoder_unavailable', 'La geocodificación no está disponible temporalmente.')
     )
@@ -341,6 +411,13 @@ async function resolveByAddress(
 
   if (candidates.length !== 1) {
     result.status = candidates.length > 1 ? 'ambiguous' : 'unresolved'
+    result.sourceChecks!.push(
+      sourceCheck(
+        'cartociudad',
+        candidates.length > 1 ? 'ambiguous' : 'not_found',
+        result.resolvedAt
+      )
+    )
     result.warnings.push(
       warning(
         candidates.length > 1 ? 'ambiguous_address' : 'address_not_found',
@@ -353,13 +430,16 @@ async function resolveByAddress(
   }
 
   const candidate = candidates[0]
+  result.sourceChecks!.push(sourceCheck('cartociudad', 'available', result.resolvedAt))
   if (candidate.cadastralReference) {
     let parcel: CatastroParcel | null = null
     try {
       parcel = await dependencies.catastro.resolveReference(
         parcelReference(candidate.cadastralReference)
       )
-    } catch {
+    } catch (error) {
+      const check = failedSourceCheck('catastro', error, result.resolvedAt)
+      result.sourceChecks!.push(check)
       result.warnings.push(
         warning(
           'catastro_confirmation_unavailable',
