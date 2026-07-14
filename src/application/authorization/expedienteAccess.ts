@@ -6,12 +6,14 @@ import { db } from '@/infrastructure/db/client'
 import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
 
 type Expediente = InferSelectModel<typeof expedientes>
+type MembershipRole = InferSelectModel<typeof organizationMembers>['role']
 
 export type ExpedienteAccessResult =
   | {
       ok: true
       userId: string
       orgId: string
+      membershipRole: MembershipRole
       expediente: Expediente
     }
   | {
@@ -25,7 +27,7 @@ export function buildExpedienteAccessQuery(
   userId: string
 ) {
   return database
-    .select({ expediente: expedientes })
+    .select({ expediente: expedientes, membershipRole: organizationMembers.role })
     .from(expedientes)
     .innerJoin(
       organizationMembers,
@@ -61,6 +63,7 @@ export async function getExpedienteAccess(
     ok: true,
     userId,
     orgId: result.expediente.orgId,
+    membershipRole: result.membershipRole,
     expediente: result.expediente,
   }
 }

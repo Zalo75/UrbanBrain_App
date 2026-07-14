@@ -84,10 +84,11 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
       <TerritorialContextPanel
         expedienteId={expediente.id}
         initialInput={{
-          cadastralReference: expediente.refCatastral,
-          address: expediente.address,
-          lat: expediente.lat,
-          lng: expediente.lng,
+          cadastralReference:
+            territorialContext?.manualContext?.cadastralReference ?? expediente.refCatastral,
+          address: territorialContext?.manualContext?.address ?? expediente.address,
+          lat: territorialContext?.manualContext?.coordinates?.lat ?? expediente.lat,
+          lng: territorialContext?.manualContext?.coordinates?.lng ?? expediente.lng,
         }}
         context={territorialContext}
       />

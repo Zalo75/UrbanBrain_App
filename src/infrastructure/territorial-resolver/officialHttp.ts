@@ -11,6 +11,10 @@ export class OfficialServiceError extends Error {
   }
 }
 
+export function officialFailureKind(error: unknown): OfficialServiceError['kind'] {
+  return error instanceof OfficialServiceError ? error.kind : 'unavailable'
+}
+
 export async function fetchOfficial(
   fetcher: FetchLike,
   service: string,
@@ -22,7 +26,8 @@ export async function fetchOfficial(
   try {
     response = await fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
   } catch (error) {
-    const isTimeout = error instanceof Error && error.name === 'TimeoutError'
+    const isTimeout =
+      error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
     throw new OfficialServiceError(
       service,
       isTimeout ? 'timeout' : 'unavailable',

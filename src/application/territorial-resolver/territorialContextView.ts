@@ -1,10 +1,16 @@
 import type {
   TerritorialEvidence,
+  ManualTerritorialContext,
+  OfficialSourceCheck,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types';
+import {
+  allSourceChecks,
+  officialContextForUse,
+} from '@/application/territorial-resolver/territorialContinuity';
 
 export interface TerritorialContextView {
-  status: 'confirmed' | 'approximate' | 'conflict' | 'undetermined';
+  status: 'confirmed' | 'approximate' | 'provisional' | 'conflict' | 'undetermined';
   confidence: TerritorialResolution['confidence'];
   resolvedAt: string;
   inputMethod: TerritorialResolution['inputMethod'];
@@ -22,6 +28,11 @@ export interface TerritorialContextView {
   canAnswerConcreteParameters: boolean;
   canRuleOutUndetectedAffects: false;
   candidateCount: number;
+  latestAttemptAt: string;
+  officialContextResolvedAt?: string;
+  usingPreviousOfficialContext: boolean;
+  manualContext?: Omit<ManualTerritorialContext, 'validatedBy'>;
+  sourceChecks: OfficialSourceCheck[];
 }
 
 function isTerritorialResolution(value: unknown): value is TerritorialResolution {
@@ -47,22 +58,37 @@ function isTerritorialResolution(value: unknown): value is TerritorialResolution
 export function buildTerritorialContextView(value: unknown): TerritorialContextView | null {
   if (!isTerritorialResolution(value)) return null;
   const result = value;
+  const effective = officialContextForUse(result);
+  const manual = result.continuity?.manualContext;
+  const sourceChecks = allSourceChecks(result);
+  const incompleteSource = sourceChecks.some((check) =>
+    ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
+  );
   const conflicts = [
     ...result.conflicts.map((conflict) => conflict.reason),
-    ...(result.planning.conflicts ?? []),
+    ...(effective?.planning.conflicts ?? result.planning.conflicts ?? []),
   ];
   const status =
     conflicts.length || result.planning.status === 'conflict'
       ? 'conflict'
-      : result.status === 'confirmed'
+      : manual || result.continuity?.usingPreviousOfficialContext || incompleteSource
+        ? 'provisional'
+      : effective?.status === 'confirmed'
         ? 'confirmed'
-        : result.status === 'probable' || result.status === 'ambiguous'
+        : effective?.status === 'probable' || result.status === 'ambiguous'
           ? 'approximate'
           : 'undetermined';
   const evidence = [
     ...result.evidence,
     ...result.planning.evidence,
     ...result.affects.detected.map((affect) => affect.evidence),
+    ...(effective && effective !== result
+      ? [
+          ...effective.evidence,
+          ...effective.planning.evidence,
+          ...effective.affects.detected.map((affect) => affect.evidence),
+        ]
+      : []),
   ];
   const sources = [
     ...new Map(
@@ -72,17 +98,28 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
 
   return {
     status,
-    confidence: result.confidence,
+    confidence: effective?.confidence ?? result.confidence,
     resolvedAt: result.resolvedAt,
     inputMethod: result.inputMethod,
-    cadastralReference: result.cadastralReference,
-    address: result.normalizedAddress,
-    municipality: result.municipality,
-    municipalityCode: result.municipalityCode,
-    classification: result.planning.classification,
-    areas: result.planning.areas?.map((area) => area.name) ?? [],
-    instrument: result.planning.instrument,
-    affects: result.affects.detected.map((affect) => ({
+    cadastralReference: effective?.cadastralReference ?? manual?.cadastralReference,
+    address: effective?.normalizedAddress ?? manual?.address,
+    municipality: effective?.municipality ?? manual?.municipality,
+    municipalityCode: effective?.municipalityCode,
+    classification:
+      effective?.planning.classification ??
+      (manual?.classification
+        ? {
+            code: manual.classification,
+            categoryCode: manual.category,
+            label: manual.classification,
+            categoryLabel: manual.category,
+            sourceFeatureIds: [],
+          }
+        : undefined),
+    areas:
+      effective?.planning.areas?.map((area) => area.name) ?? (manual?.area ? [manual.area] : []),
+    instrument: effective?.planning.instrument,
+    affects: (effective?.affects ?? result.affects).detected.map((affect) => ({
       category: affect.category,
       name: affect.name,
       confidence: affect.confidence,
@@ -95,10 +132,34 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       ...result.warnings.map((warning) => warning.message),
       ...result.planning.warnings.map((warning) => warning.message),
       ...result.affects.warnings.map((warning) => warning.message),
+      ...sourceChecks.map((check) => check.message),
     ],
     sources,
-    canAnswerConcreteParameters: result.planning.canAnswerConcreteParameters === true,
-    canRuleOutUndetectedAffects: result.affects.canRuleOutUndetectedAffects,
+    canAnswerConcreteParameters:
+      effective?.planning.canAnswerConcreteParameters === true &&
+      manual?.verification !== 'unverified',
+    canRuleOutUndetectedAffects: false,
     candidateCount: result.candidates.length,
+    latestAttemptAt: result.resolvedAt,
+    officialContextResolvedAt: effective?.resolvedAt,
+    usingPreviousOfficialContext:
+      result.continuity?.usingPreviousOfficialContext ?? false,
+    manualContext: manual
+      ? {
+          cadastralReference: manual.cadastralReference,
+          municipality: manual.municipality,
+          address: manual.address,
+          coordinates: manual.coordinates,
+          classification: manual.classification,
+          category: manual.category,
+          area: manual.area,
+          ordinance: manual.ordinance,
+          provenance: manual.provenance,
+          verification: manual.verification,
+          recordedAt: manual.recordedAt,
+          validatedAt: manual.validatedAt,
+        }
+      : undefined,
+    sourceChecks,
   };
 }

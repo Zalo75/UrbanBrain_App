@@ -8,7 +8,11 @@ import type {
   TerritorialEvidence,
   TerritorialWarning,
 } from '@/domain/territorial-resolver/types';
-import { fetchOfficial, type FetchLike } from '@/infrastructure/territorial-resolver/officialHttp';
+import {
+  fetchOfficial,
+  officialFailureKind,
+  type FetchLike,
+} from '@/infrastructure/territorial-resolver/officialHttp';
 import {
   BETANZOS_CURRENT_INSTRUMENT,
   BETANZOS_NON_SPATIALLY_BOUND_INSTRUMENTS,
@@ -322,10 +326,25 @@ export class BetanzosPlanningAdapter implements PlanningPort {
           featureMatches(feature, location.coordinates, undefined)
         );
       }
-    } catch {
+    } catch (error) {
+      const failureKind = officialFailureKind(error);
       return {
         ...base,
         status: 'partial',
+        sourceChecks: [
+          {
+            source: 'siotuga',
+            status:
+              failureKind === 'timeout'
+                ? 'timeout'
+                : failureKind === 'malformed'
+                  ? 'malformed'
+                  : 'unavailable',
+            checkedAt: retrievedAt,
+            message:
+              'SIOTUGA no esta respondiendo correctamente en este momento. La clasificacion queda pendiente.',
+          },
+        ],
         warnings: [
           warning(
             'planning_classification_unavailable',
@@ -400,6 +419,14 @@ export class BetanzosPlanningAdapter implements PlanningPort {
       classification,
       areas,
       conflicts,
+      sourceChecks: [
+        {
+          source: 'siotuga',
+          status: 'available',
+          checkedAt: retrievedAt,
+          message: 'SIOTUGA respondio correctamente para la capa de clasificacion consultada.',
+        },
+      ],
       evidence: [
         ...base.evidence!,
         {
