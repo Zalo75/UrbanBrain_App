@@ -4,7 +4,23 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
-import { authProvider } from '@/infrastructure/auth';
+import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
+import {
+  buildNormalizedParcelContext,
+  trustedMunicipalityFilter,
+} from '@/application/parcel-context/normalizeParcelContext';
+import {
+  evaluateApplicability,
+  requiresDeterminedParcelRegime,
+} from '@/application/parcel-context/applicabilityEngine';
+import {
+  buildAnswerContract,
+  buildMunicipalSafetyPrompt,
+  buildSafeAbstention,
+  validateGeneratedAnswer,
+} from '@/application/parcel-context/responseSafety';
+import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -20,44 +36,101 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+interface V1Chunk {
+  chunk_id: string | number;
+  texto?: string | null;
+  municipio_nombre?: string | null;
+  nombre_pdf?: string | null;
+  titulo_detectado?: string | null;
+  pagina_detectada?: string | number | null;
+  original_path?: string | null;
+  similarity?: number | null;
+}
+
+interface V2SearchResult {
+  chunk_id: string | number;
+  content: string;
+  title?: string | null;
+  version?: string | null;
+  similarity: number;
+  page?: string | number | null;
+  article?: string | null;
+  chapter?: string | null;
+  sourceUrl?: string | null;
+  officialIdentifier?: string | null;
+}
+
+function mapV1Candidates(chunks: V1Chunk[]): NormativeCandidate[] {
+  return chunks.map((chunk) => ({
+    id: String(chunk.chunk_id),
+    content: chunk.texto ?? '',
+    municipalityName: chunk.municipio_nombre ?? null,
+    documentName: chunk.nombre_pdf ?? null,
+    title: chunk.titulo_detectado ?? null,
+    page: chunk.pagina_detectada ?? null,
+    sourceUrl: chunk.original_path ?? null,
+    similarity: chunk.similarity ?? null,
+    hierarchy: 'municipal' as const,
+  }));
+}
+
+function mapVisibleSources(candidates: NormativeCandidate[]) {
+  return candidates.map((candidate, index) => ({
+    chunk_id: candidate.id,
+    municipio_nombre:
+      candidate.hierarchy === 'estatal'
+        ? 'Ámbito estatal'
+        : candidate.municipalityName ?? 'No identificado',
+    nombre_pdf: candidate.documentName ?? 'Documento',
+    titulo_detectado: candidate.title ?? '',
+    similarity: candidate.similarity ?? 0,
+    source_index: index + 1,
+    original_path: candidate.sourceUrl ?? '',
+    pagina_detectada: candidate.page ?? null,
+    fragmento_corto: `${candidate.content.replace(/\s+/g, ' ').trim().slice(0, 180)}${candidate.content.length > 180 ? '…' : ''}`,
+  }));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    let { message, municipio, expedienteId } = body;
+    const { message, expedienteId } = body;
 
-    municipio = municipio?.trim() || '';
-    if (municipio === 'oza_cesuras') {
-      municipio = 'Oza-Cesuras';
-    }
-
-    if (!expedienteId) {
+    if (typeof expedienteId !== 'string' || !expedienteId) {
       return NextResponse.json({ error: 'expedienteId is required' }, { status: 400 });
     }
 
-    let userId = await authProvider.getUserId();
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const access = await getExpedienteAccess(expedienteId);
+    if (!access.ok) {
+      const status = access.reason === 'unauthenticated' ? 401 : 404;
+      return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Not found' }, { status });
     }
 
-    if (!message) {
+    if (typeof message !== 'string' || !message.trim()) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    if (!municipio) {
-      return NextResponse.json({
-        answer:
-          'Necesito saber el municipio/concello del expediente para responder con seguridad jurídica.',
-        sources: [],
-      });
+    const userId = access.userId;
+    const parcelInputs = await loadAuthorizedParcelInputs(expedienteId, userId);
+    if (!parcelInputs) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+
+    const parcelContext = buildNormalizedParcelContext({
+      ...parcelInputs,
+      userMessages: [...parcelInputs.userMessages, message],
+    });
+    // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
+    const municipio =
+      trustedMunicipalityFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
+    const concreteParameterRequested = requiresDeterminedParcelRegime(message);
 
     // Guardar mensaje del usuario
     await db.insert(chatMessages).values({
       expedienteId,
       userId,
       role: 'user',
-      content: message,
+      content: message.trim(),
     });
 
     // --- SPRINT 3: Integración del Knowledge Orchestrator ---
@@ -132,11 +205,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
     }
 
-    const safeChunks = chunks || [];
-    const normalizedMunicipio = municipio.toLowerCase();
-    const filteredChunks = safeChunks.filter(
-      (c: any) => (c.municipio_nombre || '').toLowerCase().trim() === normalizedMunicipio
-    );
+    const safeChunks = (Array.isArray(chunks) ? chunks : []) as V1Chunk[];
+    const v1Candidates = mapV1Candidates(safeChunks);
 
     // --- SPRINT 3.12: Laboratorio CTE V2 ---
     let v2FinalContext = '';
@@ -144,9 +214,9 @@ export async function POST(req: NextRequest) {
     let fallbackReason = '';
     let v2_time_ms = 0;
     let v2LLMTime = 0;
-    let top3Citas = '';
     let v2Citas = '';
-    let v2Results: any[] = [];
+    let v2Results: V2SearchResult[] = [];
+    let v2Candidates: NormativeCandidate[] = [];
 
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
       try {
@@ -161,7 +231,7 @@ export async function POST(req: NextRequest) {
           limit: 8,
         });
 
-        const timeoutPromise = new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
+        const timeoutPromise = new Promise<V2SearchResult[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
         v2Results = await Promise.race([v2Promise, timeoutPromise]);
         v2_time_ms = Math.round(performance.now() - t0_v2);
 
@@ -201,12 +271,26 @@ export async function POST(req: NextRequest) {
 
             // Collect unique chunks
             const seenContent = new Set<string>();
+            const uniqueValidChunks = validChunks.filter((chunk) => {
+              if (seenContent.has(chunk.content)) return false;
+              seenContent.add(chunk.content);
+              return true;
+            });
 
-            for (const r of validChunks) {
-              if (seenContent.has(r.content)) continue;
-              seenContent.add(r.content);
+            v2Candidates = uniqueValidChunks.map((result) => ({
+              id: String(result.chunk_id),
+              content: result.content,
+              documentName: result.title ?? null,
+              title: result.article ?? result.chapter ?? null,
+              page: result.page ?? null,
+              sourceUrl: result.sourceUrl,
+              similarity: result.similarity,
+              hierarchy: 'estatal' as const,
+              status: 'vigente',
+            }));
 
-              let citaParts = [`CTE ${r.title?.split(' - ')[0] || ''}`];
+            for (const r of uniqueValidChunks) {
+              const citaParts = [`CTE ${r.title?.split(' - ')[0] || ''}`];
               if (r.chapter) citaParts.push(`Capítulo ${r.chapter}`);
               if (r.article) citaParts.push(`apartado ${r.article}`);
               citaParts.push(`página ${r.page}`);
@@ -234,11 +318,60 @@ export async function POST(req: NextRequest) {
     }
     // ----------------------------------
 
-    if (!usedV2 && filteredChunks.length === 0) {
-      return NextResponse.json({
-        answer: 'No he encontrado información suficiente en la normativa del municipio seleccionado.',
+    let applicability: ApplicabilityResult;
+    let answerCandidates: NormativeCandidate[];
+    if (usedV2) {
+      answerCandidates = v2Candidates;
+      applicability = {
+        status:
+          answerCandidates.length === 0
+            ? 'NO_DETERMINADO'
+            : concreteParameterRequested
+              ? 'PARCIAL'
+              : 'DETERMINADO',
+        applicable: answerCandidates,
+        rejected: [],
+        warnings: parcelContext.pendingValidation,
+        missingData: concreteParameterRequested
+          ? ['fuente municipal vinculada al régimen de la parcela']
+          : [],
+        conflicts: [],
+        canAnswerConcreteParameters:
+          !concreteParameterRequested && answerCandidates.length > 0,
+      };
+    } else {
+      applicability = evaluateApplicability(
+        parcelContext,
+        v1Candidates,
+        concreteParameterRequested
+      );
+      answerCandidates = applicability.applicable;
+    }
+
+    const mustAbstain =
+      answerCandidates.length === 0 ||
+      applicability.status === 'CONFLICTIVO' ||
+      applicability.status === 'NO_DETERMINADO' ||
+      (concreteParameterRequested && !applicability.canAnswerConcreteParameters);
+
+    if (mustAbstain) {
+      const answer = buildSafeAbstention(applicability);
+      const contract = buildAnswerContract(
+        answer,
+        parcelContext,
+        applicability,
+        [],
+        [],
+        'abstain'
+      );
+      await db.insert(chatMessages).values({
+        expedienteId,
+        userId,
+        role: 'assistant',
+        content: answer,
         sources: [],
       });
+      return NextResponse.json({ answer, sources: [], safety: contract });
     }
 
     // Construir contexto
@@ -268,20 +401,11 @@ FUNDAMENTO NORMATIVO
 FUENTES
 [Lista de las fuentes utilizadas en formato: - CTE DB-XX, Capítulo X, apartado Y, página Z. Fuente oficial: URL]`;
     } else {
-      contextText += '\n[NORMATIVA MUNICIPAL - ' + municipio + ']\n';
-      filteredChunks.forEach((c: any, index: number) => {
-        const sourceNum = index + 1;
-        contextText += `[Fuente ${sourceNum}]\n`;
-        contextText += `Municipio: ${c.municipio_nombre || municipio}\n`;
-        contextText += `Documento: ${c.nombre_pdf || 'Desconocido'}\n`;
-        contextText += `Título detectado: ${c.titulo_detectado || 'N/A'}\n`;
-        contextText += `Texto:\n${c.texto}\n\n`;
-      });
-
-      systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente usando el contexto proporcionado. Si el contexto no contiene información suficiente, dilo claramente. Cita las fuentes usando exactamente el formato de corchetes proporcionado, por ejemplo: [Fuente 1], [Fuente 2]. No inventes normativa.
-
-CONTEXTO RECUPERADO:
-${contextText}`;
+      systemPrompt = buildMunicipalSafetyPrompt(
+        parcelContext,
+        applicability,
+        answerCandidates
+      );
     }
 
     // Logging for CTE V2 Response Mode
@@ -319,20 +443,35 @@ ${usedV2 ? v2Citas : 'N/A'}
        console.log(`Tiempo LLM (V2): ${v2LLMTime}ms\n`);
     }
 
-    const answer = completion.choices[0].message.content || '';
+    let answer = completion.choices[0].message.content || '';
+    const validation = validateGeneratedAnswer(answer, answerCandidates, applicability);
+    let sources = mapVisibleSources(answerCandidates);
+    let decision: 'answer' | 'abstain' = 'answer';
 
-    // Devolver JSON
-    const sources = filteredChunks.map((c: any, index: number) => ({
-      chunk_id: c.chunk_id,
-      municipio_nombre: c.municipio_nombre || municipio,
-      nombre_pdf: c.nombre_pdf || 'Documento',
-      titulo_detectado: c.titulo_detectado || '',
-      similarity: c.similarity,
-      source_index: index + 1,
-      original_path: c.original_path || '',
-      pagina_detectada: c.pagina_detectada || null,
-      fragmento_corto: c.fragmento_corto || '',
-    }));
+    if (!validation.valid) {
+      decision = 'abstain';
+      const failedApplicability: ApplicabilityResult = {
+        ...applicability,
+        status: 'CONFLICTIVO',
+        conflicts: [
+          ...applicability.conflicts,
+          `La respuesta generada no superó la validación de evidencia: ${validation.reasons.join(' ')}`,
+        ],
+        canAnswerConcreteParameters: false,
+      };
+      answer = buildSafeAbstention(failedApplicability);
+      applicability = failedApplicability;
+      sources = [];
+    }
+
+    const contract = buildAnswerContract(
+      answer,
+      parcelContext,
+      applicability,
+      decision === 'answer' ? validation.citations : [],
+      decision === 'answer' ? answerCandidates : [],
+      decision
+    );
 
     // Guardar mensaje de la IA
     await db.insert(chatMessages).values({
@@ -346,6 +485,7 @@ ${usedV2 ? v2Citas : 'N/A'}
     return NextResponse.json({
       answer,
       sources,
+      safety: contract,
     });
   } catch (error) {
     console.error('Error in /api/chat:', error);
