@@ -3,45 +3,77 @@
 
 begin;
 
-drop policy if exists urbanbrain_chat_messages_select_tenant
-  on public.chat_messages;
-drop policy if exists urbanbrain_chat_messages_insert_self
-  on public.chat_messages;
-drop policy if exists urbanbrain_context_detections_select_tenant
-  on public.context_detections;
-drop policy if exists urbanbrain_expediente_afecciones_select_tenant
-  on public.expediente_afecciones;
-drop policy if exists urbanbrain_municipal_planning_select_authenticated
-  on public.municipal_planning;
-drop policy if exists urbanbrain_afeccion_types_select_authenticated
-  on public.afeccion_types;
+do $block$
+declare
+  protected_table text;
+  policy_target record;
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_roles
+    where rolname = 'service_role'
+      and rolbypassrls
+  ) then
+    raise exception 'service_role must have BYPASSRLS for fail-closed rollback';
+  end if;
 
-revoke all privileges on table public.chat_messages
-  from public, anon, authenticated;
-revoke all privileges on table public.context_detections
-  from public, anon, authenticated;
-revoke all privileges on table public.expediente_afecciones
-  from public, anon, authenticated;
-revoke all privileges on table public.municipal_planning
-  from public, anon, authenticated;
-revoke all privileges on table public.afeccion_types
-  from public, anon, authenticated;
-revoke all privileges on table public.organizations
-  from public, anon, authenticated;
-revoke all privileges on table public.profiles
-  from public, anon, authenticated;
-revoke all privileges on table public.organization_members
-  from public, anon, authenticated;
-revoke all privileges on table public.expedientes
-  from public, anon, authenticated;
-revoke all privileges on table public.normativa_documents
-  from public, anon, authenticated;
-revoke all privileges on table public.normativa_chunks
-  from public, anon, authenticated;
-revoke all privileges on table public.normative_documents_v2
-  from public, anon, authenticated;
-revoke all privileges on table public.normative_chunks_v2
-  from public, anon, authenticated;
+  -- Keep every relation closed even when the rollback is applied to a drifted
+  -- or partially hardened schema. Missing optional tables are skipped safely.
+  foreach protected_table in array array[
+    'chat_messages',
+    'context_detections',
+    'expediente_afecciones',
+    'municipal_planning',
+    'afeccion_types',
+    'organizations',
+    'profiles',
+    'organization_members',
+    'expedientes',
+    'normativa_documents',
+    'normativa_chunks',
+    'normative_documents_v2',
+    'normative_chunks_v2'
+  ] loop
+    if to_regclass('public.' || protected_table) is not null then
+      execute format(
+        'alter table public.%I enable row level security',
+        protected_table
+      );
+      execute format(
+        'alter table public.%I force row level security',
+        protected_table
+      );
+      execute format(
+        'revoke all privileges on table public.%I from public, anon, authenticated',
+        protected_table
+      );
+      execute format(
+        'grant select, insert, update, delete on table public.%I to service_role',
+        protected_table
+      );
+    end if;
+  end loop;
+
+  for policy_target in
+    select * from (values
+      ('chat_messages', 'urbanbrain_chat_messages_select_tenant'),
+      ('chat_messages', 'urbanbrain_chat_messages_insert_self'),
+      ('context_detections', 'urbanbrain_context_detections_select_tenant'),
+      ('expediente_afecciones', 'urbanbrain_expediente_afecciones_select_tenant'),
+      ('municipal_planning', 'urbanbrain_municipal_planning_select_authenticated'),
+      ('afeccion_types', 'urbanbrain_afeccion_types_select_authenticated')
+    ) as policies(table_name, policy_name)
+  loop
+    if to_regclass('public.' || policy_target.table_name) is not null then
+      execute format(
+        'drop policy if exists %I on public.%I',
+        policy_target.policy_name,
+        policy_target.table_name
+      );
+    end if;
+  end loop;
+end;
+$block$;
 
 drop function if exists public.urbanbrain_can_access_expediente(uuid);
 
@@ -61,6 +93,11 @@ begin
       = 'query_embedding vector, match_count integer, filter_municipio text';
 
   if rpc_signature is not null then
+    execute format('alter function %s security invoker', rpc_signature);
+    execute format(
+      'alter function %s set search_path to pg_catalog, public, extensions',
+      rpc_signature
+    );
     execute format(
       'revoke all privileges on function %s from public, anon, authenticated',
       rpc_signature

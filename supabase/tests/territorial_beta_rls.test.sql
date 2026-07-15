@@ -158,8 +158,11 @@ select extensions.ok(
   'authenticated users cannot bypass server-side expediente authorization'
 );
 select extensions.ok(
-  not has_table_privilege('authenticated', 'public.normativa_documents', 'SELECT'),
-  'authenticated users cannot read V1 document metadata directly'
+  case
+    when to_regclass('public.normativa_documents') is null then true
+    else not has_table_privilege('authenticated', 'public.normativa_documents', 'SELECT')
+  end,
+  'authenticated users cannot read V1 document metadata directly when present'
 );
 select extensions.ok(
   not has_table_privilege('authenticated', 'public.normativa_chunks', 'SELECT'),
@@ -271,8 +274,11 @@ select extensions.ok(
   'service_role keeps constraint DML'
 );
 select extensions.ok(
-  has_table_privilege('service_role', 'public.normativa_documents', 'SELECT'),
-  'service_role keeps V1 document metadata access'
+  case
+    when to_regclass('public.normativa_documents') is null then true
+    else has_table_privilege('service_role', 'public.normativa_documents', 'SELECT')
+  end,
+  'service_role keeps V1 document metadata access when present'
 );
 select extensions.ok(
   has_table_privilege('service_role', 'public.normativa_chunks', 'SELECT'),
