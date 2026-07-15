@@ -2,20 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
 import { eq, asc } from 'drizzle-orm';
-import { authProvider } from '@/infrastructure/auth';
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = await authProvider.getUserId();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const expedienteId = searchParams.get('expedienteId');
 
     if (!expedienteId) {
       return NextResponse.json({ error: 'expedienteId is required' }, { status: 400 });
+    }
+
+    const access = await getExpedienteAccess(expedienteId);
+    if (!access.ok) {
+      const status = access.reason === 'unauthenticated' ? 401 : 404;
+      return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Not found' }, { status });
     }
 
     // Obtener historial ordenado cronológicamente

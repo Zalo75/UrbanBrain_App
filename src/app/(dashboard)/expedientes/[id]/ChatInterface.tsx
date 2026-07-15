@@ -22,12 +22,15 @@ interface Source {
   fragmento_corto?: string;
 }
 
-interface ChatInterfaceProps {
-  expedienteId: string;
-  municipio: string;
+interface ChatHistoryEntry extends Message {
+  sources?: Source[] | null;
 }
 
-export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
+interface ChatInterfaceProps {
+  expedienteId: string;
+}
+
+export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,16 +45,17 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
         const data = await res.json();
 
         if (data.history && data.history.length > 0) {
-          const loadedMessages = data.history.map((h: any) => ({
-            role: h.role,
-            content: h.content,
+          const history = data.history as ChatHistoryEntry[];
+          const loadedMessages = history.map((entry) => ({
+            role: entry.role,
+            content: entry.content,
           }));
           setMessages(loadedMessages);
 
           // Recuperar fuentes del último mensaje del asistente si existen
-          const lastAssistantMsg = [...data.history]
+          const lastAssistantMsg = [...history]
             .reverse()
-            .find((m: any) => m.role === 'assistant');
+            .find((entry) => entry.role === 'assistant');
           if (lastAssistantMsg && lastAssistantMsg.sources) {
             setSources(lastAssistantMsg.sources);
           }
@@ -83,7 +87,6 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
         },
         body: JSON.stringify({
           message: userMessage,
-          municipio,
           expedienteId,
         }),
       });
@@ -96,8 +99,8 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
 
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
       setSources(data.sources || []);
-    } catch (err: any) {
-      setError(err.message || 'Error desconocido');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error desconocido');
     } finally {
       setLoading(false);
     }
@@ -201,7 +204,7 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
                     )}
                   {source.fragmento_corto && (
                     <p className="text-foreground/80 border-muted-foreground/30 mt-2 border-l-2 pl-2 italic">
-                      "{source.fragmento_corto}"
+                      &ldquo;{source.fragmento_corto}&rdquo;
                     </p>
                   )}
                   {source.original_path && (

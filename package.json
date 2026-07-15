@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:local": "supabase start && playwright test",
+    "verify:betanzos:live": "tsx scripts/verify-betanzos-reference.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
