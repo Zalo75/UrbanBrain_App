@@ -106,11 +106,16 @@ describe('resolveTerritorialContextAction', () => {
     )
 
     expect(result.status).toBe('success')
-    expect(mocks.detectContextFromInput).toHaveBeenCalledWith('exp-a', 'user-a', {
-      cadastralReference: '1234567NH4913S',
-      coordinates: { lat: 43.3, lng: -8.2 },
-      address: 'Direccion orientativa',
-    })
+    expect(mocks.detectContextFromInput).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      {
+        cadastralReference: '1234567NH4913S',
+        coordinates: { lat: 43.3, lng: -8.2 },
+        address: 'Direccion orientativa',
+      },
+      expect.any(String)
+    )
     expect(mocks.set).toHaveBeenCalledWith({
       refCatastral: '1234567NH4913S',
       address: 'Direccion oficial',
@@ -151,6 +156,51 @@ describe('resolveTerritorialContextAction', () => {
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
+  it('usa el contexto oficial conservado cuando la respuesta actual es parcial', async () => {
+    const previousOfficial = {
+      ...resolution,
+      normalizedAddress: 'Direccion oficial anterior',
+      coordinates: { lat: 43.31, lng: -8.21 },
+      resolvedAt: '2026-07-13T00:00:00.000Z',
+    }
+    mocks.detectContextFromInput.mockResolvedValue({
+      ...resolution,
+      normalizedAddress: undefined,
+      coordinates: undefined,
+      sourceChecks: [
+        {
+          source: 'catastro',
+          status: 'partial',
+          checkedAt: resolution.resolvedAt,
+          message: 'Catastro solo pudo completar parte de la comprobacion.',
+        },
+      ],
+      continuity: {
+        lastOfficialContext: previousOfficial,
+        effectiveOfficialContext: previousOfficial,
+        usingPreviousOfficialContext: true,
+        sameParcelAsPrevious: true,
+      },
+    })
+    const form = new FormData()
+    form.set('refCatastral', '1234567NH4913S')
+
+    await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(mocks.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: 'Direccion oficial anterior',
+        lat: 43.31,
+        lng: -8.21,
+        location: [-8.21, 43.31],
+      })
+    )
+  })
+
   it('guarda datos manuales trazables sin sustituir la localizacion oficial', async () => {
     mocks.recordManualContext.mockImplementation(async (_id, _user, _input, manualContext) => ({
       ...resolution,
@@ -167,6 +217,7 @@ describe('resolveTerritorialContextAction', () => {
     form.set('manualMunicipality', 'Betanzos')
     form.set('manualClassification', 'Suelo urbano')
     form.set('manualOrdinance', 'Ordenanza 2')
+    form.set('manualObservations', 'Comprobar alineaciones antes del proyecto')
     form.set('technicianValidated', 'on')
 
     const result = await resolveTerritorialContextAction(
@@ -185,11 +236,65 @@ describe('resolveTerritorialContextAction', () => {
         municipality: 'Betanzos',
         classification: 'Suelo urbano',
         ordinance: 'Ordenanza 2',
+        observations: 'Comprobar alineaciones antes del proyecto',
         provenance: 'manual',
         verification: 'technician_validated',
         validatedBy: 'user-a',
       })
     )
+  })
+
+  it('acepta observaciones manuales sin obligar a inventar municipio o zonificacion', async () => {
+    mocks.recordManualContext.mockImplementation(async (_id, _user, _input, manualContext) => ({
+      ...resolution,
+      status: 'unresolved',
+      evidence: [],
+      continuity: {
+        usingPreviousOfficialContext: false,
+        sameParcelAsPrevious: false,
+        manualContext,
+      },
+    }))
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('manualObservations', 'Pendiente de visita al emplazamiento')
+    form.set('provenance', 'catastro')
+    form.set('verification', 'confirmed')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.recordManualContext).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.any(Object),
+      expect.objectContaining({
+        observations: 'Pendiente de visita al emplazamiento',
+        verification: 'unverified',
+      })
+    )
+  })
+
+  it('no expone detalles internos cuando el resolver falla inesperadamente', async () => {
+    mocks.detectContextFromInput.mockRejectedValue(new Error('internal-sensitive-value'))
+    const form = new FormData()
+    form.set('refCatastral', '1234567NH4913S')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'No se ha podido completar la consulta territorial. Inténtelo de nuevo.',
+    })
+    expect(result.message).not.toContain('internal-sensitive-value')
   })
 
   it('un viewer puede guardar provisional pero no declarar validacion tecnica', async () => {

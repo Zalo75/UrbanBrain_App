@@ -96,7 +96,8 @@ describe('ContextDetectionEngine source resilience', () => {
     await new ContextDetectionEngine(vi.fn(async () => ({ ...failed }))).detectContextFromInput(
       'exp-a',
       'user-a',
-      { cadastralReference: '1234567NH4913S' }
+      { cadastralReference: '1234567NH4913S' },
+      '2026-07-14T10:00:00.000Z'
     )
 
     const persisted = mocks.values.mock.calls[0][0]
@@ -151,5 +152,43 @@ describe('ContextDetectionEngine source resilience', () => {
     })
     expect(persisted.summary.locationSource).toBeUndefined()
     expect(persisted.sourceApis).toEqual([])
+  })
+
+  it('identifica el intento mas reciente aunque una respuesta anterior termine despues', async () => {
+    let finishOlder!: (value: TerritorialResolution) => void
+    let finishNewer!: (value: TerritorialResolution) => void
+    const resolver = vi.fn(
+      (input: { cadastralReference?: string | null }) =>
+        new Promise<TerritorialResolution>((resolve) => {
+          if (input.cadastralReference === '1234567NH4913S') finishOlder = resolve
+          else finishNewer = resolve
+        })
+    )
+    const engine = new ContextDetectionEngine(resolver)
+    const older = engine.detectContextFromInput(
+      'exp-a',
+      'user-a',
+      { cadastralReference: '1234567NH4913S' },
+      '2026-07-14T10:00:00.000Z'
+    )
+    const newer = engine.detectContextFromInput(
+      'exp-a',
+      'user-a',
+      { cadastralReference: '9999999NH4999S' },
+      '2026-07-14T10:00:01.000Z'
+    )
+
+    await vi.waitFor(() => expect(resolver).toHaveBeenCalledTimes(2))
+    finishNewer({ ...official, cadastralReference: '9999999NH4999S' })
+    await newer
+    finishOlder({ ...official })
+    await older
+
+    expect(mocks.values.mock.calls[0][0].summary.reliability.latestAttemptAt).toBe(
+      '2026-07-14T10:00:01.000Z'
+    )
+    expect(mocks.values.mock.calls[1][0].summary.reliability.latestAttemptAt).toBe(
+      '2026-07-14T10:00:00.000Z'
+    )
   })
 })

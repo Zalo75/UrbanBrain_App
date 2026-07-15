@@ -140,7 +140,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       manual?.verification !== 'unverified',
     canRuleOutUndetectedAffects: false,
     candidateCount: result.candidates.length,
-    latestAttemptAt: result.resolvedAt,
+    latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,
     officialContextResolvedAt: effective?.resolvedAt,
     usingPreviousOfficialContext:
       result.continuity?.usingPreviousOfficialContext ?? false,
@@ -154,6 +154,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
           category: manual.category,
           area: manual.area,
           ordinance: manual.ordinance,
+          observations: manual.observations,
           provenance: manual.provenance,
           verification: manual.verification,
           recordedAt: manual.recordedAt,

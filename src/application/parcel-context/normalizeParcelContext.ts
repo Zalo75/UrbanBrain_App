@@ -58,6 +58,7 @@ export interface DetectedParcelInput {
     category?: string | null
     area?: string | null
     ordinance?: string | null
+    observations?: string | null
     provenance: 'manual'
     verification: 'unverified' | 'technician_validated'
     recordedAt: string
@@ -754,6 +755,15 @@ export function buildNormalizedParcelContext(
   if (!context.planningArea && manual?.area?.trim()) {
     context.planningArea = field(
       manual.area.trim(),
+      'manual',
+      manualConfidence,
+      manualVerification,
+      manual.recordedAt
+    )
+  }
+  if (manual?.observations?.trim()) {
+    context.technicalNotes = field(
+      manual.observations.trim(),
       'manual',
       manualConfidence,
       manualVerification,

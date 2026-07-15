@@ -73,4 +73,47 @@ describe('CatastroOfficialAdapter resilience', () => {
       expect.objectContaining({ source: 'catastro', status: 'partial' })
     )
   })
+
+  it('marca como parcial una geometria WFS malformada sin descartar datos validos', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('Consulta_DNPRC')) {
+        return new Response(
+          JSON.stringify({
+            consulta_dnprcResult: {
+              lrcdnp: {
+                rcdnp: {
+                  dt: { loine: { cp: '15', cm: '009' }, np: 'A CORUNA', nm: 'BETANZOS' },
+                },
+              },
+            },
+          }),
+          { status: 200 }
+        )
+      }
+      if (url.includes('Consulta_CPMRC')) {
+        return new Response(
+          JSON.stringify({
+            Consulta_CPMRCResult: {
+              coordenadas: {
+                coord: { geo: { xcen: '-8.2', ycen: '43.2' } },
+              },
+            },
+          }),
+          { status: 200 }
+        )
+      }
+      return new Response('<html>proxy error</html>', { status: 200 })
+    })
+
+    const result = await new CatastroOfficialAdapter(fetcher).resolveReference(
+      '8424001NJ4082S'
+    )
+
+    expect(result?.municipality).toBe('BETANZOS')
+    expect(result?.geometry).toBeUndefined()
+    expect(result?.sourceChecks).toContainEqual(
+      expect.objectContaining({ source: 'catastro', status: 'partial' })
+    )
+  })
 })

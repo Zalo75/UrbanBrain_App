@@ -38,6 +38,7 @@ export interface ManualTerritorialContext {
   category?: string
   area?: string
   ordinance?: string
+  observations?: string
   provenance: 'manual'
   verification: 'unverified' | 'technician_validated'
   recordedAt: string
@@ -173,6 +174,7 @@ export interface TerritorialResolution {
   planning: PlanningApplicability
   affects: AffectApplicability
   resolvedAt: string
+  attemptStartedAt?: string
 }
 
 export interface ResolveParcelLocationInput {

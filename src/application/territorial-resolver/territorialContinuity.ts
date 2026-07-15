@@ -206,6 +206,7 @@ export function createManualAttempt(
       ],
     },
     resolvedAt: manualContext.recordedAt,
+    attemptStartedAt: manualContext.recordedAt,
   }
   const attached = attachContinuity(result, input, previousRaw, manualContext)
   if (

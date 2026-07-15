@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 
 import type {
   DetectedParcelInput,
@@ -6,6 +6,7 @@ import type {
   ParcelExpedienteInput,
 } from '@/application/parcel-context/normalizeParcelContext'
 import { db } from '@/infrastructure/db/client'
+import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 import {
   afeccionTypes,
   chatMessages,
@@ -54,7 +55,7 @@ export async function loadAuthorizedParcelInputs(
       .select({ summary: contextDetections.summary, rawResponse: contextDetections.rawResponse })
       .from(contextDetections)
       .where(eq(contextDetections.expedienteId, expedienteId))
-      .orderBy(desc(contextDetections.detectedAt))
+      .orderBy(...latestContextDetectionOrder())
       .limit(1),
     db
       .select({ content: chatMessages.content })

@@ -106,7 +106,7 @@ function detectionSummary(result: TerritorialResolution) {
     manualContext: manual,
     reliability: {
       mode: reliabilityMode,
-      latestAttemptAt: result.resolvedAt,
+      latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,
       officialContextResolvedAt: effective?.resolvedAt,
       usingPreviousOfficialContext: result.continuity?.usingPreviousOfficialContext ?? false,
       sourceChecks: checks,
@@ -127,6 +127,7 @@ export class ContextDetectionEngine {
   constructor(private readonly resolver: Resolver = officialResolver()) {}
 
   async detectContext(expedienteId: string, userId: string): Promise<TerritorialResolution | null> {
+    const attemptStartedAt = new Date().toISOString()
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
 
@@ -138,20 +139,21 @@ export class ContextDetectionEngine {
           : undefined,
       address: authorized.expediente.address,
       declaredMunicipality: authorized.expediente.municipio,
-    })
+    }, attemptStartedAt)
   }
 
   async detectContextFromInput(
     expedienteId: string,
     userId: string,
-    input: ResolveParcelLocationInput
+    input: ResolveParcelLocationInput,
+    attemptStartedAt = new Date().toISOString()
   ): Promise<TerritorialResolution | null> {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
     return this.resolveAndPersist(expedienteId, authorized, {
       ...input,
       declaredMunicipality: authorized.expediente.municipio,
-    })
+    }, attemptStartedAt)
   }
 
   async recordManualContext(
@@ -170,9 +172,11 @@ export class ContextDetectionEngine {
   private async resolveAndPersist(
     expedienteId: string,
     authorized: NonNullable<Awaited<ReturnType<typeof loadAuthorizedParcelInputs>>>,
-    input: ResolveParcelLocationInput
+    input: ResolveParcelLocationInput,
+    attemptStartedAt: string
   ) {
     const current = await this.resolver(input)
+    current.attemptStartedAt = attemptStartedAt
     const result = attachContinuity(current, input, authorized.latestDetectionRaw)
     await this.persist(expedienteId, result)
     return result

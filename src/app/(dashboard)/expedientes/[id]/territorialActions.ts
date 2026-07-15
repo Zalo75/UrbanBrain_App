@@ -8,7 +8,7 @@ import { ContextDetectionEngine } from '@/application/context-engine/ContextDete
 import { normalizeCadastralReference } from '@/application/territorial-resolver/resolveParcelLocation';
 import {
   allSourceChecks,
-  isUsableOfficialContext,
+  officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity';
 import type { ManualTerritorialContext } from '@/domain/territorial-resolver/types';
 import { db } from '@/infrastructure/db/client';
@@ -33,6 +33,7 @@ export async function resolveTerritorialContextAction(
   _previousState: TerritorialResolutionActionState,
   formData: FormData
 ): Promise<TerritorialResolutionActionState> {
+  const attemptStartedAt = new Date().toISOString();
   const access = await getExpedienteAccess(expedienteId);
   if (!access.ok) {
     return { status: 'error', message: 'No se ha encontrado el expediente.' };
@@ -65,12 +66,24 @@ export async function resolveTerritorialContextAction(
   const manualCategory = limitedText(formData, 'manualCategory', 80);
   const manualArea = limitedText(formData, 'manualArea', 100);
   const manualOrdinance = limitedText(formData, 'manualOrdinance', 100);
+  const manualObservations = limitedText(formData, 'manualObservations', 1000);
+  const hasManualData = Boolean(
+    cadastralReference ||
+      address ||
+      lat !== null ||
+      manualMunicipality ||
+      manualClassification ||
+      manualCategory ||
+      manualArea ||
+      manualOrdinance ||
+      manualObservations
+  );
 
   if (
     !cadastralReference &&
     lat === null &&
     !address &&
-    !(intent === 'manual' && manualMunicipality)
+    !(intent === 'manual' && hasManualData)
   ) {
     return {
       status: 'error',
@@ -88,7 +101,7 @@ export async function resolveTerritorialContextAction(
     };
 
     if (intent === 'manual') {
-      const recordedAt = new Date().toISOString();
+      const recordedAt = attemptStartedAt;
       const requestedTechnicianValidation = formData.get('technicianValidated') === 'on';
       const technicianValidated =
         requestedTechnicianValidation &&
@@ -108,6 +121,7 @@ export async function resolveTerritorialContextAction(
         category: manualCategory || undefined,
         area: manualArea || undefined,
         ordinance: manualOrdinance || undefined,
+        observations: manualObservations || undefined,
         provenance: 'manual',
         verification: technicianValidated ? 'technician_validated' : 'unverified',
         recordedAt,
@@ -121,34 +135,41 @@ export async function resolveTerritorialContextAction(
         manualContext
       );
     } else {
-      result = await engine.detectContextFromInput(expedienteId, access.userId, input);
+      result = await engine.detectContextFromInput(
+        expedienteId,
+        access.userId,
+        input,
+        attemptStartedAt
+      );
     }
     if (!result) {
       return { status: 'error', message: 'No se ha encontrado el expediente.' };
     }
 
-    if (intent === 'resolve' && isUsableOfficialContext(result)) {
+    const officialContext = intent === 'resolve' ? officialContextForUse(result) : undefined;
+    if (officialContext) {
       const existingReference = normalizeCadastralReference(access.expediente.refCatastral);
       const locationChanged = Boolean(
-        existingReference !== normalizeCadastralReference(result.cadastralReference) ||
-        (access.expediente.address?.trim() || '') !== (result.normalizedAddress?.trim() || '') ||
-        access.expediente.lat !== (result.coordinates?.lat ?? null) ||
-        access.expediente.lng !== (result.coordinates?.lng ?? null)
+        existingReference !== normalizeCadastralReference(officialContext.cadastralReference) ||
+        (access.expediente.address?.trim() || '') !==
+          (officialContext.normalizedAddress?.trim() || '') ||
+        access.expediente.lat !== (officialContext.coordinates?.lat ?? null) ||
+        access.expediente.lng !== (officialContext.coordinates?.lng ?? null)
       );
       await db
         .update(expedientes)
         .set({
-          refCatastral: result.cadastralReference ?? null,
-          address: result.normalizedAddress ?? null,
-          lat: result.coordinates?.lat ?? null,
-          lng: result.coordinates?.lng ?? null,
-          location: result.coordinates
-            ? [result.coordinates.lng, result.coordinates.lat]
+          refCatastral: officialContext.cadastralReference ?? null,
+          address: officialContext.normalizedAddress ?? null,
+          lat: officialContext.coordinates?.lat ?? null,
+          lng: officialContext.coordinates?.lng ?? null,
+          location: officialContext.coordinates
+            ? [officialContext.coordinates.lng, officialContext.coordinates.lat]
             : null,
           locationSource:
-            result.inputMethod === 'coordinates'
+            officialContext.inputMethod === 'coordinates'
               ? 'coordinates'
-              : result.evidence.some((item) => item.source === 'catastro')
+              : officialContext.evidence.some((item) => item.source === 'catastro')
                 ? 'cadastral_reference'
                 : 'address',
           contextoValidadoPorTecnico: locationChanged

@@ -11,6 +11,7 @@ import { ChatInterface } from './ChatInterface'
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import { TerritorialContextPanel } from './TerritorialContextPanel'
+import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -39,7 +40,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
       .select({ rawResponse: contextDetections.rawResponse })
       .from(contextDetections)
       .where(eq(contextDetections.expedienteId, expediente.id))
-      .orderBy(desc(contextDetections.detectedAt))
+      .orderBy(...latestContextDetectionOrder())
       .limit(1),
   ])
   const territorialContext = buildTerritorialContextView(

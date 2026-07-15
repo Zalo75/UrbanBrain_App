@@ -30,6 +30,27 @@ function evidence(sourceUrl: string, retrievedAt: string, method: string): Terri
   return { source: 'catastro', sourceUrl, retrievedAt, method }
 }
 
+async function officialGeometry(response: Response) {
+  const xml = await response.text()
+  if (!/<(?:\w+:)?FeatureCollection\b/i.test(xml) || !/numberMatched="\d+"/i.test(xml)) {
+    throw new OfficialServiceError(
+      'Catastro INSPIRE',
+      'malformed',
+      'Catastro INSPIRE devolvió una respuesta no válida.'
+    )
+  }
+  if (/numberMatched="0"/i.test(xml)) return undefined
+  const geometry = parseCatastroGeometry(xml)
+  if (!geometry) {
+    throw new OfficialServiceError(
+      'Catastro INSPIRE',
+      'malformed',
+      'Catastro INSPIRE devolvió una geometría que no puede validarse.'
+    )
+  }
+  return geometry
+}
+
 async function officialJson(response: Response, service: string, expectedRoots: string[]) {
   try {
     const payload = await response.json()
@@ -156,8 +177,8 @@ export class CatastroOfficialAdapter implements CatastroPort {
       fetchOfficial(this.fetcher, 'Catastro', coordinatesUrl, this.timeoutMs).then((response) =>
         officialJson(response, 'Catastro', ['Consulta_CPMRCResult', 'consulta_cpmrcResult'])
       ),
-      fetchOfficial(this.fetcher, 'Catastro INSPIRE', geometryUrl, this.timeoutMs).then((response) =>
-        response.text()
+      fetchOfficial(this.fetcher, 'Catastro INSPIRE', geometryUrl, this.timeoutMs).then(
+        officialGeometry
       ),
     ])
 
@@ -184,19 +205,23 @@ export class CatastroOfficialAdapter implements CatastroPort {
       coordinates: coordinate?.coordinates,
       geometry:
         geometryState.status === 'fulfilled'
-          ? parseCatastroGeometry(geometryState.value)
+          ? geometryState.value
           : undefined,
       evidence: [],
       sourceChecks: [
         {
           source: 'catastro',
           status:
-            detailsState.status === 'fulfilled' && coordinatesState.status === 'fulfilled'
+            detailsState.status === 'fulfilled' &&
+            coordinatesState.status === 'fulfilled' &&
+            geometryState.status === 'fulfilled'
               ? 'available'
               : 'partial',
           checkedAt: retrievedAt,
           message:
-            detailsState.status === 'fulfilled' && coordinatesState.status === 'fulfilled'
+            detailsState.status === 'fulfilled' &&
+            coordinatesState.status === 'fulfilled' &&
+            geometryState.status === 'fulfilled'
               ? 'Catastro respondi\u00f3 correctamente.'
               : 'Catastro respondi\u00f3 parcialmente; algunos datos de la parcela no pudieron comprobarse.',
         },

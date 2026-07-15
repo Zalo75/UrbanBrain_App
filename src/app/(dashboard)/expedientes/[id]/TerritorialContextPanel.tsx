@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -15,6 +15,7 @@ import type { TerritorialContextView } from '@/application/territorial-resolver/
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -49,6 +50,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
   const router = useRouter();
   const action = resolveTerritorialContextAction.bind(null, expedienteId);
   const [state, formAction, pending] = useActionState(action, initialState);
+  const [manualOpen, setManualOpen] = useState(false);
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
@@ -78,9 +80,15 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
 
       <div className="max-h-[52vh] overflow-y-auto border-t px-4 py-4 lg:px-6">
         <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
-          <form action={formAction} className="bg-background space-y-4 rounded-lg border p-4">
+          <form
+            action={formAction}
+            aria-labelledby="territorial-form-heading"
+            className="bg-background space-y-4 rounded-lg border p-4"
+          >
             <div>
-              <h3 className="text-sm font-semibold">Resolver localización</h3>
+              <h3 id="territorial-form-heading" className="text-sm font-semibold">
+                Resolver localización
+              </h3>
               <p className="text-muted-foreground mt-1 text-xs">
                 Prioridad: referencia catastral, coordenadas y, por último, dirección. El municipio
                 se obtiene siempre de las fuentes oficiales.
@@ -96,10 +104,18 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 placeholder="14, 18 o 20 caracteres"
               />
             </div>
-            <details className="rounded-md border border-dashed p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                Continuar con datos manuales
-              </summary>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setManualOpen(true)}
+              disabled={pending || manualOpen}
+              className="w-full sm:w-fit"
+            >
+              Introducir datos manualmente
+            </Button>
+            {manualOpen && (
+              <fieldset className="rounded-md border border-dashed p-3">
+                <legend className="px-1 text-sm font-medium">Datos manuales provisionales</legend>
               <p className="text-muted-foreground mt-2 text-xs">
                 Se guardar&aacute;n como manuales y nunca se presentar&aacute;n como una comprobaci&oacute;n oficial.
               </p>
@@ -144,6 +160,18 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                     defaultValue={context?.manualContext?.ordinance ?? ''}
                   />
                 </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <Label htmlFor="territorial-manual-observations">
+                    Observaciones del t&eacute;cnico
+                  </Label>
+                  <Textarea
+                    id="territorial-manual-observations"
+                    name="manualObservations"
+                    defaultValue={context?.manualContext?.observations ?? ''}
+                    maxLength={1000}
+                    placeholder="Información conocida, dudas o comprobaciones pendientes"
+                  />
+                </div>
                 <label className="flex items-start gap-2 text-xs sm:col-span-2">
                   <input
                     type="checkbox"
@@ -156,7 +184,29 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                   Confirmo que un t&eacute;cnico ha revisado expresamente estos datos manuales.
                 </label>
               </div>
-            </details>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="submit"
+                    name="intent"
+                    value="manual"
+                    variant="outline"
+                    disabled={pending}
+                    className="w-full sm:w-auto"
+                  >
+                    Guardar manual y continuar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => setManualOpen(false)}
+                    className="w-full sm:w-auto"
+                  >
+                    Cancelar edici&oacute;n manual
+                  </Button>
+                </div>
+              </fieldset>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="territorial-lat">Latitud</Label>
@@ -193,6 +243,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
             {state.message && (
               <p
                 aria-live="polite"
+                role={state.status === 'error' ? 'alert' : 'status'}
                 className={`text-xs ${state.status === 'error' ? 'text-destructive' : 'text-emerald-700'}`}
               >
                 {state.message}
@@ -213,16 +264,6 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 )}
                 {context ? 'Reintentar comprobaci\u00f3n' : 'Resolver contexto'}
               </Button>
-              <Button
-                type="submit"
-                name="intent"
-                value="manual"
-                variant="outline"
-                disabled={pending}
-                className="w-full sm:w-auto"
-              >
-                Guardar manual y continuar
-              </Button>
             </div>
           </form>
 
@@ -235,7 +276,10 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
             ) : (
               <>
                 {(context.usingPreviousOfficialContext || context.manualContext) && (
-                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 text-violet-950">
+                  <div
+                    role="status"
+                    className="rounded-lg border border-violet-200 bg-violet-50 p-4 text-violet-950"
+                  >
                     <h3 className="text-sm font-semibold">Contexto provisional</h3>
                     <p className="mt-1 text-xs">
                       {context.usingPreviousOfficialContext
@@ -310,7 +354,10 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 </div>
 
                 {(context.conflicts.length > 0 || context.warnings.length > 0) && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950"
+                  >
                     <h3 className="flex items-center gap-2 text-sm font-semibold">
                       <AlertTriangle className="h-4 w-4" /> Advertencias y conflictos
                     </h3>
@@ -323,7 +370,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                 )}
 
                 {context.sourceChecks.length > 0 && (
-                  <div className="bg-background rounded-lg border p-4">
+                  <div role="status" className="bg-background rounded-lg border p-4">
                     <h3 className="text-sm font-semibold">Estado de las fuentes oficiales</h3>
                     <ul className="mt-2 space-y-2 text-xs">
                       {context.sourceChecks.map((check, index) => (
