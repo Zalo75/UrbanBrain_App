@@ -28,6 +28,17 @@ const geometry = customType<{ data: [number, number]; driverData: string }>({
 });
 
 export const roleEnum = pgEnum('role', ['owner', 'admin', 'member', 'viewer']);
+export const platformAdminRoleEnum = pgEnum('platform_admin_role', [
+  'superadmin',
+  'operations',
+  'support',
+  'readonly',
+]);
+export const adminAuditResultEnum = pgEnum('admin_audit_result', [
+  'success',
+  'denied',
+  'error',
+]);
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool']);
 export const verificationStatusEnum = pgEnum('verification_status', [
   'pending',
@@ -116,6 +127,52 @@ export const organizationMembers = pgTable('organization_members', {
   role: roleEnum('role').default('member').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Platform administration is intentionally independent from tenant membership
+// roles. These tables are server-only and are locked down by their migration.
+export const platformAdmins = pgTable('platform_admins', {
+  profileId: uuid('profile_id')
+    .primaryKey()
+    .references(() => profiles.id, { onDelete: 'restrict' }),
+  role: platformAdminRoleEnum('role').notNull(),
+  active: boolean('active').default(true).notNull(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  lastReviewedAt: timestamp('last_reviewed_at', { withTimezone: true }),
+});
+
+export const adminAuditEvents = pgTable(
+  'admin_audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    // Deliberately no FK: audit identity snapshots must survive profile deletion.
+    actorProfileId: uuid('actor_profile_id'),
+    actorRole: platformAdminRoleEnum('actor_role'),
+    action: text('action').notNull(),
+    permission: text('permission'),
+    resourceType: text('resource_type').notNull(),
+    resourceId: text('resource_id'),
+    // Deliberately no FK: audit history must preserve deleted organization IDs.
+    organizationId: uuid('organization_id'),
+    result: adminAuditResultEnum('result').notNull(),
+    reason: text('reason'),
+    correlationId: text('correlation_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    actorCreatedAtIdx: index('admin_audit_events_actor_created_at_idx').on(
+      table.actorProfileId,
+      table.createdAt
+    ),
+    organizationCreatedAtIdx: index('admin_audit_events_org_created_at_idx').on(
+      table.organizationId,
+      table.createdAt
+    ),
+    createdAtIdx: index('admin_audit_events_created_at_idx').on(table.createdAt),
+  })
+);
 
 export const expedientes = pgTable('expedientes', {
   id: uuid('id').defaultRandom().primaryKey(),
