@@ -122,7 +122,22 @@ describe('POST /api/chat parcel context boundary', () => {
         municipio: 'a_coruna',
         contextoValidadoPorTecnico: true,
       },
-      detected: null,
+      detected: {
+        municipalityName: 'Municipio manual manipulado',
+        manualContext: {
+          municipality: 'Municipio manual manipulado',
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-07-14T10:00:00.000Z',
+        },
+        reliability: {
+          mode: 'manual_unverified',
+          latestAttemptAt: '2026-07-14T10:00:00.000Z',
+          usingPreviousOfficialContext: false,
+          sourceChecks: [],
+        },
+        planningCanAnswerConcreteParameters: false,
+      },
       userMessages: [],
       constraints: [],
     })

@@ -30,6 +30,47 @@ function evidence(sourceUrl: string, retrievedAt: string, method: string): Terri
   return { source: 'catastro', sourceUrl, retrievedAt, method }
 }
 
+async function officialGeometry(response: Response) {
+  const xml = await response.text()
+  if (!/<(?:\w+:)?FeatureCollection\b/i.test(xml) || !/numberMatched="\d+"/i.test(xml)) {
+    throw new OfficialServiceError(
+      'Catastro INSPIRE',
+      'malformed',
+      'Catastro INSPIRE devolvió una respuesta no válida.'
+    )
+  }
+  if (/numberMatched="0"/i.test(xml)) return undefined
+  const geometry = parseCatastroGeometry(xml)
+  if (!geometry) {
+    throw new OfficialServiceError(
+      'Catastro INSPIRE',
+      'malformed',
+      'Catastro INSPIRE devolvió una geometría que no puede validarse.'
+    )
+  }
+  return geometry
+}
+
+async function officialJson(response: Response, service: string, expectedRoots: string[]) {
+  try {
+    const payload = await response.json()
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !expectedRoots.some((root) => Object.hasOwn(payload, root))
+    ) {
+      throw new Error('unexpected schema')
+    }
+    return payload
+  } catch {
+    throw new OfficialServiceError(
+      service,
+      'malformed',
+      `${service} devolvi\u00f3 una respuesta no v\u00e1lida.`
+    )
+  }
+}
+
 function firstRecord(payload: unknown): CatastroRecord | null {
   if (!payload || typeof payload !== 'object') return null
   const root = payload as Record<string, unknown>
@@ -131,13 +172,13 @@ export class CatastroOfficialAdapter implements CatastroPort {
 
     const [detailsState, coordinatesState, geometryState] = await Promise.allSettled([
       fetchOfficial(this.fetcher, 'Catastro', detailsUrl, this.timeoutMs).then((response) =>
-        response.json()
+        officialJson(response, 'Catastro', ['consulta_dnprcResult', 'Consulta_DNPRCResult'])
       ),
       fetchOfficial(this.fetcher, 'Catastro', coordinatesUrl, this.timeoutMs).then((response) =>
-        response.json()
+        officialJson(response, 'Catastro', ['Consulta_CPMRCResult', 'consulta_cpmrcResult'])
       ),
-      fetchOfficial(this.fetcher, 'Catastro INSPIRE', geometryUrl, this.timeoutMs).then((response) =>
-        response.text()
+      fetchOfficial(this.fetcher, 'Catastro INSPIRE', geometryUrl, this.timeoutMs).then(
+        officialGeometry
       ),
     ])
 
@@ -164,9 +205,27 @@ export class CatastroOfficialAdapter implements CatastroPort {
       coordinates: coordinate?.coordinates,
       geometry:
         geometryState.status === 'fulfilled'
-          ? parseCatastroGeometry(geometryState.value)
+          ? geometryState.value
           : undefined,
       evidence: [],
+      sourceChecks: [
+        {
+          source: 'catastro',
+          status:
+            detailsState.status === 'fulfilled' &&
+            coordinatesState.status === 'fulfilled' &&
+            geometryState.status === 'fulfilled'
+              ? 'available'
+              : 'partial',
+          checkedAt: retrievedAt,
+          message:
+            detailsState.status === 'fulfilled' &&
+            coordinatesState.status === 'fulfilled' &&
+            geometryState.status === 'fulfilled'
+              ? 'Catastro respondi\u00f3 correctamente.'
+              : 'Catastro respondi\u00f3 parcialmente; algunos datos de la parcela no pudieron comprobarse.',
+        },
+      ],
     }
     if (detailsState.status === 'fulfilled') {
       result.evidence.push(evidence(detailsUrl.toString(), retrievedAt, 'Consulta_DNPRC'))
@@ -189,7 +248,12 @@ export class CatastroOfficialAdapter implements CatastroPort {
     }).toString()
     const response = await fetchOfficial(this.fetcher, 'Catastro', url, this.timeoutMs)
     try {
-      return referenceResult(await response.json())
+      return referenceResult(
+        await officialJson(response, 'Catastro', [
+          'Consulta_RCCOORResult',
+          'consulta_rccoorResult',
+        ])
+      )
     } catch {
       throw new OfficialServiceError('Catastro', 'malformed', 'Catastro devolvió una respuesta no válida.')
     }

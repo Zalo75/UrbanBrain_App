@@ -11,6 +11,40 @@ export interface ParcelGeometry {
 
 export type TerritorialConfidence = 'high' | 'medium' | 'low'
 export type TerritorialVerification = 'confirmed' | 'probable' | 'ambiguous' | 'unresolved'
+export type OfficialSource = 'catastro' | 'cartociudad' | 'siotuga' | 'ideg'
+export type OfficialSourceCheckStatus =
+  | 'available'
+  | 'partial'
+  | 'timeout'
+  | 'unavailable'
+  | 'malformed'
+  | 'not_found'
+  | 'ambiguous'
+  | 'conflict'
+
+export interface OfficialSourceCheck {
+  source: OfficialSource
+  status: OfficialSourceCheckStatus
+  checkedAt: string
+  message: string
+}
+
+export interface ManualTerritorialContext {
+  cadastralReference?: string
+  municipality?: string
+  address?: string
+  coordinates?: TerritorialCoordinates
+  classification?: string
+  category?: string
+  area?: string
+  ordinance?: string
+  observations?: string
+  provenance: 'manual'
+  verification: 'unverified' | 'technician_validated'
+  recordedAt: string
+  validatedAt?: string
+  validatedBy?: string
+}
 
 export interface TerritorialEvidence {
   source: 'catastro' | 'cartociudad' | 'siotuga' | 'ideg' | 'urbanbrain'
@@ -91,6 +125,7 @@ export interface PlanningApplicability {
   conflicts?: string[]
   evidence: TerritorialEvidence[]
   warnings: TerritorialWarning[]
+  sourceChecks?: OfficialSourceCheck[]
 }
 
 export interface TerritorialAffect {
@@ -107,6 +142,15 @@ export interface AffectApplicability {
   detected: TerritorialAffect[]
   canRuleOutUndetectedAffects: false
   warnings: TerritorialWarning[]
+  sourceChecks?: OfficialSourceCheck[]
+}
+
+export interface TerritorialContinuity {
+  lastOfficialContext?: TerritorialResolution
+  effectiveOfficialContext?: TerritorialResolution
+  usingPreviousOfficialContext: boolean
+  sameParcelAsPrevious: boolean
+  manualContext?: ManualTerritorialContext
 }
 
 export interface TerritorialResolution {
@@ -125,9 +169,12 @@ export interface TerritorialResolution {
   evidence: TerritorialEvidence[]
   warnings: TerritorialWarning[]
   conflicts: TerritorialConflict[]
+  sourceChecks?: OfficialSourceCheck[]
+  continuity?: TerritorialContinuity
   planning: PlanningApplicability
   affects: AffectApplicability
   resolvedAt: string
+  attemptStartedAt?: string
 }
 
 export interface ResolveParcelLocationInput {
@@ -147,6 +194,7 @@ export interface CatastroParcel {
   coordinates?: TerritorialCoordinates
   geometry?: ParcelGeometry
   evidence: TerritorialEvidence[]
+  sourceChecks?: OfficialSourceCheck[]
 }
 
 export interface CatastroPort {

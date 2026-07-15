@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 
 import type {
   DetectedParcelInput,
@@ -6,6 +6,7 @@ import type {
   ParcelExpedienteInput,
 } from '@/application/parcel-context/normalizeParcelContext'
 import { db } from '@/infrastructure/db/client'
+import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 import {
   afeccionTypes,
   chatMessages,
@@ -20,6 +21,7 @@ export interface AuthorizedParcelInputs {
   detected: DetectedParcelInput | null
   userMessages: string[]
   constraints: KnownConstraintInput[]
+  latestDetectionRaw?: unknown
 }
 
 export function buildAuthorizedExpedienteQuery(
@@ -50,10 +52,10 @@ export async function loadAuthorizedParcelInputs(
 
   const [latestDetection, history, constraints] = await Promise.all([
     db
-      .select({ summary: contextDetections.summary })
+      .select({ summary: contextDetections.summary, rawResponse: contextDetections.rawResponse })
       .from(contextDetections)
       .where(eq(contextDetections.expedienteId, expedienteId))
-      .orderBy(desc(contextDetections.detectedAt))
+      .orderBy(...latestContextDetectionOrder())
       .limit(1),
     db
       .select({ content: chatMessages.content })
@@ -106,5 +108,6 @@ export async function loadAuthorizedParcelInputs(
       })),
       ...detectedAffects,
     ],
+    latestDetectionRaw: latestDetection[0]?.rawResponse,
   }
 }

@@ -11,6 +11,7 @@ import { ChatInterface } from './ChatInterface'
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import { TerritorialContextPanel } from './TerritorialContextPanel'
+import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -39,7 +40,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
       .select({ rawResponse: contextDetections.rawResponse })
       .from(contextDetections)
       .where(eq(contextDetections.expedienteId, expediente.id))
-      .orderBy(desc(contextDetections.detectedAt))
+      .orderBy(...latestContextDetectionOrder())
       .limit(1),
   ])
   const territorialContext = buildTerritorialContextView(
@@ -84,10 +85,11 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
       <TerritorialContextPanel
         expedienteId={expediente.id}
         initialInput={{
-          cadastralReference: expediente.refCatastral,
-          address: expediente.address,
-          lat: expediente.lat,
-          lng: expediente.lng,
+          cadastralReference:
+            territorialContext?.manualContext?.cadastralReference ?? expediente.refCatastral,
+          address: territorialContext?.manualContext?.address ?? expediente.address,
+          lat: territorialContext?.manualContext?.coordinates?.lat ?? expediente.lat,
+          lng: territorialContext?.manualContext?.coordinates?.lng ?? expediente.lng,
         }}
         context={territorialContext}
       />
