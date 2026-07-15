@@ -8,6 +8,11 @@ The tenant boundary is:
 
 `chat_messages`, `context_detections`, and `expediente_afecciones` inherit the tenant from their `expediente_id`. `municipal_planning` and `afeccion_types` are global catalogues and have no tenant key. Physical V1/V2 RAG tables are server-only implementation details.
 
+The operational schema has historical drift: `normativa_documents` V1 may be absent while
+`normativa_chunks` V1 remains present. Authorization roots are mandatory because the tenant helper
+depends on them. Product and RAG tables are hardened independently with an explicit `to_regclass`
+check, so absence of one optional table never prevents existing tables from being closed.
+
 The application performs authenticated server actions through `DATABASE_URL`. The audited server database role has `BYPASSRLS`. `/api/chat` invokes `match_normativa_chunks` with `SUPABASE_SERVICE_ROLE_KEY`; the browser does not need direct RPC execution.
 
 ## Direct Data API matrix
@@ -36,6 +41,8 @@ All messages, detections, constraints, catalogue maintenance, updates, and delet
 - The migration revokes grants from both `PUBLIC` and the explicit Data API roles before granting the minimum permissions.
 - Authorization roots cannot be mutated through the Data API, preventing fabricated memberships or expedientes.
 - V1/V2 chunks and document metadata cannot be read directly; the server role retains the V1 metadata access required by `match_normativa_chunks`, and RAG remains behind the server channel.
+- Reapplication is idempotent: owned policies are dropped and recreated, while grants, RLS flags,
+  function security, and `search_path` converge on the same state.
 
 ## Validation before any production application
 
@@ -48,6 +55,20 @@ supabase test db --db-url "$STAGING_DATABASE_URL"
 ```
 
 Then run the application typecheck, tests, build, and an authenticated smoke test covering users from two organizations and the server-side chat RPC.
+
+The historical local migration chain creates `normativa_documents` and therefore cannot reproduce
+the drifted operational shape. Validate that shape separately in an ephemeral Supabase PostgreSQL
+container by executing:
+
+```bash
+psql "$EPHEMERAL_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f supabase/tests/territorial_beta_rls_optional_v1.test.sql
+```
+
+That scenario creates only a synthetic minimum schema, leaves `normativa_documents` absent, keeps
+V1 chunks and V2 present, applies the migration twice, verifies browser/server/RPC permissions,
+executes the fail-closed rollback, and verifies the post-rollback state. It is test-only and must
+never be run against an operational database.
 
 Before production, capture a database backup and a catalogue-only snapshot of policies, grants, function ACLs, and the exact RPC definition. Apply only the reviewed migration file in a maintenance window:
 
@@ -78,3 +99,7 @@ psql "$PRODUCTION_DATABASE_URL" -v ON_ERROR_STOP=1 \
 ```
 
 This removes the new authenticated policies and helper but leaves all sensitive tables closed to `anon` and `authenticated`; `service_role` and the server database role continue operating. Restoring the insecure grants is intentionally not provided.
+
+The rollback uses the same per-table existence checks as the migration. It also forces RLS on every
+existing protected table, restores only `service_role` DML, and keeps the RPC as `SECURITY INVOKER`
+with its restricted `search_path`.

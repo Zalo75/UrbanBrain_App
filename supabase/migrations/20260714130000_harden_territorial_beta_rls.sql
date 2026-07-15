@@ -5,6 +5,8 @@
 begin;
 
 do $block$
+declare
+  required_table text;
 begin
   if not exists (
     select 1
@@ -23,6 +25,19 @@ begin
   ) then
     raise exception 'service_role must have BYPASSRLS for server operations';
   end if;
+
+  -- These relations are authorization roots used by the helper and therefore
+  -- are not optional. Everything else is hardened independently when present.
+  foreach required_table in array array[
+    'organizations',
+    'profiles',
+    'organization_members',
+    'expedientes'
+  ] loop
+    if to_regclass('public.' || required_table) is null then
+      raise exception 'Required authorization table public.% does not exist', required_table;
+    end if;
+  end loop;
 end;
 $block$;
 
@@ -56,150 +71,94 @@ revoke all privileges on function public.urbanbrain_can_access_expediente(uuid) 
 grant execute on function public.urbanbrain_can_access_expediente(uuid)
   to authenticated, service_role;
 
-alter table public.chat_messages enable row level security;
-alter table public.chat_messages force row level security;
-alter table public.context_detections enable row level security;
-alter table public.context_detections force row level security;
-alter table public.expediente_afecciones enable row level security;
-alter table public.expediente_afecciones force row level security;
-alter table public.municipal_planning enable row level security;
-alter table public.municipal_planning force row level security;
-alter table public.afeccion_types enable row level security;
-alter table public.afeccion_types force row level security;
-
--- Authorization roots are server-managed. Revoking their direct Data API
--- grants prevents membership or expediente escalation even if a permissive
--- historical policy exists in another environment.
-alter table public.organizations enable row level security;
-alter table public.organizations force row level security;
-alter table public.profiles enable row level security;
-alter table public.profiles force row level security;
-alter table public.organization_members enable row level security;
-alter table public.organization_members force row level security;
-alter table public.expedientes enable row level security;
-alter table public.expedientes force row level security;
-
--- RAG storage is not a browser API. V1 remains available through the RPC and
--- V2 through the server database connection only.
-alter table public.normativa_documents enable row level security;
-alter table public.normativa_documents force row level security;
-alter table public.normativa_chunks enable row level security;
-alter table public.normativa_chunks force row level security;
-alter table public.normative_documents_v2 enable row level security;
-alter table public.normative_documents_v2 force row level security;
-alter table public.normative_chunks_v2 enable row level security;
-alter table public.normative_chunks_v2 force row level security;
+-- The remote schema has historical drift: V1 metadata may be absent while V1
+-- chunks remain. Protect every known relation independently and explicitly.
+do $block$
+declare
+  protected_table text;
+begin
+  foreach protected_table in array array[
+    'chat_messages',
+    'context_detections',
+    'expediente_afecciones',
+    'municipal_planning',
+    'afeccion_types',
+    'organizations',
+    'profiles',
+    'organization_members',
+    'expedientes',
+    'normativa_documents',
+    'normativa_chunks',
+    'normative_documents_v2',
+    'normative_chunks_v2'
+  ] loop
+    if to_regclass('public.' || protected_table) is not null then
+      execute format(
+        'alter table public.%I enable row level security',
+        protected_table
+      );
+      execute format(
+        'alter table public.%I force row level security',
+        protected_table
+      );
+      execute format(
+        'revoke all privileges on table public.%I from public, anon, authenticated',
+        protected_table
+      );
+      execute format(
+        'grant select, insert, update, delete on table public.%I to service_role',
+        protected_table
+      );
+    end if;
+  end loop;
+end;
+$block$;
 
 -- Re-running the migration recreates only policies owned by this change.
-drop policy if exists urbanbrain_chat_messages_select_tenant
-  on public.chat_messages;
-drop policy if exists urbanbrain_chat_messages_insert_self
-  on public.chat_messages;
-drop policy if exists urbanbrain_context_detections_select_tenant
-  on public.context_detections;
-drop policy if exists urbanbrain_expediente_afecciones_select_tenant
-  on public.expediente_afecciones;
-drop policy if exists urbanbrain_municipal_planning_select_authenticated
-  on public.municipal_planning;
-drop policy if exists urbanbrain_afeccion_types_select_authenticated
-  on public.afeccion_types;
+-- Each block is conditional because non-core product tables may legitimately
+-- be absent in an operational schema assembled before migration versioning.
+do $block$
+begin
+  if to_regclass('public.chat_messages') is not null then
+    execute 'drop policy if exists urbanbrain_chat_messages_select_tenant on public.chat_messages';
+    execute 'drop policy if exists urbanbrain_chat_messages_insert_self on public.chat_messages';
+    execute 'create policy urbanbrain_chat_messages_select_tenant
+      on public.chat_messages for select to authenticated
+      using (public.urbanbrain_can_access_expediente(expediente_id))';
+    grant select on table public.chat_messages to authenticated;
+  end if;
 
--- Chat history is tenant-readable. All writes remain server-only because the
--- webapp sends messages through /api/chat after the centralized access guard.
-create policy urbanbrain_chat_messages_select_tenant
-on public.chat_messages
-for select
-to authenticated
-using (public.urbanbrain_can_access_expediente(expediente_id));
+  if to_regclass('public.context_detections') is not null then
+    execute 'drop policy if exists urbanbrain_context_detections_select_tenant on public.context_detections';
+    execute 'create policy urbanbrain_context_detections_select_tenant
+      on public.context_detections for select to authenticated
+      using (public.urbanbrain_can_access_expediente(expediente_id))';
+    grant select on table public.context_detections to authenticated;
+  end if;
 
--- Territorial detections and applied constraints are generated by trusted
--- server processes. Authenticated users may read only their tenant rows.
-create policy urbanbrain_context_detections_select_tenant
-on public.context_detections
-for select
-to authenticated
-using (public.urbanbrain_can_access_expediente(expediente_id));
+  if to_regclass('public.expediente_afecciones') is not null then
+    execute 'drop policy if exists urbanbrain_expediente_afecciones_select_tenant on public.expediente_afecciones';
+    execute 'create policy urbanbrain_expediente_afecciones_select_tenant
+      on public.expediente_afecciones for select to authenticated
+      using (public.urbanbrain_can_access_expediente(expediente_id))';
+    grant select on table public.expediente_afecciones to authenticated;
+  end if;
 
-create policy urbanbrain_expediente_afecciones_select_tenant
-on public.expediente_afecciones
-for select
-to authenticated
-using (public.urbanbrain_can_access_expediente(expediente_id));
+  if to_regclass('public.municipal_planning') is not null then
+    execute 'drop policy if exists urbanbrain_municipal_planning_select_authenticated on public.municipal_planning';
+    execute 'create policy urbanbrain_municipal_planning_select_authenticated
+      on public.municipal_planning for select to authenticated using (true)';
+    grant select on table public.municipal_planning to authenticated;
+  end if;
 
--- municipal_planning is an explicit global catalogue: authenticated read-only,
--- never anonymously writable or readable through the Data API.
-create policy urbanbrain_municipal_planning_select_authenticated
-on public.municipal_planning
-for select
-to authenticated
-using (true);
-
-create policy urbanbrain_afeccion_types_select_authenticated
-on public.afeccion_types
-for select
-to authenticated
-using (true);
-
--- Remove broad default Data API grants, then grant the minimum surface.
-revoke all privileges on table public.chat_messages
-  from public, anon, authenticated;
-revoke all privileges on table public.context_detections
-  from public, anon, authenticated;
-revoke all privileges on table public.expediente_afecciones
-  from public, anon, authenticated;
-revoke all privileges on table public.municipal_planning
-  from public, anon, authenticated;
-revoke all privileges on table public.afeccion_types
-  from public, anon, authenticated;
-revoke all privileges on table public.organizations
-  from public, anon, authenticated;
-revoke all privileges on table public.profiles
-  from public, anon, authenticated;
-revoke all privileges on table public.organization_members
-  from public, anon, authenticated;
-revoke all privileges on table public.expedientes
-  from public, anon, authenticated;
-revoke all privileges on table public.normativa_documents
-  from public, anon, authenticated;
-revoke all privileges on table public.normativa_chunks
-  from public, anon, authenticated;
-revoke all privileges on table public.normative_documents_v2
-  from public, anon, authenticated;
-revoke all privileges on table public.normative_chunks_v2
-  from public, anon, authenticated;
-
-grant select on table public.chat_messages to authenticated;
-grant select on table public.context_detections to authenticated;
-grant select on table public.expediente_afecciones to authenticated;
-grant select on table public.municipal_planning to authenticated;
-grant select on table public.afeccion_types to authenticated;
-
-grant select, insert, update, delete on table public.chat_messages
-  to service_role;
-grant select, insert, update, delete on table public.context_detections
-  to service_role;
-grant select, insert, update, delete on table public.expediente_afecciones
-  to service_role;
-grant select, insert, update, delete on table public.municipal_planning
-  to service_role;
-grant select, insert, update, delete on table public.afeccion_types
-  to service_role;
-grant select, insert, update, delete on table public.organizations
-  to service_role;
-grant select, insert, update, delete on table public.profiles
-  to service_role;
-grant select, insert, update, delete on table public.organization_members
-  to service_role;
-grant select, insert, update, delete on table public.expedientes
-  to service_role;
-grant select, insert, update, delete on table public.normativa_documents
-  to service_role;
-grant select, insert, update, delete on table public.normativa_chunks
-  to service_role;
-grant select, insert, update, delete on table public.normative_documents_v2
-  to service_role;
-grant select, insert, update, delete on table public.normative_chunks_v2
-  to service_role;
+  if to_regclass('public.afeccion_types') is not null then
+    execute 'drop policy if exists urbanbrain_afeccion_types_select_authenticated on public.afeccion_types';
+    execute 'create policy urbanbrain_afeccion_types_select_authenticated
+      on public.afeccion_types for select to authenticated using (true)';
+    grant select on table public.afeccion_types to authenticated;
+  end if;
+end;
+$block$;
 
 -- The webapp calls this RPC only from /api/chat with SUPABASE_SERVICE_ROLE_KEY.
 -- Fail closed if the audited signature is not present or is ambiguous.
