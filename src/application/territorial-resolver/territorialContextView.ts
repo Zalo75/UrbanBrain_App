@@ -16,8 +16,10 @@ export interface TerritorialContextView {
   inputMethod: TerritorialResolution['inputMethod'];
   cadastralReference?: string;
   address?: string;
+  coordinates?: TerritorialResolution['coordinates'];
   municipality?: string;
   municipalityCode?: string;
+  province?: string;
   classification?: TerritorialResolution['planning']['classification'];
   areas: string[];
   instrument?: string;
@@ -32,6 +34,7 @@ export interface TerritorialContextView {
   officialContextResolvedAt?: string;
   usingPreviousOfficialContext: boolean;
   manualContext?: Omit<ManualTerritorialContext, 'validatedBy'>;
+  technicallyReviewed: boolean;
   sourceChecks: OfficialSourceCheck[];
 }
 
@@ -103,8 +106,10 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     inputMethod: result.inputMethod,
     cadastralReference: effective?.cadastralReference ?? manual?.cadastralReference,
     address: effective?.normalizedAddress ?? manual?.address,
+    coordinates: effective?.coordinates ?? manual?.coordinates,
     municipality: effective?.municipality ?? manual?.municipality,
     municipalityCode: effective?.municipalityCode,
+    province: effective?.province,
     classification:
       effective?.planning.classification ??
       (manual?.classification
@@ -161,6 +166,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
           validatedAt: manual.validatedAt,
         }
       : undefined,
+    technicallyReviewed: manual?.verification === 'technician_validated',
     sourceChecks,
   };
 }

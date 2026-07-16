@@ -60,7 +60,7 @@ export function ExpedienteForm({
           toast.info("No se han podido mapear los datos detectados automáticamente.")
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Error al detectar el contexto.")
     } finally {
       setIsDetecting(false)
@@ -297,13 +297,13 @@ export function ExpedienteForm({
         <label className="flex items-start gap-3 p-4 border rounded-md bg-background shadow-sm cursor-pointer hover:bg-muted/30 transition-colors">
           <input 
             type="checkbox" 
-            name="contextoValidadoPorTecnico"
+            name="initialContextNoticeAccepted"
             value="true"
             required
             className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
           />
           <span className="text-sm font-medium leading-tight text-foreground">
-            Confirmo que he revisado el contexto urbanístico inicial del expediente.
+            Entiendo que el contexto inicial es orientativo y debe validarse técnicamente antes de utilizarlo.
           </span>
         </label>
       </div>

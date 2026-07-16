@@ -7,6 +7,7 @@ import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
 import { authProvider } from '@/infrastructure/auth'
 import { eq } from 'drizzle-orm'
 import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
+import { getInitialContextAcceptance } from './creationContext'
 
 import { isMunicipalityEnabled, getProvinceByName, getMunicipalityByName } from '@/shared/territory'
 
@@ -53,13 +54,16 @@ export async function createExpediente(formData: FormData) {
   const actionType = actionTypeRaw ? actionTypeRaw as 'consulta_urbanistica' | 'vivienda_unifamiliar' | 'reforma' | 'segregacion' | 'cambio_de_uso' | 'nave' | 'legalizacion' | 'demolicion' | 'parcelacion' | 'informe_urbanistico' | 'otro' : null
   const notes = formData.get('notes') as string | null
   const planeamiento = formData.get('planeamiento') as string | null
-  const contextoValidadoPorTecnico = formData.get('contextoValidadoPorTecnico') === 'true'
+  const initialContextAcceptance = getInitialContextAcceptance(formData)
 
   if (!name || name.trim() === '') {
     redirect('/expedientes/new?error=name_required')
   }
   if (!province || province.trim() === '' || !municipio || municipio.trim() === '') {
     redirect('/expedientes/new?error=territory_required')
+  }
+  if (!initialContextAcceptance.noticeAccepted) {
+    redirect('/expedientes/new?error=context_notice_required')
   }
 
   if (!isMunicipalityEnabled(municipio)) {
@@ -108,7 +112,7 @@ export async function createExpediente(formData: FormData) {
       actionType,
       notes: notes ? notes.trim() : null,
       planeamiento: planeamiento ? planeamiento.trim() : null,
-      contextoValidadoPorTecnico,
+      contextoValidadoPorTecnico: initialContextAcceptance.technicallyReviewed,
       status: 'active'
     }).returning({ id: expedientes.id })
 
