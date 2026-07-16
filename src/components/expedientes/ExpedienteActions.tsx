@@ -20,6 +20,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { updateExpediente, archiveExpediente } from '@/app/(dashboard)/expedientes/actions'
+import { hasOrganizationPermission, type OrganizationRole } from '@/application/authorization/organizationRoles'
 
 interface Expediente {
   id: string
@@ -28,10 +29,14 @@ interface Expediente {
   refCatastral: string | null
 }
 
-export function ExpedienteActions({ expediente }: { expediente: Expediente }) {
+export function ExpedienteActions({ expediente, membershipRole }: { expediente: Expediente; membershipRole: OrganizationRole }) {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isArchiveOpen, setIsArchiveOpen] = useState(false)
   const [isPending, setIsPending] = useState(false)
+  const canEdit = hasOrganizationPermission(membershipRole, 'expediente.edit')
+  const canArchive = hasOrganizationPermission(membershipRole, 'expediente.archive')
+
+  if (!canEdit && !canArchive) return null
 
   async function handleArchive() {
     setIsPending(true)
@@ -66,17 +71,17 @@ export function ExpedienteActions({ expediente }: { expediente: Expediente }) {
           <span className="sr-only">Abrir menú</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => setIsEditOpen(true)} className="cursor-pointer">
+          {canEdit && <DropdownMenuItem onClick={() => setIsEditOpen(true)} className="cursor-pointer">
             <Edit2 className="mr-2 h-4 w-4" />
             <span>Editar</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem 
+          </DropdownMenuItem>}
+          {canArchive && <DropdownMenuItem
             onClick={() => setIsArchiveOpen(true)} 
             className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
           >
             <Archive className="mr-2 h-4 w-4" />
             <span>Archivar</span>
-          </DropdownMenuItem>
+          </DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>
 

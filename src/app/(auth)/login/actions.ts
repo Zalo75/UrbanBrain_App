@@ -13,7 +13,7 @@ export async function login(formData: FormData) {
   const { error } = await authProvider.login(credentials)
 
   if (error) {
-    redirect('/login?message=Could not authenticate user')
+    redirect('/login?message=invalid_credentials')
   }
 
   revalidatePath('/', 'layout')
@@ -29,7 +29,7 @@ export async function signup(formData: FormData) {
   const { error } = await authProvider.signup(credentials)
 
   if (error) {
-    redirect('/login?message=Could not authenticate user')
+    redirect('/login?message=signup_failed')
   }
 
   revalidatePath('/', 'layout')
@@ -41,7 +41,7 @@ export async function loginWithGoogle() {
   const { url, error } = await authProvider.signInWithOAuth('google', `${siteUrl}/auth/callback`)
   
   if (error) {
-    redirect('/login?message=Could not authenticate with Google')
+    redirect('/login?message=oauth_failed')
   }
 
   if (url) {

@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FolderOpen, Settings, LayoutDashboard, ChevronDown } from "lucide-react"
+import { FolderOpen, LayoutDashboard, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -41,12 +42,6 @@ export function AppSidebar({ className, organization }: AppSidebarProps) {
       icon: FolderOpen,
       active: pathname.startsWith("/expedientes"),
     },
-    {
-      title: "Ajustes",
-      href: "/settings",
-      icon: Settings,
-      active: pathname.startsWith("/settings"),
-    },
   ]
 
   const orgName = organization?.name || "Estudio"
@@ -69,7 +64,9 @@ export function AppSidebar({ className, organization }: AppSidebarProps) {
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuLabel>Cambiar de Estudio</DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Cambiar de Estudio</DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem>
               <div className="flex items-center gap-2">

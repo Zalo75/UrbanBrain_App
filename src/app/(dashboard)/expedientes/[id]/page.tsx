@@ -1,46 +1,51 @@
 import { redirect } from 'next/navigation'
 import { db } from '@/infrastructure/db/client'
-import { expedientes, organizationMembers, documents } from '@/infrastructure/db/schema'
-import { eq, and, desc } from 'drizzle-orm'
-import { authProvider } from '@/infrastructure/auth'
-import { MapPin, Settings, MessageSquare, AlertCircle } from 'lucide-react'
+import { contextDetections, documents } from '@/infrastructure/db/schema'
+import { eq, desc } from 'drizzle-orm'
+import { MapPin, Settings, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DocumentList } from './DocumentList'
 import { formatLocationSource, formatLandClass, formatActionType } from '@/shared/utils/formatters'
 import { getProvinceNameById, getMunicipalityNameById } from '@/shared/territory'
 import { ChatInterface } from './ChatInterface'
+import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
+import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
+import { TerritorialContextPanel } from './TerritorialContextPanel'
+import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
-  const [expediente] = await db.select().from(expedientes).where(eq(expedientes.id, resolvedParams.id))
-  if (!expediente) return { title: 'Expediente no encontrado - UrbanBrain' }
-  return { title: `${expediente.name} - UrbanBrain` }
+  const access = await getExpedienteAccess(resolvedParams.id)
+  if (!access.ok) return { title: 'Expediente - UrbanBrain' }
+  return { title: `${access.expediente.name} - UrbanBrain` }
 }
 
 export default async function ExpedienteWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
-  const userId = await authProvider.getUserId()
-  if (!userId) redirect('/login')
-
-  const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
-  if (memberships.length === 0) redirect('/onboarding')
-  
-  const orgId = memberships[0].orgId
-
-  const [expediente] = await db
-    .select()
-    .from(expedientes)
-    .where(and(eq(expedientes.id, resolvedParams.id), eq(expedientes.orgId, orgId)))
-
-  if (!expediente) {
+  const access = await getExpedienteAccess(resolvedParams.id)
+  if (!access.ok && access.reason === 'unauthenticated') redirect('/login')
+  if (!access.ok) {
     redirect('/dashboard')
   }
 
-  const expedienteDocs = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.expedienteId, expediente.id))
-    .orderBy(desc(documents.uploadedAt))
+  const { expediente, membershipRole } = access
+
+  const [expedienteDocs, latestDetections] = await Promise.all([
+    db
+      .select()
+      .from(documents)
+      .where(eq(documents.expedienteId, expediente.id))
+      .orderBy(desc(documents.uploadedAt)),
+    db
+      .select({ rawResponse: contextDetections.rawResponse })
+      .from(contextDetections)
+      .where(eq(contextDetections.expedienteId, expediente.id))
+      .orderBy(...latestContextDetectionOrder())
+      .limit(1),
+  ])
+  const territorialContext = buildTerritorialContextView(
+    latestDetections[0]?.rawResponse ?? null
+  )
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
@@ -76,6 +81,18 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           </Button>
         </div>
       </div>
+
+      <TerritorialContextPanel
+        expedienteId={expediente.id}
+        initialInput={{
+          cadastralReference:
+            territorialContext?.manualContext?.cadastralReference ?? expediente.refCatastral,
+          address: territorialContext?.manualContext?.address ?? expediente.address,
+          lat: territorialContext?.manualContext?.coordinates?.lat ?? expediente.lat,
+          lng: territorialContext?.manualContext?.coordinates?.lng ?? expediente.lng,
+        }}
+        context={territorialContext}
+      />
 
       {/* Workspace Layout: Split Screen */}
       <div className="flex flex-1 overflow-hidden">
@@ -166,8 +183,8 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
           <DocumentList 
             expedienteId={expediente.id} 
-            orgId={orgId} 
             documents={expedienteDocs} 
+            membershipRole={membershipRole}
           />
         </div>
 
@@ -184,7 +201,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
               <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden a este expediente.</span>
             </div>
           )}
-          <ChatInterface expedienteId={expediente.id} municipio={expediente.municipio} />
+          <ChatInterface expedienteId={expediente.id} />
         </div>
 
       </div>

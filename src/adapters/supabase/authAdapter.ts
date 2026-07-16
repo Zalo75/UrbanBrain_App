@@ -35,11 +35,15 @@ export class SupabaseAuthAdapter implements AuthPort {
       data: { user },
     } = await supabase.auth.getUser()
 
+    const isProtectedPath =
+      request.nextUrl.pathname.startsWith('/dashboard') ||
+      request.nextUrl.pathname.startsWith('/control-center')
+
     if (
       !user &&
       !request.nextUrl.pathname.startsWith('/login') &&
       !request.nextUrl.pathname.startsWith('/auth') &&
-      request.nextUrl.pathname.startsWith('/dashboard')
+      isProtectedPath
     ) {
       // no user, redirect to login page
       const url = request.nextUrl.clone()
@@ -69,6 +73,12 @@ export class SupabaseAuthAdapter implements AuthPort {
       email: credentials.email,
       password: credentials.password
     })
+    return { error: error ? error.message : null }
+  }
+
+  async logout(): Promise<{ error: string | null }> {
+    const supabase = await this._getServerClient()
+    const { error } = await supabase.auth.signOut()
     return { error: error ? error.message : null }
   }
 

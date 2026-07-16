@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send, FileText, AlertCircle } from 'lucide-react';
@@ -22,12 +22,16 @@ interface Source {
   fragmento_corto?: string;
 }
 
-interface ChatInterfaceProps {
-  expedienteId: string;
-  municipio: string;
+interface ChatHistoryEntry extends Message {
+  sources?: Source[] | null;
 }
 
-export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
+interface ChatInterfaceProps {
+  expedienteId: string;
+}
+
+export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
+  const inFlightRef = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,26 +42,30 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
     async function fetchHistory() {
       try {
         const res = await fetch(`/api/chat/history?expedienteId=${expedienteId}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          setError('No se ha podido cargar el historial del chat.');
+          return;
+        }
         const data = await res.json();
 
         if (data.history && data.history.length > 0) {
-          const loadedMessages = data.history.map((h: any) => ({
-            role: h.role,
-            content: h.content,
+          const history = data.history as ChatHistoryEntry[];
+          const loadedMessages = history.map((entry) => ({
+            role: entry.role,
+            content: entry.content,
           }));
           setMessages(loadedMessages);
 
           // Recuperar fuentes del último mensaje del asistente si existen
-          const lastAssistantMsg = [...data.history]
+          const lastAssistantMsg = [...history]
             .reverse()
-            .find((m: any) => m.role === 'assistant');
+            .find((entry) => entry.role === 'assistant');
           if (lastAssistantMsg && lastAssistantMsg.sources) {
             setSources(lastAssistantMsg.sources);
           }
         }
-      } catch (err) {
-        console.error('Error fetching chat history', err);
+      } catch {
+        setError('No se ha podido cargar el historial del chat.');
       }
     }
 
@@ -67,13 +75,20 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
   }, [expedienteId]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || inFlightRef.current) return;
 
     const userMessage = input.trim();
+    if (userMessage.length > 4000) {
+      setError('La consulta no puede superar 4000 caracteres.');
+      return;
+    }
+    inFlightRef.current = true;
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 50_000);
 
     try {
       const response = await fetch('/api/chat', {
@@ -83,9 +98,9 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
         },
         body: JSON.stringify({
           message: userMessage,
-          municipio,
           expedienteId,
         }),
+        signal: controller.signal,
       });
 
       const data = await response.json();
@@ -96,9 +111,11 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
 
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
       setSources(data.sources || []);
-    } catch (err: any) {
-      setError(err.message || 'Error desconocido');
+    } catch (err: unknown) {
+      setError(err instanceof DOMException && err.name === 'AbortError' ? 'La consulta ha tardado demasiado. Inténtelo de nuevo.' : err instanceof Error ? err.message : 'No se ha podido completar la consulta.');
     } finally {
+      window.clearTimeout(timeoutId);
+      inFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -140,9 +157,13 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
               placeholder="Escribe tu consulta normativa..."
               className="flex-1 shadow-sm"
               value={input}
+              maxLength={4000}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSend();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSend();
+                }
               }}
               disabled={loading}
             />
@@ -201,7 +222,7 @@ export function ChatInterface({ expedienteId, municipio }: ChatInterfaceProps) {
                     )}
                   {source.fragmento_corto && (
                     <p className="text-foreground/80 border-muted-foreground/30 mt-2 border-l-2 pl-2 italic">
-                      "{source.fragmento_corto}"
+                      &ldquo;{source.fragmento_corto}&rdquo;
                     </p>
                   )}
                   {source.original_path && (
