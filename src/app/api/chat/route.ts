@@ -21,6 +21,7 @@ import {
 } from '@/application/parcel-context/responseSafety';
 import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
+import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -91,7 +92,8 @@ function mapVisibleSources(candidates: NormativeCandidate[]) {
   }));
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest, signal: AbortSignal) {
+  let releaseChatSlot: (() => void) | undefined;
   try {
     const body = await req.json();
     const { message, expedienteId } = body;
@@ -107,10 +109,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (typeof message !== 'string' || !message.trim()) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Escriba una consulta.' }, { status: 400 });
+    }
+    if (message.trim().length > MAX_CHAT_MESSAGE_LENGTH) {
+      return NextResponse.json({ error: `La consulta no puede superar ${MAX_CHAT_MESSAGE_LENGTH} caracteres.` }, { status: 413 });
     }
 
     const userId = access.userId;
+    const slot = acquireChatSlot(userId);
+    if (!slot.ok) {
+      return NextResponse.json(
+        { error: slot.reason === 'concurrent' ? 'Ya hay una consulta en curso.' : 'Ha enviado demasiadas consultas. Espere un momento.' },
+        { status: 429, headers: { 'Retry-After': String(slot.retryAfterSeconds) } }
+      );
+    }
+    releaseChatSlot = slot.release;
     const parcelInputs = await loadAuthorizedParcelInputs(expedienteId, userId);
     if (!parcelInputs) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -143,7 +156,7 @@ export async function POST(req: NextRequest) {
       const { eq } = await import('drizzle-orm');
 
       const analyzer = new QuestionAnalyzer();
-      const analysis = await analyzer.analyze(message);
+      const analysis = await analyzer.analyze(message, signal);
 
       // Obtener contexto existente sin invocar de nuevo el motor
       const existingContext = await db
@@ -171,7 +184,7 @@ export async function POST(req: NextRequest) {
     const embeddingResult = await embeddingModel.embedContent({
       content: { role: 'user', parts: [{ text: message }] },
       taskType: TaskType.RETRIEVAL_QUERY,
-    });
+    }, { timeout: CHAT_REQUEST_TIMEOUT_MS, signal });
 
     const rawEmbedding = Array.from(embeddingResult.embedding.values);
 
@@ -185,18 +198,13 @@ export async function POST(req: NextRequest) {
 
     const query_embedding = rawEmbedding.slice(0, 768);
 
-    console.log('Embedding dimensions:', {
-      original: rawEmbedding.length,
-      used: query_embedding.length,
-    });
-
     // Llamar a Supabase RPC match_normativa_chunks (V1)
     const t0_v1 = performance.now();
     const { data: chunks, error: rpcError } = await supabase.rpc('match_normativa_chunks', {
       query_embedding,
       match_count: 8,
       filter_municipio: municipio,
-    });
+    }).abortSignal(signal);
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);
 
@@ -411,7 +419,7 @@ FUENTES
     // Logging for CTE V2 Response Mode
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
       console.log(`\n========== CTE V2 RESPONSE MODE ==========
-Pregunta: ${message}
+Pregunta: [omitida por privacidad]
 Feature flag: ${process.env.ENABLE_CTE_V2_RESPONSES || 'false'}
 DocumentCodes: ${plan?.documentCodes?.join(', ') || 'Ninguno'}
 Chunks recuperados: ${v2Results?.length || 0}
@@ -435,7 +443,7 @@ ${usedV2 ? v2Citas : 'N/A'}
         { role: 'user', content: usedV2 ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}` : message },
       ],
       temperature: 0.1,
-    });
+    }, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
     const t1_llm = performance.now();
     v2LLMTime = Math.round(t1_llm - t0_llm);
 
@@ -488,7 +496,31 @@ ${usedV2 ? v2Citas : 'N/A'}
       safety: contract,
     });
   } catch (error) {
-    console.error('Error in /api/chat:', error);
+    if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      return NextResponse.json({ error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' }, { status: 504 });
+    }
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } finally {
+    releaseChatSlot?.();
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutResponse = new Promise<NextResponse>((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve(NextResponse.json(
+        { error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' },
+        { status: 504 }
+      ));
+    }, CHAT_REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([handlePost(req, controller.signal), timeoutResponse]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

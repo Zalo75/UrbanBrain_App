@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, FolderOpen, MapPin } from 'lucide-react'
 import Link from 'next/link'
 import { ExpedienteActions } from '@/components/expedientes/ExpedienteActions'
+import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
 
 export const metadata = {
   title: 'Expedientes - UrbanBrain',
@@ -19,7 +20,8 @@ export default async function ExpedientesListPage() {
   const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
   if (memberships.length === 0) redirect('/onboarding')
   
-  const orgId = memberships[0].orgId
+  const { orgId, role: membershipRole } = memberships[0]
+  const canCreate = hasOrganizationPermission(membershipRole, 'expediente.create')
 
   const expedientesList = await db
     .select()
@@ -40,14 +42,14 @@ export default async function ExpedientesListPage() {
               Crea un expediente para organizar tus referencias catastrales, normativas y consultas.
             </p>
           </div>
-          <div className="pt-2">
+          {canCreate && <div className="pt-2">
             <Link href="/expedientes/new">
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
                 Nuevo Expediente
               </Button>
             </Link>
-          </div>
+          </div>}
         </div>
       </div>
     )
@@ -61,12 +63,12 @@ export default async function ExpedientesListPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Expedientes</h1>
           <p className="text-sm text-muted-foreground">Todos los expedientes activos de tu estudio.</p>
         </div>
-        <Link href="/expedientes/new">
+        {canCreate && <Link href="/expedientes/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
             Nuevo
           </Button>
-        </Link>
+        </Link>}
       </div>
 
       <div className="rounded-xl border bg-card">
@@ -115,7 +117,7 @@ export default async function ExpedientesListPage() {
 
               {/* Acciones */}
               <div className="flex justify-end">
-                <ExpedienteActions expediente={exp} />
+                <ExpedienteActions expediente={exp} membershipRole={membershipRole} />
               </div>
             </div>
           ))}

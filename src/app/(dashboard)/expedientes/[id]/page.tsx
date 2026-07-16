@@ -28,7 +28,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
     redirect('/dashboard')
   }
 
-  const { expediente, orgId } = access
+  const { expediente, membershipRole } = access
 
   const [expedienteDocs, latestDetections] = await Promise.all([
     db
@@ -183,8 +183,8 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
           <DocumentList 
             expedienteId={expediente.id} 
-            orgId={orgId} 
             documents={expedienteDocs} 
+            membershipRole={membershipRole}
           />
         </div>
 

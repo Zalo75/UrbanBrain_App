@@ -27,7 +27,19 @@ const GoogleIcon = () => (
   </svg>
 )
 
-export default function AuthenticationPage() {
+const loginMessages: Record<string, { text: string; success?: boolean }> = {
+  invalid_credentials: { text: 'El correo o la contraseña no son correctos.' },
+  signup_failed: { text: 'No se ha podido crear la cuenta.' },
+  oauth_failed: { text: 'No se ha podido iniciar sesión con Google.' },
+  auth_callback_failed: { text: 'No se ha podido completar el inicio de sesión.' },
+  no_code_provided: { text: 'El enlace de acceso no es válido o ha caducado.' },
+  logout_failed: { text: 'No se ha podido cerrar la sesión. Inténtalo de nuevo.' },
+  signed_out: { text: 'Sesión cerrada correctamente.', success: true },
+}
+
+export default async function AuthenticationPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
+  const { message } = await searchParams
+  const notice = message ? loginMessages[message] : undefined
   return (
     <div className="grid min-h-screen grid-cols-1 md:grid-cols-2">
       {/* Lado Izquierdo (Marca) */}
@@ -84,6 +96,11 @@ export default function AuthenticationPage() {
           </div>
 
           <div className="space-y-4">
+            {notice && (
+              <div role="alert" className={`rounded-xl border p-3 text-sm ${notice.success ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                {notice.text}
+              </div>
+            )}
             <form action={loginWithGoogle}>
               <Button type="submit" variant="outline" className="w-full h-14 rounded-xl bg-white hover:bg-zinc-50 text-zinc-700 font-medium border-zinc-200">
                 <GoogleIcon />

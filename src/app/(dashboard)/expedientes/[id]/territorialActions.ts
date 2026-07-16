@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
+import { hasOrganizationPermission } from '@/application/authorization/organizationRoles';
 import { ContextDetectionEngine } from '@/application/context-engine/ContextDetectionEngine';
 import { normalizeCadastralReference } from '@/application/territorial-resolver/resolveParcelLocation';
 import {
@@ -38,6 +39,13 @@ export async function resolveTerritorialContextAction(
   if (!access.ok) {
     return { status: 'error', message: 'No se ha encontrado el expediente.' };
   }
+  const intent = textValue(formData, 'intent') === 'manual' ? 'manual' : 'resolve';
+  if (
+    intent === 'manual' &&
+    !hasOrganizationPermission(access.membershipRole, 'context.manual.write')
+  ) {
+    return { status: 'error', message: 'No tienes permisos para guardar contexto manual.' };
+  }
 
   const rawReference = textValue(formData, 'refCatastral');
   const cadastralReference = normalizeCadastralReference(rawReference);
@@ -60,7 +68,6 @@ export async function resolveTerritorialContextAction(
   ) {
     return { status: 'error', message: 'Las coordenadas WGS84 no son válidas.' };
   }
-  const intent = textValue(formData, 'intent') === 'manual' ? 'manual' : 'resolve';
   const manualMunicipality = limitedText(formData, 'manualMunicipality', 80);
   const manualClassification = limitedText(formData, 'manualClassification', 80);
   const manualCategory = limitedText(formData, 'manualCategory', 80);
@@ -103,9 +110,8 @@ export async function resolveTerritorialContextAction(
     if (intent === 'manual') {
       const recordedAt = attemptStartedAt;
       const requestedTechnicianValidation = formData.get('technicianValidated') === 'on';
-      const technicianValidated =
-        requestedTechnicianValidation &&
-        ['owner', 'admin', 'member'].includes(access.membershipRole);
+      const technicianValidated = requestedTechnicianValidation &&
+        hasOrganizationPermission(access.membershipRole, 'context.technical_review');
       if (requestedTechnicianValidation && !technicianValidated) {
         return {
           status: 'error',

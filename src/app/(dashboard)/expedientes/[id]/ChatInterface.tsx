@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Send, FileText, AlertCircle } from 'lucide-react';
@@ -31,6 +31,7 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
+  const inFlightRef = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,7 +42,10 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
     async function fetchHistory() {
       try {
         const res = await fetch(`/api/chat/history?expedienteId=${expedienteId}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          setError('No se ha podido cargar el historial del chat.');
+          return;
+        }
         const data = await res.json();
 
         if (data.history && data.history.length > 0) {
@@ -60,8 +64,8 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
             setSources(lastAssistantMsg.sources);
           }
         }
-      } catch (err) {
-        console.error('Error fetching chat history', err);
+      } catch {
+        setError('No se ha podido cargar el historial del chat.');
       }
     }
 
@@ -71,13 +75,20 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   }, [expedienteId]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || inFlightRef.current) return;
 
     const userMessage = input.trim();
+    if (userMessage.length > 4000) {
+      setError('La consulta no puede superar 4000 caracteres.');
+      return;
+    }
+    inFlightRef.current = true;
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 50_000);
 
     try {
       const response = await fetch('/api/chat', {
@@ -89,6 +100,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
           message: userMessage,
           expedienteId,
         }),
+        signal: controller.signal,
       });
 
       const data = await response.json();
@@ -100,8 +112,10 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
       setSources(data.sources || []);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error desconocido');
+      setError(err instanceof DOMException && err.name === 'AbortError' ? 'La consulta ha tardado demasiado. Inténtelo de nuevo.' : err instanceof Error ? err.message : 'No se ha podido completar la consulta.');
     } finally {
+      window.clearTimeout(timeoutId);
+      inFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -143,9 +157,13 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
               placeholder="Escribe tu consulta normativa..."
               className="flex-1 shadow-sm"
               value={input}
+              maxLength={4000}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSend();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSend();
+                }
               }}
               disabled={loading}
             />

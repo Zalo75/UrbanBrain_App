@@ -20,6 +20,9 @@ export interface AuthPort {
    */
   login(credentials: Record<string, string>): Promise<{ error: string | null }>;
 
+  /** Cierra e invalida la sesiÃ³n autenticada actual. */
+  logout(): Promise<{ error: string | null }>;
+
   /**
    * Registra un nuevo usuario con email y contraseña.
    * Devuelve un error como string si falla, o null si tiene éxito.

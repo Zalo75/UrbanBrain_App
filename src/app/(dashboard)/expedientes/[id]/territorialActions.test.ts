@@ -297,7 +297,7 @@ describe('resolveTerritorialContextAction', () => {
     expect(result.message).not.toContain('internal-sensitive-value')
   })
 
-  it('un viewer puede guardar provisional pero no declarar validacion tecnica', async () => {
+  it('impide que un viewer guarde contexto manual o declare validacion tecnica', async () => {
     mocks.getExpedienteAccess.mockResolvedValue({
       ok: true,
       userId: 'viewer-a',
@@ -317,6 +317,7 @@ describe('resolveTerritorialContextAction', () => {
     )
 
     expect(result.status).toBe('error')
+    expect(result.message).toContain('permisos')
     expect(mocks.recordManualContext).not.toHaveBeenCalled()
   })
 })

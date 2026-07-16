@@ -6,6 +6,7 @@ import { db } from '@/infrastructure/db/client'
 import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
 import { authProvider } from '@/infrastructure/auth'
 import { eq } from 'drizzle-orm'
+import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
 
 import { isMunicipalityEnabled, getProvinceByName, getMunicipalityByName } from '@/shared/territory'
 
@@ -16,19 +17,25 @@ export async function createExpediente(formData: FormData) {
   }
 
   // Verificar la organización del usuario
-  let orgId: string | null = null;
+  let membership: { orgId: string; role: 'owner' | 'admin' | 'member' | 'viewer' } | null = null
   try {
-    const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
-    if (memberships.length > 0) {
-      orgId = memberships[0].orgId
-    }
+    const [result] = await db
+      .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.profileId, userId))
+      .limit(1)
+    membership = result ?? null
   } catch (error) {
     console.error("Error querying memberships in createExpediente:", error)
   }
 
-  if (!orgId) {
+  if (!membership) {
     redirect('/onboarding')
   }
+  if (!hasOrganizationPermission(membership.role, 'expediente.create')) {
+    redirect('/expedientes?error=forbidden')
+  }
+  const orgId = membership.orgId
 
   const name = formData.get('name') as string
   const province = formData.get('province') as string

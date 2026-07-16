@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FolderOpen, Settings, LayoutDashboard } from "lucide-react"
+import { FolderOpen, LayoutDashboard } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function MobileNav({ className }: { className?: string }) {
@@ -11,7 +11,6 @@ export function MobileNav({ className }: { className?: string }) {
   const navItems = [
     { name: "Inicio", href: "/dashboard", icon: LayoutDashboard },
     { name: "Expedientes", href: "/expedientes", icon: FolderOpen },
-    { name: "Ajustes", href: "/settings", icon: Settings },
   ]
 
   return (

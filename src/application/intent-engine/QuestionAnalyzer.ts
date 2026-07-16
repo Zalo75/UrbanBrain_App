@@ -12,7 +12,7 @@ export class QuestionAnalyzer {
     });
   }
 
-  public async analyze(userText: string): Promise<IntentAnalyzerResponse> {
+  public async analyze(userText: string, signal?: AbortSignal): Promise<IntentAnalyzerResponse> {
     const fallback: IntentAnalyzerResponse = {
       intent: "normativa_lookup",
       required_scopes: ["municipal"],
@@ -45,7 +45,7 @@ Responde ÚNICAMENTE con el JSON válido. Sin markdown, sin explicaciones.`;
         ],
         temperature: 0.1,
         response_format: { type: "json_object" }
-      });
+      }, { signal });
 
       const responseText = completion.choices[0].message.content || '{}';
       const parsed = JSON.parse(responseText);
@@ -59,8 +59,7 @@ Responde ÚNICAMENTE con el JSON válido. Sin markdown, sin explicaciones.`;
         extracted_parameters: parsed.extracted_parameters || {}
       };
 
-    } catch (error) {
-      console.error("[QuestionAnalyzer] Error analizando la pregunta. Usando fallback.", error);
+    } catch {
       return fallback;
     }
   }

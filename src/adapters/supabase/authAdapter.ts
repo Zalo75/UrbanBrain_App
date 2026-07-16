@@ -76,6 +76,12 @@ export class SupabaseAuthAdapter implements AuthPort {
     return { error: error ? error.message : null }
   }
 
+  async logout(): Promise<{ error: string | null }> {
+    const supabase = await this._getServerClient()
+    const { error } = await supabase.auth.signOut()
+    return { error: error ? error.message : null }
+  }
+
   async signup(credentials: Record<string, string>): Promise<{ error: string | null }> {
     const supabase = await this._getServerClient()
     const { error } = await supabase.auth.signUp({

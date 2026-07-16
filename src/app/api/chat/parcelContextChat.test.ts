@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   values: vi.fn(),
   embedContent: vi.fn(),
   rpc: vi.fn(),
+  abortSignal: vi.fn(),
 }))
 
 vi.mock('@/application/authorization/expedienteAccess', () => ({
@@ -36,15 +37,18 @@ vi.mock('openai', () => ({
   },
 }))
 
+import { resetChatRequestGuardForTests } from '@/application/chat/chatRequestGuard'
 import { POST } from './route'
 
 describe('POST /api/chat parcel context boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetChatRequestGuardForTests()
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockResolvedValue(undefined)
     mocks.embedContent.mockResolvedValue({ embedding: { values: new Array(768).fill(0.01) } })
-    mocks.rpc.mockResolvedValue({ data: [], error: null })
+    mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
+    mocks.abortSignal.mockResolvedValue({ data: [], error: null })
     mocks.getExpedienteAccess.mockResolvedValue({
       ok: true,
       userId: 'user-org-a',

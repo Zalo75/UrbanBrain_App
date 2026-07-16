@@ -33,21 +33,13 @@ export async function GET(request: Request) {
       }
     )
     
-    console.log('[Auth Callback] Code received:', code.substring(0, 10) + '...');
-    
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
     
     if (error) {
-      console.error('[Auth Callback] exchangeCodeForSession error:', error.message);
-      console.error('[Auth Callback] full error:', JSON.stringify(error, null, 2));
-      return NextResponse.redirect(`${origin}/login?message=exchange_error:${encodeURIComponent(error.message)}`)
+      return NextResponse.redirect(`${origin}/login?message=auth_callback_failed`)
     }
     
-    console.log('[Auth Callback] Session exchanged successfully for user:', data.user?.email);
-    console.log('[Auth Callback] Redirecting to:', `${origin}${next}`);
     return NextResponse.redirect(`${origin}${next}`)
-  } else {
-    console.warn('[Auth Callback] No code provided in URL searchParams');
   }
 
   // return the user to an error page with some instructions

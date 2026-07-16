@@ -40,14 +40,39 @@ vi.mock('openai', () => ({
 import { generateMetadata } from '@/app/(dashboard)/expedientes/[id]/page'
 import { POST } from '@/app/api/chat/route'
 import { GET } from '@/app/api/chat/history/route'
+import { MAX_CHAT_MESSAGE_LENGTH, resetChatRequestGuardForTests } from '@/application/chat/chatRequestGuard'
 
 describe('chat multitenancy boundaries', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetChatRequestGuardForTests()
     mocks.getExpedienteAccess.mockResolvedValue({
       ok: false,
       reason: 'not_found_or_forbidden',
     })
+  })
+
+  it('rejects oversized messages before reading context or writing chat data', async () => {
+    mocks.getExpedienteAccess.mockResolvedValue({
+      ok: true,
+      userId: 'user-a',
+      orgId: 'org-a',
+      membershipRole: 'member',
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+    })
+    const request = new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: 'x'.repeat(MAX_CHAT_MESSAGE_LENGTH + 1),
+      }),
+    })
+
+    const response = await POST(request)
+
+    expect(response.status).toBe(413)
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('prevents a user from organization A from reading organization B chat history', async () => {

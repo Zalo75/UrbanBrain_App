@@ -46,14 +46,14 @@ export function LegalFooter() {
               <p>De conformidad con lo dispuesto en el Reglamento (UE) 2016/679 del Parlamento Europeo y del Consejo (RGPD), informamos que los datos personales recabados a través de este sitio web serán tratados por el Titular de forma confidencial.</p>
               <p>Finalidad del tratamiento: Mantener una relación comercial con el Usuario. Gestión de solicitudes de información y soporte.</p>
               <p>Criterios de conservación de los datos: Se conservarán mientras exista un interés mutuo para mantener el fin del tratamiento.</p>
-              <p>Comunicación de los datos: No se comunicarán los datos a terceros, salvo obligación legal.</p>
+              <p>Proveedores necesarios: para prestar el servicio utilizamos proveedores tecnológicos como Supabase (autenticación y datos), Google Gemini y DeepSeek (funciones de IA). El acceso se limita a lo necesario para operar la beta privada. Evite introducir datos personales innecesarios.</p>
               <p>Derechos que asisten al Usuario: Derecho a retirar el consentimiento en cualquier momento. Derecho de acceso, rectificación, portabilidad y supresión de sus datos y a la limitación u oposición al su tratamiento.</p>
             </div>
           </LegalModal>
 
           <LegalModal title="Política de Cookies">
             <div className="space-y-4 text-zinc-600 text-sm">
-              <p>Este sitio web utiliza cookies propias y de terceros para analizar nuestros servicios y mostrarle publicidad relacionada con sus preferencias, en base a un perfil elaborado a partir de sus hábitos de navegación.</p>
+              <p>Este sitio utiliza únicamente tecnologías necesarias para el funcionamiento, la seguridad y el mantenimiento de la sesión.</p>
               <p><strong>¿Qué son las cookies?</strong><br/>Una cookie es un fichero que se descarga en su ordenador al acceder a determinadas páginas web. Las cookies permiten a una página web, entre otras cosas, almacenar y recuperar información sobre los hábitos de navegación de un usuario o de su equipo.</p>
               <p>Actualmente, UrbanBrain utiliza únicamente cookies técnicas necesarias para el mantenimiento de la sesión (ej. autenticación mediante Supabase). No utilizamos cookies analíticas o publicitarias invasivas.</p>
             </div>
