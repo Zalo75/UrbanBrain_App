@@ -25,8 +25,8 @@ describe('document mutation roles', () => {
     expect(mocks.createSignedUploadUrl).not.toHaveBeenCalled()
   })
 
-  it('issues a signed upload only to an authorized member for a bounded PDF', async () => {
-    mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: 'member-a', orgId: 'org-a', membershipRole: 'member', expediente: { id: 'exp-a', orgId: 'org-a' } })
+  it.each(['owner', 'admin', 'member'] as const)('issues a signed upload to an authorized %s for a bounded PDF', async (role) => {
+    mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: `${role}-a`, orgId: 'org-a', membershipRole: role, expediente: { id: 'exp-a', orgId: 'org-a' } })
     await expect(prepareDocumentUpload({ expedienteId: 'exp-a', filename: '../norma.pdf', contentType: 'application/pdf', size: 100 })).resolves.toMatchObject({ token: 'signed-token' })
     const path = mocks.createSignedUploadUrl.mock.calls[0][0] as string
     expect(path).toMatch(/^organizations\/org-a\/expedientes\/exp-a\//)
