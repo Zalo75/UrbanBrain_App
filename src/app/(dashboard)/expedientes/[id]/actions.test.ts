@@ -33,10 +33,10 @@ describe('document mutation roles', () => {
     expect(path).not.toContain('../')
   })
 
-  it('allows operational members to register a document', async () => {
-    mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: 'member-a', orgId: 'org-a', membershipRole: 'member', expediente: { id: 'exp-a', orgId: 'org-a' } })
+  it.each(['owner', 'admin', 'member'] as const)('allows an operational %s to register a document', async (role) => {
+    mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: `${role}-a`, orgId: 'org-a', membershipRole: role, expediente: { id: 'exp-a', orgId: 'org-a' } })
     await expect(registerDocument(documentInput)).resolves.toEqual({ success: true })
-    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ expedienteId: 'exp-a', uploadedBy: 'member-a' }))
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ expedienteId: 'exp-a', uploadedBy: `${role}-a` }))
   })
 
   it('keeps processing disabled without writing for every role', async () => {
