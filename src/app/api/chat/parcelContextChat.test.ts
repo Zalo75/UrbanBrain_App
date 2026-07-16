@@ -165,4 +165,51 @@ describe('POST /api/chat parcel context boundary', () => {
       })
     )
   })
+
+  it('mantiene las afecciones confirmadas de Betanzos aunque la clasificación sea conflictiva', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningApplicabilityStatus: 'conflict',
+        planningCanAnswerConcreteParameters: false,
+        planningConflicts: [
+          'La parcela intersecta clases de suelo incompatibles y requiere validación geométrica.',
+        ],
+      },
+      userMessages: [],
+      constraints: [
+        {
+          name: 'Patrimonio cultural: contorno de protección',
+          source: 'ideg',
+          confidence: 0.95,
+          confirmed: true,
+        },
+      ],
+    })
+    const request = new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: 'Indica las afecciones y la edificabilidad aplicable.',
+      }),
+    })
+
+    const response = await POST(request)
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.answer).toContain('AFECCIONES CONFIRMADAS')
+    expect(payload.answer).toContain('Patrimonio cultural: contorno de protección')
+    expect(payload.answer).toContain('Fuente: ideg')
+    expect(payload.answer).toContain('CLASIFICACIÓN Y PLANEAMIENTO')
+    expect(payload.answer).toContain('COMPROBACIONES PENDIENTES')
+    expect(payload.answer).not.toMatch(/edificabilidad\s*[:=]\s*\d/i)
+  })
 })

@@ -363,7 +363,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       (concreteParameterRequested && !applicability.canAnswerConcreteParameters);
 
     if (mustAbstain) {
-      const answer = buildSafeAbstention(applicability);
+      const answer = buildSafeAbstention(applicability, parcelContext);
       const contract = buildAnswerContract(
         answer,
         parcelContext,
