@@ -132,4 +132,61 @@ describe('buildSafeAbstention', () => {
     expect(answer).toContain('Me abstengo')
     expect(answer).not.toMatch(/7 m|9 m/)
   })
+
+  it('comunica afecciones confirmadas por secciones aunque Betanzos tenga clasificación conflictiva', () => {
+    const betanzosContext = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningApplicabilityStatus: 'conflict',
+        planningCanAnswerConcreteParameters: false,
+        planningConflicts: [
+          'La parcela intersecta clases de suelo incompatibles y requiere validación geométrica.',
+        ],
+      },
+      constraints: [
+        {
+          name: 'Patrimonio cultural: contorno de protección',
+          source: 'ideg',
+          confidence: 0.95,
+          confirmed: true,
+        },
+        {
+          name: 'Comprobar otras afecciones sectoriales no cubiertas',
+          source: 'ideg',
+          confidence: 0.55,
+          confirmed: false,
+        },
+      ],
+    })
+    const conflictive: ApplicabilityResult = {
+      ...determined,
+      status: 'CONFLICTIVO',
+      applicable: [],
+      conflicts: betanzosContext.conflicts.map((conflict) => conflict.reason),
+      missingData: ['clasificación del suelo', 'ordenanza o ámbito aplicable'],
+      warnings: ['La cobertura automática de afecciones es parcial.'],
+      canAnswerConcreteParameters: false,
+    }
+
+    const answer = buildSafeAbstention(conflictive, betanzosContext)
+
+    expect(betanzosContext.cadastralReference?.value).toBe('15009A01300255')
+    expect(answer).toContain('AFECCIONES CONFIRMADAS')
+    expect(answer).toContain('Patrimonio cultural: contorno de protección')
+    expect(answer).toContain('Fuente: ideg')
+    expect(answer).toContain('Confianza: alta')
+    expect(answer).toMatch(/cobertura parcial/i)
+    expect(answer).toContain('CLASIFICACIÓN Y PLANEAMIENTO')
+    expect(answer).toMatch(/Estado conflictivo/i)
+    expect(answer).toContain('COMPROBACIONES PENDIENTES')
+    expect(answer).toContain('Comprobar otras afecciones sectoriales no cubiertas')
+    expect(answer).toMatch(/abstengo únicamente.*clasificación.*planeamiento.*parámetros/i)
+    expect(answer).not.toMatch(/edificabilidad\s*[:=]|altura\s*[:=]|ocupación\s*[:=]/i)
+  })
 })

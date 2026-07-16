@@ -17,7 +17,68 @@ function unique<T>(values: T[]) {
   return [...new Set(values)]
 }
 
-export function buildSafeAbstention(applicability: ApplicabilityResult): string {
+function confidenceLabel(confidence: number) {
+  if (confidence >= 0.85) return 'alta'
+  if (confidence >= 0.65) return 'media'
+  return 'baja'
+}
+
+function buildSectionedTerritorialAnswer(
+  applicability: ApplicabilityResult,
+  context: NormalizedParcelContext
+) {
+  const confirmedAffects = context.knownConstraints.filter(
+    (constraint) => constraint.verification === 'confirmed'
+  )
+  if (confirmedAffects.length === 0) return null
+
+  const affectLines = confirmedAffects.map((affect) => {
+    const source = affect.evidence?.trim() || affect.source
+    return `- ${affect.value}. Fuente: ${source}. Confianza: ${confidenceLabel(affect.confidence)}.`
+  })
+  const planningDetails = unique([
+    ...applicability.conflicts,
+    ...applicability.missingData.map((item) => `Pendiente: ${item}.`),
+  ])
+  const pendingChecks = unique([
+    ...applicability.warnings,
+    ...context.pendingValidation,
+    ...context.knownConstraints
+      .filter((constraint) => constraint.verification !== 'confirmed')
+      .map((constraint) => `Validar la posible afección: ${constraint.value}.`),
+  ])
+
+  return [
+    'AFECCIONES CONFIRMADAS',
+    ...affectLines,
+    'Advertencia de cobertura parcial: estas detecciones positivas no descartan otras afecciones ni sustituyen los informes sectoriales aplicables.',
+    '',
+    'CLASIFICACIÓN Y PLANEAMIENTO',
+    applicability.status === 'CONFLICTIVO'
+      ? 'Estado conflictivo: no puede determinarse una clasificación o un planeamiento inequívocos.'
+      : 'Estado no determinado: no puede confirmarse una clasificación o un planeamiento inequívocos.',
+    ...(planningDetails.length > 0 ? planningDetails : ['Falta evidencia compatible para determinar esta sección.']),
+    'Me abstengo únicamente de afirmar la clasificación, el planeamiento aplicable, parámetros urbanísticos o cifras concretas.',
+    '',
+    'COMPROBACIONES PENDIENTES',
+    ...(pendingChecks.length > 0
+      ? pendingChecks.map((item) => `- ${item}`)
+      : ['- Validación técnica del régimen urbanístico aplicable.']),
+    '',
+    'DECISIÓN',
+    'Se comunican las afecciones confirmadas; se mantiene la abstención sobre clasificación, planeamiento y parámetros hasta resolver el conflicto.',
+  ].join('\n')
+}
+
+export function buildSafeAbstention(
+  applicability: ApplicabilityResult,
+  context?: NormalizedParcelContext
+): string {
+  if (context) {
+    const sectionedAnswer = buildSectionedTerritorialAnswer(applicability, context)
+    if (sectionedAnswer) return sectionedAnswer
+  }
+
   const details: string[] = []
   if (applicability.missingData.length > 0) {
     details.push(`Faltan estos datos: ${unique(applicability.missingData).join(', ')}.`)
