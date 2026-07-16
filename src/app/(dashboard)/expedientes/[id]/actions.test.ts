@@ -1,9 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ getExpedienteAccess: vi.fn(), insert: vi.fn(), values: vi.fn(), createSignedUploadUrl: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  getExpedienteAccess: vi.fn(),
+  insert: vi.fn(),
+  values: vi.fn(),
+  createClient: vi.fn(),
+  createSignedUploadUrl: vi.fn(),
+}))
 vi.mock('@/application/authorization/expedienteAccess', () => ({ getExpedienteAccess: mocks.getExpedienteAccess }))
 vi.mock('@/infrastructure/db/client', () => ({ db: { insert: mocks.insert } }))
-vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn(() => ({ storage: { from: () => ({ createSignedUploadUrl: mocks.createSignedUploadUrl }) } })) }))
+vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }))
 
 import { prepareDocumentUpload, processDocumentAction, registerDocument } from './actions'
 
@@ -12,10 +18,15 @@ const documentInput = { expedienteId: 'exp-a', filename: 'norma.pdf', storagePat
 describe('document mutation roles', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.test')
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-test')
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockResolvedValue(undefined)
+    mocks.createClient.mockReturnValue({ storage: { from: () => ({ createSignedUploadUrl: mocks.createSignedUploadUrl }) } })
     mocks.createSignedUploadUrl.mockResolvedValue({ data: { token: 'signed-token' }, error: null })
   })
+
+  afterEach(() => vi.unstubAllEnvs())
 
   it('denies viewer document registration before writing', async () => {
     mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: 'viewer-a', orgId: 'org-a', membershipRole: 'viewer', expediente: { id: 'exp-a', orgId: 'org-a' } })
@@ -31,6 +42,22 @@ describe('document mutation roles', () => {
     const path = mocks.createSignedUploadUrl.mock.calls[0][0] as string
     expect(path).toMatch(/^organizations\/org-a\/expedientes\/exp-a\//)
     expect(path).not.toContain('../')
+    expect(mocks.createClient).toHaveBeenCalledWith(
+      'https://supabase.test',
+      'service-role-test',
+      expect.objectContaining({ auth: expect.objectContaining({ persistSession: false }) })
+    )
+  })
+
+  it('denies an expediente from another tenant before issuing an upload token or registering metadata', async () => {
+    mocks.getExpedienteAccess.mockResolvedValue({ ok: false, reason: 'not_found' })
+
+    await expect(prepareDocumentUpload({ expedienteId: 'exp-b', filename: 'norma.pdf', contentType: 'application/pdf', size: 100 })).rejects.toThrow('access denied')
+    await expect(registerDocument({ ...documentInput, expedienteId: 'exp-b' })).rejects.toThrow('access denied')
+
+    expect(mocks.createClient).not.toHaveBeenCalled()
+    expect(mocks.createSignedUploadUrl).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it.each(['owner', 'admin', 'member'] as const)('allows an operational %s to register a document', async (role) => {
