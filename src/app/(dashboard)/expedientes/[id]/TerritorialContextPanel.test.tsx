@@ -66,6 +66,7 @@ describe('TerritorialContextPanel', () => {
           candidateCount: 0,
           latestAttemptAt: '2026-07-14T00:00:00.000Z',
           usingPreviousOfficialContext: false,
+          technicallyReviewed: false,
           sourceChecks: [],
         }}
       />
@@ -98,6 +99,7 @@ describe('TerritorialContextPanel', () => {
           canRuleOutUndetectedAffects: false,
           candidateCount: 0,
           usingPreviousOfficialContext: true,
+          technicallyReviewed: false,
           sourceChecks: [
             {
               source: 'catastro',

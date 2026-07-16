@@ -12,6 +12,7 @@ import { getExpedienteAccess } from '@/application/authorization/expedienteAcces
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import { TerritorialContextPanel } from './TerritorialContextPanel'
 import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
+import { buildTerritorialPresentation } from './territorialPresentation'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -46,6 +47,28 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
   const territorialContext = buildTerritorialContextView(
     latestDetections[0]?.rawResponse ?? null
   )
+  const presentation = buildTerritorialPresentation(
+    {
+      province: expediente.province ? getProvinceNameById(expediente.province) : '',
+      municipality: getMunicipalityNameById(expediente.municipio),
+      address: expediente.address,
+      lat: expediente.lat,
+      lng: expediente.lng,
+      planning: expediente.planeamiento,
+      zone: expediente.urbanPlanningZone,
+      landClass: expediente.landClass ? formatLandClass(expediente.landClass) : null,
+    },
+    territorialContext
+  )
+  const displayedProvince = presentation.province
+  const displayedMunicipality = presentation.municipality
+  const displayedAddress = presentation.address
+  const displayedCoordinates = presentation.coordinates
+  const technicallyReviewed = presentation.technicallyReviewed
+  const displayedReference = territorialContext?.cadastralReference ?? expediente.refCatastral
+  const displayedPlanning = presentation.planning
+  const displayedZone = presentation.zone
+  const displayedLandClass = presentation.landClass
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
@@ -57,12 +80,12 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
             <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 truncate">
               <span className="flex items-center gap-1 shrink-0">
                 <MapPin className="h-3 w-3" />
-                <span className="truncate">{getMunicipalityNameById(expediente.municipio)}</span>
+                <span className="truncate">{displayedMunicipality}</span>
               </span>
-              {expediente.refCatastral && (
+              {displayedReference && (
                 <>
                   <span className="shrink-0">•</span>
-                  <span className="font-mono truncate">{expediente.refCatastral}</span>
+                  <span className="font-mono truncate">{displayedReference}</span>
                 </>
               )}
             </div>
@@ -85,11 +108,10 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
       <TerritorialContextPanel
         expedienteId={expediente.id}
         initialInput={{
-          cadastralReference:
-            territorialContext?.manualContext?.cadastralReference ?? expediente.refCatastral,
-          address: territorialContext?.manualContext?.address ?? expediente.address,
-          lat: territorialContext?.manualContext?.coordinates?.lat ?? expediente.lat,
-          lng: territorialContext?.manualContext?.coordinates?.lng ?? expediente.lng,
+          cadastralReference: displayedReference,
+          address: displayedAddress,
+          lat: displayedCoordinates?.lat ?? null,
+          lng: displayedCoordinates?.lng ?? null,
         }}
         context={territorialContext}
       />
@@ -107,7 +129,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
                 <MapPin className="h-4 w-4 text-muted-foreground" />
                 Detalles del Proyecto
               </h2>
-              {expediente.contextoValidadoPorTecnico ? (
+              {technicallyReviewed ? (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
                   Contexto revisado
                 </span>
@@ -121,43 +143,43 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
               {expediente.province && (
                 <div>
                   <div className="text-xs text-muted-foreground font-medium mb-1">Provincia / Municipio</div>
-                  <div className="font-medium">{getProvinceNameById(expediente.province)} / {getMunicipalityNameById(expediente.municipio)}</div>
+                  <div className="font-medium">{displayedProvince} / {displayedMunicipality}</div>
                 </div>
               )}
               
-              {(expediente.address || (expediente.lat !== null && expediente.lng !== null) || expediente.locationSource) && (
+              {(displayedAddress || displayedCoordinates || expediente.locationSource) && (
                 <div>
                   <div className="text-xs text-muted-foreground font-medium mb-1">Localización</div>
-                  {expediente.address && <div className="mb-1">{expediente.address}</div>}
-                  {expediente.lat !== null && expediente.lng !== null && (
-                    <div className="font-mono text-xs">{expediente.lat.toFixed(5)}, {expediente.lng.toFixed(5)}</div>
+                  {displayedAddress && <div className="mb-1">{displayedAddress}</div>}
+                  {displayedCoordinates && (
+                    <div className="font-mono text-xs">{displayedCoordinates.lat.toFixed(6)}, {displayedCoordinates.lng.toFixed(6)}</div>
                   )}
-                  {expediente.locationSource && (
+                  {!territorialContext && expediente.locationSource && (
                     <div className="text-xs text-muted-foreground mt-1">Fuente: {formatLocationSource(expediente.locationSource)}</div>
                   )}
                 </div>
               )}
 
-              {(expediente.urbanPlanningZone || expediente.landClass || expediente.actionType) && (
+              {(displayedPlanning || displayedZone || displayedLandClass || expediente.actionType) && (
                 <div>
                   <div className="text-xs text-muted-foreground font-medium mb-1">Parámetros Urbanísticos</div>
                   <ul className="space-y-1.5">
-                    {expediente.planeamiento && (
+                    {displayedPlanning && (
                       <li className="flex flex-col">
                         <span className="text-xs text-muted-foreground">Planeamiento:</span>
-                        <span className="font-medium">{expediente.planeamiento}</span>
+                        <span className="font-medium">{displayedPlanning}</span>
                       </li>
                     )}
-                    {expediente.urbanPlanningZone && (
+                    {displayedZone && (
                       <li className="flex flex-col">
                         <span className="text-xs text-muted-foreground">Ámbito/Ordenanza:</span>
-                        <span>{expediente.urbanPlanningZone}</span>
+                        <span>{displayedZone}</span>
                       </li>
                     )}
-                    {expediente.landClass && (
+                    {displayedLandClass && (
                       <li className="flex flex-col">
                         <span className="text-xs text-muted-foreground">Clase de suelo:</span>
-                        <span>{formatLandClass(expediente.landClass)}</span>
+                        <span>{displayedLandClass}</span>
                       </li>
                     )}
                     {expediente.actionType && (
@@ -190,7 +212,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
         {/* Right Side: Chat / Main Interaction Area */}
         <div className="flex flex-1 flex-col relative bg-background min-w-0">
-          {expediente.contextoValidadoPorTecnico ? (
+          {technicallyReviewed ? (
             <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
               <MapPin className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
               <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
