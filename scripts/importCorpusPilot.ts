@@ -3,6 +3,11 @@ import readline from 'readline';
 import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import path from 'path';
+import {
+  addChunkQualityResult,
+  createChunkQualityStatistics,
+  evaluateChunkTextQuality,
+} from '../src/application/document-processing/chunkTextQuality';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -88,6 +93,7 @@ async function run() {
 
   const documentsMap = new Map<string, Record<string, unknown>>();
   const chunksToImport: Record<string, unknown>[] = [];
+  let qualityStatistics = createChunkQualityStatistics();
   
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -97,6 +103,13 @@ async function run() {
       const { scopeType, sourceSystem, ccaa } = parseMetadata(chunk);
       
       if (scopeType === 'manual') continue;
+
+      const quality = evaluateChunkTextQuality({
+        text: chunk.texto ?? '',
+        chunkType: chunk.tipo_chunk,
+      });
+      qualityStatistics = addChunkQualityResult(qualityStatistics, quality);
+      if (!quality.eligible) continue;
 
       if (!documentsMap.has(chunk.sha256)) {
         documentsMap.set(chunk.sha256, {
@@ -137,6 +150,7 @@ async function run() {
   console.log(`Target Batch ID: ${BATCH_ID}`);
   console.log(`Documents to insert: ${docsArray.length}`);
   console.log(`Chunks to insert: ${chunksToImport.length}`);
+  console.log('Chunk text quality statistics:', qualityStatistics);
 
   const scopeCounts = docsArray.reduce((acc, doc) => {
     const scope = doc.scope_type as string;
@@ -181,12 +195,24 @@ async function run() {
 
   // 2. Prepare and insert chunks in batches of 500
   console.log('Inserting normativa_chunks...');
-  const chunksToInsert = chunksToImport.map(chunk => ({
-    normativa_document_id: dbIdMap.get(chunk.source_id as string)!,
-    content: chunk.content,
-    metadata: chunk.metadata,
-    chunk_index: chunk.chunk_index
-  })).filter(c => c.normativa_document_id); // Ensure ID is mapped
+  const chunksToInsert = chunksToImport.map(chunk => {
+    const metadata = chunk.metadata as { tipo_chunk?: string | null };
+    const quality = evaluateChunkTextQuality({
+      text: String(chunk.content ?? ''),
+      chunkType: metadata.tipo_chunk,
+    });
+    if (!quality.eligible) {
+      throw new Error(
+        `Chunk text quality invariant failed: ${quality.reasonCodes.join(',')}`
+      );
+    }
+    return {
+      normativa_document_id: dbIdMap.get(chunk.source_id as string)!,
+      content: chunk.content,
+      metadata: chunk.metadata,
+      chunk_index: chunk.chunk_index
+    };
+  }).filter(c => c.normativa_document_id); // Ensure ID is mapped
 
   const BATCH_SIZE = 500;
   for (let i = 0; i < chunksToInsert.length; i += BATCH_SIZE) {
