@@ -4,9 +4,80 @@ import path from 'path';
 import crypto from 'crypto';
 import { db } from '../src/infrastructure/db/client';
 import { normativeDocumentsV2, normativeChunksV2, normativeFamilies } from '../src/infrastructure/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { GeminiEmbeddingProvider } from '../src/application/embeddings/EmbeddingProvider';
-const pdf = require('pdf-parse');
+import {
+  addChunkQualityResult,
+  createChunkQualityStatistics,
+  evaluateChunkTextQuality,
+} from '../src/application/document-processing/chunkTextQuality';
+import {
+  StructuredPdfExtractor,
+  type Chunk,
+  type ChunkMetadata,
+} from '../src/application/document-processing/StructuredPdfExtractor';
+
+type NormativeDocumentInsert = typeof normativeDocumentsV2.$inferInsert;
+type NormativeFamilyInsert = typeof normativeFamilies.$inferInsert;
+type PreparedDocumentInsert = NormativeDocumentInsert & { validUntil: Date | null };
+
+interface ManifestDocument {
+  code: string;
+  title?: string;
+  file_name: string;
+  file_hash: string;
+  source_url: string;
+  version_label: NormativeDocumentInsert['versionLabel'];
+  valid_from?: string | null;
+  valid_until?: string | null;
+  current_version: NormativeDocumentInsert['currentVersion'];
+  is_consolidated: NormativeDocumentInsert['isConsolidated'];
+  legal_review_status: NormativeDocumentInsert['legalReviewStatus'];
+  status: NormativeDocumentInsert['status'];
+  scope_type: NormativeDocumentInsert['scopeType'];
+  category: NormativeDocumentInsert['category'];
+  authority: NormativeDocumentInsert['authority'];
+  authority_type: NormativeDocumentInsert['authorityType'];
+  official_identifier: NormativeDocumentInsert['officialIdentifier'];
+  language: NormativeDocumentInsert['language'];
+  priority: NormativeDocumentInsert['priority'];
+  confidence: NormativeDocumentInsert['confidence'];
+}
+
+interface IngestionManifest {
+  family: {
+    id?: string;
+    code: string;
+    name: string;
+    jurisdiction: string;
+    category: NormativeFamilyInsert['category'];
+    authority: string;
+  };
+  documents: ManifestDocument[];
+}
+
+interface DocumentReport {
+  code: string;
+  status: string;
+  pages: number;
+  chunks: number;
+  minTokens: number;
+  maxTokens: number;
+  avgTokens: number;
+}
+
+interface PreparedChunk {
+  id: string;
+  documentId: string;
+  chunkIndex: number;
+  content: string;
+  tokens: number;
+  page: number;
+  article: string | null;
+  chapter: string | null;
+  hash: string;
+  chunkType: string;
+}
 
 const ALLOWED_DOMAINS = [
   'codigotecnico.org',
@@ -20,14 +91,16 @@ function isOfficialUrl(url: string): boolean {
   try {
     const u = new URL(url);
     return ALLOWED_DOMAINS.some(domain => u.hostname === domain || u.hostname.endsWith(`.${domain}`));
-  } catch (e) {
+  } catch {
     return false;
   }
 }
 
-import { StructuredPdfExtractor } from '../src/application/document-processing/StructuredPdfExtractor';
-
 const generateHash = (data: Buffer | string) => crypto.createHash('sha256').update(data).digest('hex');
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function run() {
   const args = process.argv.slice(2);
@@ -52,11 +125,11 @@ async function run() {
   }
 
   const manifestStr = fs.readFileSync(manifestPath, 'utf8');
-  let manifest;
+  let manifest: IngestionManifest;
   try {
-    manifest = JSON.parse(manifestStr);
-  } catch (e: any) {
-    console.error(`ERROR: El manifest.json es inválido (${e.message})`);
+    manifest = JSON.parse(manifestStr) as IngestionManifest;
+  } catch (error: unknown) {
+    console.error(`ERROR: El manifest.json es inválido (${errorMessage(error)})`);
     process.exit(1);
   }
 
@@ -82,14 +155,15 @@ async function run() {
     duplicates: 0,
     errors: 0,
     costEstimate: 0,
-    details: [] as any[]
+    details: [] as DocumentReport[]
   };
 
-  const docsToInsert: any[] = [];
-  const allChunksToInsert: any[] = [];
+  const docsToInsert: PreparedDocumentInsert[] = [];
+  const allChunksToInsert: PreparedChunk[] = [];
+  let qualityStatistics = createChunkQualityStatistics();
 
   for (const doc of manifest.documents) {
-    const docReport: any = {
+    const docReport: DocumentReport = {
       code: doc.code,
       status: 'OK',
       pages: 0,
@@ -122,24 +196,33 @@ async function run() {
     }
 
     // Extract text using StructuredPdfExtractor
-    let chunks: any[] = [];
+    let chunks: Chunk[] = [];
     try {
       const extractor = new StructuredPdfExtractor();
       chunks = await extractor.extractAndChunk(filePath, doc, manifest.family.code);
       docReport.pages = extractor.stats.pagesProcessed;
-    } catch(e:any) {
-      docReport.status = `ERROR: Imposible parsear PDF (${e.message})`;
+    } catch (error: unknown) {
+      docReport.status = `ERROR: Imposible parsear PDF (${errorMessage(error)})`;
       report.errors++;
       continue;
     }
 
-    const validChunks = [];
-    const seenHashes = new Set();
+    const validChunks: Array<{
+      content: string;
+      metadata: ChunkMetadata;
+      tokens: number;
+      hash: string;
+    }> = [];
+    const seenHashes = new Set<string>();
     let docTokens = 0;
 
     const contentHash = generateHash(chunks.map(c => c.content).join('\n'));
     for (const c of chunks) {
       if (!c.content.trim()) continue;
+      const chunkType = c.metadata.article ? 'ARTICULO' : c.metadata.block_type;
+      const quality = evaluateChunkTextQuality({ text: c.content, chunkType });
+      qualityStatistics = addChunkQualityResult(qualityStatistics, quality);
+      if (!quality.eligible) continue;
       const cHash = generateHash(c.content);
       if (seenHashes.has(cHash)) continue;
       seenHashes.add(cHash);
@@ -210,7 +293,8 @@ async function run() {
         page: vc.metadata.page_start,
         article: vc.metadata.article || null,
         chapter: vc.metadata.chapter || null,
-        hash: vc.hash
+        hash: vc.hash,
+        chunkType: vc.metadata.article ? 'ARTICULO' : vc.metadata.block_type,
       });
     }
   }
@@ -224,6 +308,7 @@ async function run() {
   console.log(`Errores: ${report.errors}`);
   console.log(`Duplicados ignorados: ${report.duplicates}`);
   console.log(`Chunks válidos totales: ${report.totalChunks}`);
+  console.log('Estadísticas agregadas de calidad textual:', qualityStatistics);
   console.log(`Tokens totales estimados: ${report.totalTokens}`);
   console.log(`Coste estimado (${provider.getModelName()}): $${report.costEstimate.toFixed(6)}`);
   
@@ -245,7 +330,7 @@ async function run() {
   try {
     await db.transaction(async (tx) => {
       // Upsert family
-      let f = await tx.select().from(normativeFamilies).where(eq(normativeFamilies.code, manifest.family.code)).limit(1);
+      const f = await tx.select().from(normativeFamilies).where(eq(normativeFamilies.code, manifest.family.code)).limit(1);
       let familyId;
       if (f.length === 0) {
         familyId = crypto.randomUUID();
@@ -269,13 +354,19 @@ async function run() {
       // Generate embeddings in chunks to avoid rate limits
       for (let i = 0; i < allChunksToInsert.length; i++) {
         const c = allChunksToInsert[i];
+        const quality = evaluateChunkTextQuality({ text: c.content, chunkType: c.chunkType });
+        if (!quality.eligible) {
+          throw new Error(
+            `Chunk text quality invariant failed: ${quality.reasonCodes.join(',')}`
+          );
+        }
         console.log(`Embeddings: chunk ${i+1}/${allChunksToInsert.length}...`);
         const vector = await provider.generateEmbedding(c.content);
         await tx.insert(normativeChunksV2).values({
           documentId: c.documentId,
           chunkIndex: c.chunkIndex,
           content: c.content,
-          embedding: vector as any,
+          embedding: vector,
           tokenCount: c.tokens,
           page: c.page,
           article: c.article,
@@ -285,11 +376,12 @@ async function run() {
     });
 
     console.log('\n¡INGESTIÓN COMPLETADA CON ÉXITO!');
-  } catch (e: any) {
+  } catch (error: unknown) {
     console.error('\nERROR DURANTE LA TRANSACCIÓN. Haciendo ROLLBACK...');
-    console.error(e.message);
-    if (e.cause) console.error('CAUSA:', e.cause);
-    if (e.originalError) console.error('ORIGINAL:', e.originalError);
+    console.error(errorMessage(error));
+    const details = error as { cause?: unknown; originalError?: unknown };
+    if (details.cause) console.error('CAUSA:', details.cause);
+    if (details.originalError) console.error('ORIGINAL:', details.originalError);
     process.exit(1);
   }
 
