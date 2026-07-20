@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { aCorunaMunicipalities } from '@/shared/territory/provinces/a_coruna'
-import { AUTO_EXCLUDED_INE, createSnapshot, diffSnapshots, validateCorunaImport } from './corunaPlanningImport'
+import { AUTO_EXCLUDED_INE, createSnapshot, diffSnapshots, fetchSiotugaPlanningHtml, validateCorunaImport } from './corunaPlanningImport'
 
 const valid = aCorunaMunicipalities.filter((m) => m.ineCode && !AUTO_EXCLUDED_INE.has(m.ineCode)).map((m) => `<tr><td>${m.ineCode}</td><td>${m.name}</td><td>Plan general de ordenación municipal</td><td>2000-01-01</td><td>Adaptado</td><td><a href="/inventario.php?inv=1&idconcello=${m.ineCode}">Inventario</a></td></tr>`).join('')
 describe('A Coruña SIOTUGA planning import', () => {
+  it('acquires the complete official HTML contract without browser pagination', async () => {
+    const fetcher = vi.fn(async () => new Response(`<table id="inventoryTableSortable"><tbody>${valid}</tbody></table>`, { status: 200 })) as unknown as typeof fetch
+    await expect(fetchSiotugaPlanningHtml(fetcher)).resolves.toContain('inventoryTableSortable')
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
   it('keeps script awaits inside its CommonJS-compatible entry point', async () => {
     const script = await readFile(resolve(process.cwd(), 'scripts/importMunicipalPlanningCoruna.ts'), 'utf8')
     expect(script).toContain('async function main()')

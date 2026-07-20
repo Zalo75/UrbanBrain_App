@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 import { aCorunaMunicipalities } from '@/shared/territory/provinces/a_coruna'
 
@@ -23,6 +25,14 @@ const href = (row: string, index: number) => {
   return value ? new URL(value, SIOTUGA_CORUNA_URL).toString() : undefined
 }
 const fingerprint = (record: Omit<OfficialPlanningRecord, 'externalId'>) => createHash('sha256').update(`${record.municipalityId}|${record.name}|${record.approvalDate}|${record.sourceUrl}`).digest('hex')
+const execFileAsync = promisify(execFile)
+
+export async function fetchSiotugaPlanningHtml(fetcher: typeof fetch = fetch) {
+  const response = await fetcher(SIOTUGA_CORUNA_URL, { headers: { accept: 'text/html', 'accept-language': 'es-ES,es;q=0.9', 'user-agent': 'Mozilla/5.0 (compatible; UrbanBrain planning catalogue importer/1.0)' } })
+  const html = response.ok ? await response.text() : response.status === 406 && fetcher === fetch ? (await execFileAsync('curl', ['--fail', '--location', '--silent', '--show-error', SIOTUGA_CORUNA_URL], { maxBuffer: 2_000_000 })).stdout : (() => { throw new Error(`SIOTUGA request failed: ${response.status}`) })()
+  if (!/id=["']inventoryTableSortable["']/i.test(html) || !/<tbody[\s>]/i.test(html)) throw new Error('SIOTUGA import blocked: planning table contract changed')
+  return html
+}
 
 export function parseSiotugaCorunaPlanning(html: string): OfficialPlanningRecord[] {
   const records: OfficialPlanningRecord[] = []

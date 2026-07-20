@@ -2,13 +2,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import dotenv from 'dotenv'
 import postgres from 'postgres'
-import { createSnapshot, diffSnapshots, SIOTUGA_CORUNA_URL } from '../src/application/municipal-planning-import/corunaPlanningImport'
+import { createSnapshot, diffSnapshots, fetchSiotugaPlanningHtml, SIOTUGA_CORUNA_URL } from '../src/application/municipal-planning-import/corunaPlanningImport'
 
 async function main() {
-  const args = process.argv.slice(2); const value = (name: string) => args[args.indexOf(name) + 1]
+  const args = process.argv.slice(2); const value = (name: string) => { const index = args.indexOf(name); return index === -1 ? undefined : args[index + 1] }
   const source = value('--source'); const output = value('--snapshot-dir') ?? '.artifacts/municipal-planning-coruna'
-  if (!source) throw new Error('Provide --source <SIOTUGA HTML>.')
-  const html = await readFile(resolve(source), 'utf8'); const snapshot = createSnapshot(html, new Date().toISOString())
+  const html = source ? await readFile(resolve(source), 'utf8') : await fetchSiotugaPlanningHtml()
+  const snapshot = createSnapshot(html, new Date().toISOString())
   const previousPath = value('--previous-snapshot'); const previous = previousPath ? JSON.parse(await readFile(resolve(previousPath), 'utf8')) : undefined
   const apply = args.includes('--apply')
   if (apply) {
@@ -29,7 +29,7 @@ async function main() {
   } finally { await sql.end({ timeout: 5 }) }
   }
   const report = { snapshot, diff: diffSnapshots(previous, snapshot), mode: apply ? 'apply' : 'dry-run' }
-  await mkdir(resolve(output), { recursive: true }); await writeFile(resolve(output, 'snapshot.json'), JSON.stringify(snapshot, null, 2)); await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
+  await mkdir(resolve(output), { recursive: true }); await writeFile(resolve(output, 'siotuga-response.html'), html); await writeFile(resolve(output, 'snapshot.json'), JSON.stringify(snapshot, null, 2)); await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify({ source: SIOTUGA_CORUNA_URL, candidates: snapshot.records.length, changes: report.diff.reduce((acc, item) => ({ ...acc, [item.change]: (acc[item.change] ?? 0) + 1 }), {} as Record<string, number>), mode: report.mode }))
 }
 
