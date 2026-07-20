@@ -1,0 +1,1 @@
+drop index if exists public.municipal_planning_one_vigente_per_municipality;

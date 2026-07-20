@@ -1,0 +1,20 @@
+import { describe, expect, it } from 'vitest'
+import { aCorunaMunicipalities } from '@/shared/territory/provinces/a_coruna'
+import { AUTO_EXCLUDED_INE, createSnapshot, diffSnapshots, validateCorunaImport } from './corunaPlanningImport'
+
+const valid = aCorunaMunicipalities.filter((m) => m.ineCode && !AUTO_EXCLUDED_INE.has(m.ineCode)).map((m) => `<tr><td>${m.ineCode}</td><td>${m.name}</td><td>Plan general de ordenación municipal</td><td>2000-01-01</td><td>Adaptado</td><td><a href="/inventario.php?inv=1&idconcello=${m.ineCode}">Inventario</a></td></tr>`).join('')
+describe('A Coruña SIOTUGA planning import', () => {
+  it('accepts exactly the 89 automatic municipalities and excludes ambiguous records', () => {
+    const snapshot = createSnapshot(`<table>${valid}<tr><td>15902</td><td>Oza-Cesuras</td><td>Plan A</td><td>2001-01-01</td></tr><tr><td>15902</td><td>Oza-Cesuras</td><td>Plan B</td><td>2002-01-01</td></tr></table>`, '2026-07-20T00:00:00.000Z')
+    expect(snapshot.records).toHaveLength(89); expect(snapshot.records.some((record) => record.municipalityId === '15031')).toBe(true); expect(snapshot.records.some((record) => record.municipalityId === '15902')).toBe(false)
+  })
+  it('fails closed on a missing or duplicate municipality', () => {
+    expect(() => createSnapshot(`<table>${valid.replace(/<tr><td>15031[\s\S]*?<\/tr>/, '')}</table>`, '2026-07-20T00:00:00.000Z')).toThrow('15031')
+    const records = createSnapshot(`<table>${valid}</table>`, '2026-07-20T00:00:00.000Z').records
+    expect(() => validateCorunaImport([...records, records[0]])).toThrow('exactly one')
+  })
+  it('reports deterministic source changes', () => {
+    const first = createSnapshot(`<table>${valid}</table>`, '2026-07-20T00:00:00.000Z'); const changed = structuredClone(first); changed.records[0].name = 'Nuevo plan'; changed.records[0].externalId = 'changed'
+    expect(diffSnapshots(first, changed).filter((item) => item.change === 'changed')).toHaveLength(1)
+  })
+})
