@@ -112,10 +112,88 @@ describe('TerritorialContextPanel', () => {
       />
     )
 
-    expect(screen.getByText('Provisional')).toBeTruthy()
+    expect(screen.getByText('Parcial')).toBeTruthy()
     expect(screen.getByText(/se mantiene el .*ltimo contexto oficial v.*lido/i)).toBeTruthy()
     expect(screen.getByText(/Catastro esta tardando mas de lo esperado/i)).toBeTruthy()
     expect(screen.getAllByRole('status').length).toBeGreaterThan(0)
     expect(screen.getByText(/Contexto oficial utilizado/i)).toBeTruthy()
+  })
+
+  it('mantiene las afecciones positivas separadas aunque el contexto esté parcial', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{
+          status: 'provisional',
+          confidence: 'high',
+          resolvedAt: '2026-07-14T10:00:00.000Z',
+          latestAttemptAt: '2026-07-14T10:00:00.000Z',
+          inputMethod: 'cadastral_reference',
+          municipality: 'Culleredo',
+          municipalityCode: '15031',
+          areas: [],
+          affects: [
+            { category: 'patrimonio_cultural', name: 'BIC: contorno de protección', confidence: 'high' },
+          ],
+          conflicts: [],
+          warnings: [],
+          sources: [],
+          canAnswerConcreteParameters: false,
+          canRuleOutUndetectedAffects: false,
+          candidateCount: 0,
+          usingPreviousOfficialContext: false,
+          technicallyReviewed: false,
+          sourceChecks: [
+            {
+              source: 'ideg',
+              status: 'partial',
+              checkedAt: '2026-07-14T10:00:00.000Z',
+              message: 'IDEG solo pudo comprobar parte de las capas oficiales.',
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText('Parcial')).toBeTruthy()
+    expect(screen.getByText('BIC: contorno de protección')).toBeTruthy()
+    expect(screen.getByText(/no demuestra ausencia de otras afecciones/i)).toBeTruthy()
+  })
+
+  it('explica que una consulta de afecciones fallida no equivale a ausencia', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{
+          status: 'provisional',
+          confidence: 'low',
+          resolvedAt: '2026-07-14T10:00:00.000Z',
+          latestAttemptAt: '2026-07-14T10:00:00.000Z',
+          inputMethod: 'coordinates',
+          areas: [],
+          affects: [],
+          conflicts: [],
+          warnings: [],
+          sources: [],
+          canAnswerConcreteParameters: false,
+          canRuleOutUndetectedAffects: false,
+          candidateCount: 0,
+          usingPreviousOfficialContext: false,
+          technicallyReviewed: false,
+          sourceChecks: [
+            {
+              source: 'ideg',
+              status: 'timeout',
+              checkedAt: '2026-07-14T10:00:00.000Z',
+              message: 'IDEG esta tardando mas de lo esperado.',
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText(/no equivale a ausencia de afecciones/i)).toBeTruthy()
   })
 })

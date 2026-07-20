@@ -39,7 +39,7 @@ const statusCopy = {
   approximate: { label: 'Aproximado', className: 'bg-sky-100 text-sky-800' },
   conflict: { label: 'Conflictivo', className: 'bg-amber-100 text-amber-900' },
   undetermined: { label: 'No determinado', className: 'bg-zinc-200 text-zinc-800' },
-  provisional: { label: 'Provisional', className: 'bg-violet-100 text-violet-900' },
+  provisional: { label: 'Parcial', className: 'bg-violet-100 text-violet-900' },
 } as const;
 
 function confidenceLabel(confidence: TerritorialContextView['confidence']) {
@@ -57,6 +57,9 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
   }, [router, state.status]);
 
   const status = context ? statusCopy[context.status] : statusCopy.undetermined;
+  const affectsFullyChecked = context?.sourceChecks.some(
+    (check) => check.source === 'ideg' && check.status === 'available'
+  );
 
   return (
     <details className="group border-b bg-zinc-50/70 dark:bg-zinc-950/30" open={!context}>
@@ -342,7 +345,9 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                     </ul>
                   ) : (
                     <p className="text-muted-foreground mt-2 text-sm">
-                      No hay afecciones positivas confirmadas en las comprobaciones completadas.
+                      {affectsFullyChecked
+                        ? 'No se detectaron afecciones positivas en las comprobaciones completadas.'
+                        : 'La comprobación de afecciones no está completa; no equivale a ausencia de afecciones.'}
                     </p>
                   )}
                   {!context.canRuleOutUndetectedAffects && (

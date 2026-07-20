@@ -75,6 +75,42 @@ describe('CatastroOfficialAdapter', () => {
     expect(result?.evidence).toHaveLength(3)
   })
 
+  it('normaliza municipio e INE desde el catálogo cuando Catastro sólo aporta la localidad en la dirección', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('Consulta_DNPRC')) {
+        return json({
+          consulta_dnprcResult: {
+            lrcdnp: { rcdnp: [{ dt: { np: 'A CORUÑA' } }] },
+          },
+        })
+      }
+      if (url.includes('Consulta_CPMRC')) {
+        return json({
+          Consulta_CPMRCResult: {
+            coordenadas: {
+              coord: [
+                {
+                  geo: { xcen: '-8.336', ycen: '43.316' },
+                  ldt: 'LG LEDOÑO CULLEREDO (A CORUÑA)',
+                },
+              ],
+            },
+          },
+        })
+      }
+      return new Response(GML, { status: 200 })
+    })
+
+    const result = await new CatastroOfficialAdapter(fetcher).resolveReference('7709702NH4970N0001SZ')
+
+    expect(result).toMatchObject({
+      cadastralReference: '7709702NH4970N',
+      municipality: 'Culleredo',
+      municipalityCode: '15031',
+    })
+  })
+
   it('devuelve null cuando Catastro informa que no hay RC para el punto', async () => {
     const fetcher = vi.fn(async () =>
       json({ Consulta_RCCOORResult: { control: { cuerr: 1 }, lerr: [{ cod: '16' }] } })

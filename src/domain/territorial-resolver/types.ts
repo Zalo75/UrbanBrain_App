@@ -158,6 +158,7 @@ export interface TerritorialResolution {
   confidence: TerritorialConfidence
   inputMethod: 'cadastral_reference' | 'coordinates' | 'address' | 'none'
   cadastralReference?: string
+  parcelReference?: string
   normalizedAddress?: string
   municipality?: string
   municipalityCode?: string

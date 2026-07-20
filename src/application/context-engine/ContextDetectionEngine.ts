@@ -62,6 +62,7 @@ function detectionSummary(result: TerritorialResolution) {
         : 'unresolved'
   return {
     cadastralReference: effective?.cadastralReference,
+    parcelReference: effective?.parcelReference,
     provinceId: province?.id,
     provinceName: effective?.province,
     provinceCode: effective?.provinceCode,

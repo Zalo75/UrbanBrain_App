@@ -8,7 +8,14 @@ const base: TerritorialResolution = {
   confidence: 'high',
   inputMethod: 'coordinates',
   candidates: [],
-  evidence: [],
+  evidence: [
+    {
+      source: 'catastro',
+      sourceUrl: 'https://official.test/catastro',
+      retrievedAt: '2026-07-14T00:00:00.000Z',
+      method: 'fixture',
+    },
+  ],
   warnings: [],
   conflicts: [],
   planning: { status: 'partial', evidence: [], warnings: [] },
@@ -63,6 +70,58 @@ describe('buildTerritorialContextView', () => {
       municipality: 'Betanzos',
       coordinates: { lat: 43.271234, lng: -8.217654 },
       technicallyReviewed: false,
+    });
+  });
+
+  it('no confirma el contexto global cuando faltan municipio, INE, planeamiento o clasificación', () => {
+    const view = buildTerritorialContextView({
+      ...base,
+      sourceChecks: [
+        {
+          source: 'ideg',
+          status: 'available',
+          checkedAt: base.resolvedAt,
+          message: 'IDEG respondio correctamente para las capas verificadas.',
+        },
+      ],
+    });
+
+    expect(view?.status).toBe('provisional');
+  });
+
+  it('mantiene visibles las afecciones positivas aunque el contexto territorial siga parcial', () => {
+    const view = buildTerritorialContextView({
+      ...base,
+      municipality: 'Culleredo',
+      municipalityCode: '15031',
+      cadastralReference: '7709702NH4970N0001SZ',
+      parcelReference: '7709702NH4970N',
+      affects: {
+        ...base.affects,
+        detected: [
+          {
+            category: 'patrimonio_cultural',
+            name: 'BIC: contorno de protección',
+            confidence: 'high',
+            attributes: {},
+            evidence: {
+              source: 'ideg',
+              sourceUrl: 'https://official.test/ideg',
+              retrievedAt: base.resolvedAt,
+              method: 'fixture',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(view).toMatchObject({
+      status: 'provisional',
+      cadastralReference: '7709702NH4970N0001SZ',
+      parcelReference: '7709702NH4970N',
+      affects: [
+        { category: 'patrimonio_cultural', name: 'BIC: contorno de protección' },
+      ],
     });
   });
 

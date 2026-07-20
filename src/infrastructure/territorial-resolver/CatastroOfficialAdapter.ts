@@ -10,6 +10,7 @@ import {
   OfficialServiceError,
   type FetchLike,
 } from '@/infrastructure/territorial-resolver/officialHttp'
+import { resolveMunicipalityIdentity } from '@/shared/territory'
 
 const CATASTRO_COORDINATES =
   'https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCoordenadas.svc/json'
@@ -192,14 +193,21 @@ export class CatastroOfficialAdapter implements CatastroPort {
     if (!record && !coordinate) return null
 
     const retrievedAt = this.now().toISOString()
+    const normalizedAddress = coordinate?.address ?? addressFromRecord(record)
+    const rawMunicipalityCode =
+      record?.dt?.loine?.cp && record.dt.loine.cm
+        ? `${record.dt.loine.cp}${record.dt.loine.cm.padStart(3, '0')}`
+        : undefined
+    const municipality = resolveMunicipalityIdentity({
+      municipality: record?.dt?.nm,
+      municipalityCode: rawMunicipalityCode,
+      address: normalizedAddress,
+    })
     const result: CatastroParcel = {
       cadastralReference: parcelReference,
-      normalizedAddress: coordinate?.address ?? addressFromRecord(record),
-      municipality: record?.dt?.nm,
-      municipalityCode:
-        record?.dt?.loine?.cp && record.dt.loine.cm
-          ? `${record.dt.loine.cp}${record.dt.loine.cm.padStart(3, '0')}`
-          : undefined,
+      normalizedAddress,
+      municipality: municipality?.name ?? record?.dt?.nm,
+      municipalityCode: municipality?.ineCode ?? rawMunicipalityCode,
       province: record?.dt?.np,
       provinceCode: record?.dt?.loine?.cp,
       coordinates: coordinate?.coordinates,

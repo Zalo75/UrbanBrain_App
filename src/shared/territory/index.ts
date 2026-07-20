@@ -70,3 +70,46 @@ export function getMunicipalityByName(name: string): Municipality | undefined {
     m.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() === normalized
   );
 }
+
+export function getMunicipalityByIneCode(ineCode: string | null | undefined): Municipality | undefined {
+  const normalized = ineCode?.replace(/\D/g, '');
+  return normalized
+    ? allMunicipalities.find((municipality) => municipality.ineCode === normalized)
+    : undefined;
+}
+
+function normalizeTerritoryText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function municipalityFromAddress(address: string | null | undefined): Municipality | undefined {
+  if (!address) return undefined;
+  const withoutProvinceSuffix = address.replace(/\([^)]*\)\s*$/u, '');
+  const normalizedAddress = ` ${normalizeTerritoryText(withoutProvinceSuffix)} `;
+  const matches = allMunicipalities.filter((municipality) =>
+    normalizedAddress.includes(` ${normalizeTerritoryText(municipality.name)} `)
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * Normalizes Catastro municipality data through the existing territorial catalogue.
+ * Address matching is a conservative fallback for records that omit the dedicated
+ * municipality field; ambiguity intentionally remains unresolved.
+ */
+export function resolveMunicipalityIdentity(input: {
+  municipality?: string | null;
+  municipalityCode?: string | null;
+  address?: string | null;
+}): Municipality | undefined {
+  return (
+    getMunicipalityByIneCode(input.municipalityCode) ??
+    getMunicipalityByName(input.municipality ?? '') ??
+    municipalityFromAddress(input.address)
+  );
+}

@@ -22,6 +22,7 @@ export interface ParcelExpedienteInput {
 
 export interface DetectedParcelInput {
   cadastralReference?: string | null
+  parcelReference?: string | null
   provinceId?: string | null
   provinceName?: string | null
   municipalityId?: string | null

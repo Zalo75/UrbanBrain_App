@@ -15,6 +15,7 @@ export interface TerritorialContextView {
   resolvedAt: string;
   inputMethod: TerritorialResolution['inputMethod'];
   cadastralReference?: string;
+  parcelReference?: string;
   address?: string;
   coordinates?: TerritorialResolution['coordinates'];
   municipality?: string;
@@ -71,13 +72,23 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     ...result.conflicts.map((conflict) => conflict.reason),
     ...(effective?.planning.conflicts ?? result.planning.conflicts ?? []),
   ];
+  const territorialContextComplete = Boolean(
+    effective?.status === 'confirmed' &&
+      effective.municipality?.trim() &&
+      effective.municipalityCode?.trim() &&
+      effective.planning.status === 'determined' &&
+      effective.planning.instrument?.trim() &&
+      effective.planning.classification?.label.trim()
+  );
   const status =
     conflicts.length || result.planning.status === 'conflict'
       ? 'conflict'
       : manual || result.continuity?.usingPreviousOfficialContext || incompleteSource
         ? 'provisional'
-      : effective?.status === 'confirmed'
+      : territorialContextComplete
         ? 'confirmed'
+        : effective?.status === 'confirmed'
+          ? 'provisional'
         : effective?.status === 'probable' || result.status === 'ambiguous'
           ? 'approximate'
           : 'undetermined';
@@ -105,6 +116,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     resolvedAt: result.resolvedAt,
     inputMethod: result.inputMethod,
     cadastralReference: effective?.cadastralReference ?? manual?.cadastralReference,
+    parcelReference: effective?.parcelReference,
     address: effective?.normalizedAddress ?? manual?.address,
     coordinates: effective?.coordinates ?? manual?.coordinates,
     municipality: effective?.municipality ?? manual?.municipality,

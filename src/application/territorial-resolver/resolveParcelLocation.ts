@@ -157,7 +157,11 @@ function baseResolution(
   }
 }
 
-function applyParcel(result: TerritorialResolution, parcel: CatastroParcel) {
+function applyParcel(
+  result: TerritorialResolution,
+  parcel: CatastroParcel,
+  requestedReference?: string
+) {
   if (!parcel.evidence.length) {
     result.warnings.push(
       warning('provenance_missing', 'Se descartó una respuesta territorial sin procedencia.')
@@ -168,7 +172,8 @@ function applyParcel(result: TerritorialResolution, parcel: CatastroParcel) {
   result.confidence = parcel.sourceChecks?.some((check) => check.status !== 'available')
     ? 'medium'
     : 'high'
-  result.cadastralReference = parcel.cadastralReference
+  result.cadastralReference = requestedReference ?? parcel.cadastralReference
+  result.parcelReference = parcelReference(parcel.cadastralReference)
   result.normalizedAddress = parcel.normalizedAddress
   result.municipality = parcel.municipality
   result.municipalityCode = parcel.municipalityCode
@@ -255,7 +260,7 @@ async function resolveByReference(
     return result
   }
 
-  if (!applyParcel(result, parcel)) return result
+  if (!applyParcel(result, parcel, reference)) return result
 
   if (isValidCoordinates(input.coordinates) && parcel.coordinates) {
     const distance = distanceMetres(input.coordinates!, parcel.coordinates)
@@ -448,7 +453,13 @@ async function resolveByAddress(
       )
     }
     if (parcel) {
-      if (applyParcel(result, parcel)) {
+      if (
+        applyParcel(
+          result,
+          parcel,
+          normalizeCadastralReference(candidate.cadastralReference) ?? parcel.cadastralReference
+        )
+      ) {
         result.inputMethod = 'address'
         await addApplicability(result, dependencies)
         return result

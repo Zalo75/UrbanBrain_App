@@ -117,7 +117,8 @@ describe('resolveParcelLocation', () => {
       status: 'confirmed',
       confidence: 'high',
       inputMethod: 'cadastral_reference',
-      cadastralReference: '8424001NJ4082S',
+      cadastralReference: '8424001NJ4082S0001AY',
+      parcelReference: '8424001NJ4082S',
       municipalityCode: '15030',
     })
     expect(result.parcelGeometry?.type).toBe('MultiPolygon')

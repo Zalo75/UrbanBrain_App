@@ -11,6 +11,7 @@ import {
   allSourceChecks,
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity';
+import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView';
 import type { ManualTerritorialContext } from '@/domain/territorial-resolver/types';
 import { db } from '@/infrastructure/db/client';
 import { expedientes } from '@/infrastructure/db/schema';
@@ -214,7 +215,9 @@ export async function resolveTerritorialContextAction(
   }
   const message =
     result.status === 'confirmed'
-      ? 'Ubicación confirmada y contexto territorial actualizado.'
+      ? buildTerritorialContextView(result)?.status === 'confirmed'
+        ? 'Ubicación confirmada y contexto territorial actualizado.'
+        : 'Ubicación catastral confirmada, pero el contexto territorial sigue parcial y requiere completar municipio, planeamiento o clasificación.'
       : result.status === 'probable' || result.status === 'ambiguous'
         ? 'Se ha guardado un resultado aproximado que requiere validación.'
         : 'La consulta se ha guardado, pero no ha podido determinarse la ubicación.';
