@@ -4,13 +4,14 @@ import dotenv from 'dotenv'
 import postgres from 'postgres'
 import { createSnapshot, diffSnapshots, SIOTUGA_CORUNA_URL } from '../src/application/municipal-planning-import/corunaPlanningImport'
 
-const args = process.argv.slice(2); const value = (name: string) => args[args.indexOf(name) + 1]
-const source = value('--source'); const output = value('--snapshot-dir') ?? '.artifacts/municipal-planning-coruna'
-if (!source) throw new Error('Provide --source <SIOTUGA HTML>.')
-const html = await readFile(resolve(source), 'utf8'); const snapshot = createSnapshot(html, new Date().toISOString())
-const previousPath = value('--previous-snapshot'); const previous = previousPath ? JSON.parse(await readFile(resolve(previousPath), 'utf8')) : undefined
-const apply = args.includes('--apply')
-if (apply) {
+async function main() {
+  const args = process.argv.slice(2); const value = (name: string) => args[args.indexOf(name) + 1]
+  const source = value('--source'); const output = value('--snapshot-dir') ?? '.artifacts/municipal-planning-coruna'
+  if (!source) throw new Error('Provide --source <SIOTUGA HTML>.')
+  const html = await readFile(resolve(source), 'utf8'); const snapshot = createSnapshot(html, new Date().toISOString())
+  const previousPath = value('--previous-snapshot'); const previous = previousPath ? JSON.parse(await readFile(resolve(previousPath), 'utf8')) : undefined
+  const apply = args.includes('--apply')
+  if (apply) {
   dotenv.config({ path: resolve('.env') })
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required only with --apply.')
   const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1 })
@@ -26,7 +27,13 @@ if (apply) {
       }
     })
   } finally { await sql.end({ timeout: 5 }) }
+  }
+  const report = { snapshot, diff: diffSnapshots(previous, snapshot), mode: apply ? 'apply' : 'dry-run' }
+  await mkdir(resolve(output), { recursive: true }); await writeFile(resolve(output, 'snapshot.json'), JSON.stringify(snapshot, null, 2)); await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
+  console.log(JSON.stringify({ source: SIOTUGA_CORUNA_URL, candidates: snapshot.records.length, changes: report.diff.reduce((acc, item) => ({ ...acc, [item.change]: (acc[item.change] ?? 0) + 1 }), {} as Record<string, number>), mode: report.mode }))
 }
-const report = { snapshot, diff: diffSnapshots(previous, snapshot), mode: apply ? 'apply' : 'dry-run' }
-await mkdir(resolve(output), { recursive: true }); await writeFile(resolve(output, 'snapshot.json'), JSON.stringify(snapshot, null, 2)); await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
-console.log(JSON.stringify({ source: SIOTUGA_CORUNA_URL, candidates: snapshot.records.length, changes: report.diff.reduce((acc, item) => ({ ...acc, [item.change]: (acc[item.change] ?? 0) + 1 }), {} as Record<string, number>), mode: report.mode }))
+
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
