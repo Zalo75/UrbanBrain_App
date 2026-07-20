@@ -24,7 +24,7 @@ const href = (row: string, index: number) => {
   const value = /href=["']([^"']+)["']/i.exec(cell)?.[1]
   return value ? new URL(value, SIOTUGA_CORUNA_URL).toString() : undefined
 }
-const fingerprint = (record: Omit<OfficialPlanningRecord, 'externalId'>) => createHash('sha256').update(`${record.municipalityId}|${record.name}|${record.approvalDate}|${record.sourceUrl}`).digest('hex')
+const fingerprint = (record: Omit<OfficialPlanningRecord, 'externalId'>) => createHash('sha256').update(`${record.municipalityId}|${record.name}|${record.approvalDate}|${record.sourceUrl}|${record.adaptation ?? ''}`).digest('hex')
 const execFileAsync = promisify(execFile)
 
 export async function fetchSiotugaPlanningHtml(fetcher: typeof fetch = fetch) {

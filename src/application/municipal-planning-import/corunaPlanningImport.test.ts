@@ -34,4 +34,14 @@ describe('A Coruña SIOTUGA planning import', () => {
     const first = createSnapshot(`<table>${valid}</table>`, '2026-07-20T00:00:00.000Z'); const changed = structuredClone(first); changed.records[0].name = 'Nuevo plan'; changed.records[0].externalId = 'changed'
     expect(diffSnapshots(first, changed).filter((item) => item.change === 'changed')).toHaveLength(1)
   })
+  it('detects changes in the adaptation status (fingerprint bug)', () => {
+    // Generate valid records but replace Abegondo (15001) with our custom row
+    const baseValid = valid.replace(/<tr><td>15001[\s\S]*?<\/tr>/, '')
+    const tableBase = `<tr><td>15001</td><td>Abegondo</td><td>Plan general de ordenación municipal</td><td>2023-10-19</td><td>Planeamiento general no adaptado</td><td><a href="/inventario.php?inv=1&idconcello=15001">Inventario</a></td></tr>`
+    const tableUpdated = `<tr><td>15001</td><td>Abegondo</td><td>Plan general de ordenación municipal</td><td>2023-10-19</td><td>Planeamiento general adaptado a la LSG</td><td><a href="/inventario.php?inv=1&idconcello=15001">Inventario</a></td></tr>`
+    const snap1 = createSnapshot(`<table>${baseValid}${tableBase}</table>`, '2026-07-20T00:00:00.000Z')
+    const snap2 = createSnapshot(`<table>${baseValid}${tableUpdated}</table>`, '2026-07-21T00:00:00.000Z')
+    const diff = diffSnapshots(snap1, snap2)
+    expect(diff.find(d => d.municipalityId === '15001')?.change).toBe('changed')
+  })
 })
