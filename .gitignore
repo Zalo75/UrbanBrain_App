@@ -57,3 +57,4 @@ public/sw.js
 corpus_v2/*.pdf
 scripts/*.md
 scripts/*.txt
+data/
