@@ -2,179 +2,244 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { db } from '@/infrastructure/db/client'
-import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
-import { authProvider } from '@/infrastructure/auth'
-import { eq } from 'drizzle-orm'
-import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
-import { getInitialContextAcceptance } from './creationContext'
+import { and, eq } from 'drizzle-orm'
 
-import { isMunicipalityEnabled, getProvinceByName, getMunicipalityByName } from '@/shared/territory'
+import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
+import { ContextDetectionEngine } from '@/application/context-engine/ContextDetectionEngine'
+import { normalizeCadastralReference } from '@/application/territorial-resolver/resolveParcelLocation'
+import { authProvider } from '@/infrastructure/auth'
+import { db } from '@/infrastructure/db/client'
+import { expedientes, municipalPlanning, organizationMembers } from '@/infrastructure/db/schema'
+import { getMunicipalityById, getProvinceById } from '@/shared/territory'
+
+import { getInitialContextAcceptance } from './creationContext'
+import { getPreflightDetection, storePreflightDetection } from './preflightDetectionCache'
+import {
+  LAND_CLASS_OPTIONS,
+  summarizeSmartCaseDetection,
+  validateSmartCaseSubmission,
+} from './smartCaseDetection'
+
+type Membership = { orgId: string; role: 'owner' | 'admin' | 'member' | 'viewer' }
+
+async function creatorMembership(userId: string): Promise<Membership | null> {
+  const [membership] = await db
+    .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.profileId, userId))
+    .limit(1)
+  return membership ?? null
+}
+
+function formText(formData: FormData, name: string) {
+  const value = formData.get(name)
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function coordinatesFromForm(formData: FormData) {
+  const latRaw = formText(formData, 'lat')
+  const lngRaw = formText(formData, 'lng')
+  if (!latRaw && !lngRaw) return { lat: null, lng: null }
+  if (!latRaw || !lngRaw) return null
+  const lat = Number(latRaw)
+  const lng = Number(lngRaw)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { lat, lng }
+}
+
+function errorRedirect(error: string): never {
+  redirect(`/expedientes/new?error=${error}`)
+}
 
 export async function createExpediente(formData: FormData) {
   const userId = await authProvider.getUserId()
-  if (!userId) {
-    redirect('/login')
-  }
+  if (!userId) redirect('/login')
 
-  // Verificar la organización del usuario
-  let membership: { orgId: string; role: 'owner' | 'admin' | 'member' | 'viewer' } | null = null
+  let membership: Membership | null = null
   try {
-    const [result] = await db
-      .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
-      .from(organizationMembers)
-      .where(eq(organizationMembers.profileId, userId))
-      .limit(1)
-    membership = result ?? null
-  } catch (error) {
-    console.error("Error querying memberships in createExpediente:", error)
+    membership = await creatorMembership(userId)
+  } catch {
+    errorRedirect('creation_failed')
   }
-
-  if (!membership) {
-    redirect('/onboarding')
-  }
+  if (!membership) redirect('/onboarding')
   if (!hasOrganizationPermission(membership.role, 'expediente.create')) {
-    redirect('/expedientes?error=forbidden')
+    errorRedirect('forbidden')
   }
-  const orgId = membership.orgId
 
-  const name = formData.get('name') as string
-  const province = formData.get('province') as string
-  const municipio = formData.get('municipio') as string
-  const refCatastral = formData.get('refCatastral') as string | null
-  const address = formData.get('address') as string | null
-  const latStr = formData.get('lat') as string | null
-  const lngStr = formData.get('lng') as string | null
-  const locationSourceRaw = formData.get('locationSource') as string | null
-  const locationSource = locationSourceRaw ? locationSourceRaw as 'cadastral_reference' | 'address' | 'coordinates' | 'planning_area' | 'manual' : null
-  const urbanPlanningZone = formData.get('urbanPlanningZone') as string | null
-  const landClassRaw = formData.get('landClass') as string | null
-  const landClass = landClassRaw ? landClassRaw as 'desconocido' | 'urbano_consolidado' | 'urbano_no_consolidado' | 'urbanizable' | 'rustico_no_urbanizable' | 'nucleo_rural' : null
-  const actionTypeRaw = formData.get('actionType') as string | null
-  const actionType = actionTypeRaw ? actionTypeRaw as 'consulta_urbanistica' | 'vivienda_unifamiliar' | 'reforma' | 'segregacion' | 'cambio_de_uso' | 'nave' | 'legalizacion' | 'demolicion' | 'parcelacion' | 'informe_urbanistico' | 'otro' : null
-  const notes = formData.get('notes') as string | null
-  const planeamiento = formData.get('planeamiento') as string | null
+  const name = formText(formData, 'name')
+  const provinceId = formText(formData, 'province')
+  const municipalityId = formText(formData, 'municipio')
+  const refCatastral = normalizeCadastralReference(formText(formData, 'refCatastral'))
+  const address = formText(formData, 'address')
+  const coordinates = coordinatesFromForm(formData)
+  const planeamiento = formText(formData, 'planeamiento')
+  const urbanPlanningZone = formText(formData, 'urbanPlanningZone')
+  const landClassRaw = formText(formData, 'landClass')
+  const landClass = LAND_CLASS_OPTIONS.some((option) => option.value === landClassRaw)
+    ? landClassRaw as (typeof LAND_CLASS_OPTIONS)[number]['value']
+    : null
+  const actionTypeRaw = formText(formData, 'actionType')
+  const actionType = actionTypeRaw || null
+  const notes = formText(formData, 'notes')
   const initialContextAcceptance = getInitialContextAcceptance(formData)
 
-  if (!name || name.trim() === '') {
-    redirect('/expedientes/new?error=name_required')
+  if (!name) errorRedirect('name_required')
+  if (!provinceId || !municipalityId) errorRedirect('territory_required')
+  if (!getProvinceById(provinceId)?.enabled) errorRedirect('province_invalid')
+  if (!initialContextAcceptance.noticeAccepted) errorRedirect('context_notice_required')
+  if (!coordinates) errorRedirect('coordinates_invalid')
+  if (!refCatastral && !address && coordinates.lat === null && coordinates.lng === null && !urbanPlanningZone) {
+    errorRedirect('location_required')
   }
-  if (!province || province.trim() === '' || !municipio || municipio.trim() === '') {
-    redirect('/expedientes/new?error=territory_required')
-  }
-  if (!initialContextAcceptance.noticeAccepted) {
-    redirect('/expedientes/new?error=context_notice_required')
-  }
+  const municipality = getMunicipalityById(municipalityId)
+  if (!municipality?.enabled) errorRedirect('municipality_disabled')
 
-  if (!isMunicipalityEnabled(municipio)) {
-    redirect('/expedientes/new?error=municipality_disabled')
-  }
+  const cached = getPreflightDetection(userId, formText(formData, 'preflightDetectionId') || null)
+  let preflight = cached ?? undefined
+  const engine = new ContextDetectionEngine()
 
-  let lat: number | null = null
-  let lng: number | null = null
-  if (latStr || lngStr) {
-    if (!latStr || !lngStr) {
-      redirect('/expedientes/new?error=coordinates_incomplete')
+  // A cache miss can happen after a server restart or a request routed to another
+  // process. Re-resolve before insertion instead of trusting client-populated data.
+  if (!preflight && refCatastral) {
+    try {
+      preflight = summarizeSmartCaseDetection(
+        await engine.detectStateless({ cadastralReference: refCatastral })
+      )
+    } catch {
+      preflight = undefined
     }
-    lat = parseFloat(latStr)
-    lng = parseFloat(lngStr)
-    if (isNaN(lat) || isNaN(lng)) {
-      redirect('/expedientes/new?error=coordinates_invalid')
-    }
   }
 
-  const hasLocation = 
-    (refCatastral && refCatastral.trim() !== '') || 
-    (address && address.trim() !== '') || 
-    (lat !== null && lng !== null) ||
-    (urbanPlanningZone && urbanPlanningZone.trim() !== '')
-
-  if (!hasLocation) {
-    redirect('/expedientes/new?error=location_required')
+  const validationError = validateSmartCaseSubmission(
+    {
+      provinceId,
+      municipalityId,
+      cadastralReference: refCatastral,
+      address,
+      lat: coordinates.lat,
+      lng: coordinates.lng,
+      planeamiento,
+      landClass,
+      urbanPlanningZone,
+    },
+    preflight
+  )
+  if (validationError) errorRedirect(validationError)
+  if (!preflight?.detected.planeamiento && planeamiento) {
+    const rows = await db
+      .select({ name: municipalPlanning.name })
+      .from(municipalPlanning)
+      .where(
+        and(
+          eq(municipalPlanning.municipalityId, municipality?.ineCode ?? ''),
+          eq(municipalPlanning.status, 'vigente'),
+          eq(municipalPlanning.name, planeamiento)
+        )
+      )
+      .limit(1)
+    if (!rows.length) errorRedirect('planning_invalid')
   }
+  if (!landClass && landClassRaw) errorRedirect('land_class_invalid')
 
   let newExpedienteId: string
-
   try {
     const [newExpediente] = await db.insert(expedientes).values({
-      orgId,
-      name: name.trim(),
-      province: province.trim(),
-      municipio: municipio.trim(),
-      address: address ? address.trim() : null,
-      refCatastral: refCatastral ? refCatastral.trim() : null,
-      lat,
-      lng,
-      location: (lat !== null && lng !== null) ? [lng, lat] : null,
-      locationSource,
-      urbanPlanningZone: urbanPlanningZone ? urbanPlanningZone.trim() : null,
+      orgId: membership.orgId,
+      name,
+      province: provinceId,
+      municipio: municipalityId,
+      address: address || null,
+      refCatastral: refCatastral ?? null,
+      lat: coordinates.lat,
+      lng: coordinates.lng,
+      location: coordinates.lat !== null && coordinates.lng !== null
+        ? [coordinates.lng, coordinates.lat]
+        : null,
+      locationSource: preflight?.detected.locationSource ?? (coordinates.lat !== null ? 'coordinates' : address ? 'address' : 'manual'),
+      urbanPlanningZone: urbanPlanningZone || null,
       landClass,
-      actionType,
-      notes: notes ? notes.trim() : null,
-      planeamiento: planeamiento ? planeamiento.trim() : null,
+      actionType: actionType as typeof expedientes.$inferInsert.actionType,
+      notes: notes || null,
+      planeamiento: planeamiento || null,
       contextoValidadoPorTecnico: initialContextAcceptance.technicallyReviewed,
-      status: 'active'
+      status: 'active',
     }).returning({ id: expedientes.id })
-
     newExpedienteId = newExpediente.id
-    
-    // Guardar la detección en context_detections usando el motor
+
     try {
-      const { ContextDetectionEngine } = await import('@/application/context-engine/ContextDetectionEngine')
-      const engine = new ContextDetectionEngine()
-      // Se ejecuta en background (no usamos await para no bloquear la redirección de inmediato)
-      // O usamos await si queremos garantizar que termine antes de redirigir
-      await engine.detectContext(newExpedienteId, userId)
-    } catch (engineError) {
-      console.error('Error in ContextDetectionEngine during creation:', engineError)
-      // No interrumpimos la creación del expediente por un fallo en el motor
+      if (preflight) {
+        await engine.persistAuthorizedDetection(newExpedienteId, userId, preflight.result)
+      } else {
+        await engine.detectContext(newExpedienteId, userId)
+      }
+    } catch {
+      // The expediente remains usable if a non-critical follow-up persistence fails.
     }
-  } catch (error) {
-    console.error('Error creating expediente:', error)
-    redirect('/expedientes/new?error=creation_failed')
+  } catch {
+    errorRedirect('creation_failed')
   }
 
   revalidatePath('/dashboard')
   revalidatePath('/expedientes')
-  
   redirect(`/expedientes/${newExpedienteId}`)
 }
 
 export async function detectContextAction(formData: FormData) {
   const userId = await authProvider.getUserId()
-  if (!userId) {
-    return { error: "Debe iniciar sesión para consultar fuentes territoriales." }
-  }
-  const refCatastral = formData.get('refCatastral') as string | null
-  
-  if (!refCatastral || refCatastral.trim() === '') {
-    return { error: "Debe introducir una referencia catastral." }
+  if (!userId) return { error: 'Debe iniciar sesión para consultar fuentes territoriales.' }
+
+  try {
+    const membership = await creatorMembership(userId)
+    if (!membership || !hasOrganizationPermission(membership.role, 'expediente.create')) {
+      return { error: 'No dispone de permisos para preparar un expediente.' }
+    }
+  } catch {
+    return { error: 'No se ha podido comprobar el acceso.' }
   }
 
-  const rc = refCatastral.trim().toUpperCase()
-  
+  const refCatastral = normalizeCadastralReference(formText(formData, 'refCatastral'))
+  if (!refCatastral) return { error: 'Debe introducir una referencia catastral válida.' }
+
   try {
-    const { ContextDetectionEngine } = await import('@/application/context-engine/ContextDetectionEngine')
     const engine = new ContextDetectionEngine()
-    const result = await engine.detectStateless(rc)
-    
-    if (result.status === 'unresolved') {
-      return {
-        error:
-          result.warnings[0]?.message ??
-          "No se ha podido resolver la referencia catastral.",
-      }
+    const detection = summarizeSmartCaseDetection(
+      await engine.detectStateless({ cadastralReference: refCatastral })
+    )
+    const detectionId = storePreflightDetection(userId, detection)
+    const clientDetection = {
+      detected: detection.detected,
+      progress: detection.progress,
+      sourceChecks: detection.sourceChecks,
+      affects: detection.affects,
     }
-    
-    return {
-      provinceId: getProvinceByName(result.province ?? '')?.id ?? null,
-      municipalityId: getMunicipalityByName(result.municipality ?? '')?.id ?? null,
-      provinceName: result.province ?? null,
-      municipalityName: result.municipality ?? null,
-      address: result.normalizedAddress ?? null
-    }
-  } catch (e) {
-    console.error('Error in detectContextAction:', e)
-    return { error: "Error interno al detectar contexto urbanístico." }
+    return { detectionId, detection: clientDetection }
+  } catch {
+    return { error: 'No se ha podido completar la detección territorial. Inténtelo de nuevo.' }
   }
+}
+
+/** Returns only current, catalogued instruments for the selected municipality. */
+export async function getPlanningOptionsAction(municipalityId: string) {
+  const userId = await authProvider.getUserId()
+  if (!userId) return []
+  try {
+    const membership = await creatorMembership(userId)
+    if (!membership || !hasOrganizationPermission(membership.role, 'expediente.create')) return []
+  } catch {
+    return []
+  }
+
+  const municipality = getMunicipalityById(municipalityId)
+  if (!municipality?.enabled || !municipality.ineCode) return []
+  const rows = await db
+    .select({ name: municipalPlanning.name })
+    .from(municipalPlanning)
+    .where(
+      and(
+        eq(municipalPlanning.municipalityId, municipality.ineCode),
+        eq(municipalPlanning.status, 'vigente')
+      )
+    )
+    .limit(20)
+  return [...new Set(rows.map((row) => row.name).filter(Boolean))]
 }

@@ -157,6 +157,22 @@ export class ContextDetectionEngine {
     }, attemptStartedAt)
   }
 
+  /**
+   * Persists a pre-creation resolution only after confirming that the caller may
+   * write context for the newly-created expediente. This avoids repeating the
+   * official queries already performed immediately before creation.
+   */
+  async persistAuthorizedDetection(
+    expedienteId: string,
+    userId: string,
+    result: TerritorialResolution
+  ): Promise<boolean> {
+    const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
+    if (!authorized) return false
+    await this.persist(expedienteId, result)
+    return true
+  }
+
   async recordManualContext(
     expedienteId: string,
     userId: string,

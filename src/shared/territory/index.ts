@@ -50,9 +50,17 @@ export function getProvinceNameById(provinceId: string): string {
   return prov ? prov.name : provinceId;
 }
 
+export function getProvinceById(provinceId: string): Province | undefined {
+  return allProvinces.find((province) => province.id === provinceId);
+}
+
 export function getMunicipalityNameById(municipalityId: string): string {
   const mun = allMunicipalities.find(m => m.id === municipalityId);
   return mun ? mun.name : municipalityId;
+}
+
+export function getMunicipalityById(municipalityId: string): Municipality | undefined {
+  return allMunicipalities.find((municipality) => municipality.id === municipalityId);
 }
 
 export function getProvinceByName(name: string): Province | undefined {

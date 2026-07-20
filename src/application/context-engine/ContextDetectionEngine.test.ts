@@ -68,6 +68,18 @@ describe('ContextDetectionEngine tenant boundary', () => {
     expect(mocks.insert).not.toHaveBeenCalled()
   })
 
+  it('solo persiste una deteccion previa cuando el nuevo expediente sigue autorizado', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue(null)
+    const engine = new ContextDetectionEngine(vi.fn(async () => resolution))
+
+    await expect(engine.persistAuthorizedDetection('expediente-org-b', 'usuario-org-a', resolution)).resolves.toBe(false)
+    expect(mocks.insert).not.toHaveBeenCalled()
+
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({ expediente: { id: 'expediente-org-a' } })
+    await expect(engine.persistAuthorizedDetection('expediente-org-a', 'usuario-org-a', resolution)).resolves.toBe(true)
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ expedienteId: 'expediente-org-a' }))
+  })
+
   it('usa exclusivamente la localización cargada después de autorizar', async () => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: {
