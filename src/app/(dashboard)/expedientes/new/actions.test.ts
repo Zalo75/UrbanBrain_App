@@ -37,7 +37,8 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   },
 }))
 
-import { createExpediente, initialCreateExpedienteState } from './actions'
+import { createExpediente } from './actions'
+import { initialCreateExpedienteState } from './creationState'
 import { storePreflightDetection } from './preflightDetectionCache'
 import { summarizeSmartCaseDetection } from './smartCaseDetection'
 import type { TerritorialResolution } from '@/domain/territorial-resolver/types'

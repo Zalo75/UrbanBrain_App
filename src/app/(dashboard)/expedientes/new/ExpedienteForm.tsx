@@ -15,9 +15,8 @@ import {
   createExpediente,
   detectContextAction,
   getPlanningOptionsAction,
-  initialCreateExpedienteState,
-  type CreateExpedienteState,
 } from './actions'
+import { initialCreateExpedienteState, type CreateExpedienteState } from './creationState'
 import {
   LAND_CLASS_OPTIONS,
   municipalitiesForProvince,

@@ -5,7 +5,6 @@ vi.mock('./actions', () => ({
   createExpediente: vi.fn(),
   detectContextAction: vi.fn(),
   getPlanningOptionsAction: vi.fn(async () => []),
-  initialCreateExpedienteState: { status: 'idle' },
 }))
 
 import { ExpedienteForm } from './ExpedienteForm'
