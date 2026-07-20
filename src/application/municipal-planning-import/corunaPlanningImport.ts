@@ -37,12 +37,14 @@ export function parseSiotugaCorunaPlanning(html: string): OfficialPlanningRecord
 }
 
 export function validateCorunaImport(records: OfficialPlanningRecord[]) {
-  const expected = new Set(aCorunaMunicipalities.flatMap((municipality) => municipality.ineCode && !AUTO_EXCLUDED_INE.has(municipality.ineCode) ? [municipality.ineCode] : []))
-  const selected = records.filter((record) => !AUTO_EXCLUDED_INE.has(record.municipalityId))
+  const knownCoruna = new Set(aCorunaMunicipalities.flatMap((municipality) => municipality.ineCode ? [municipality.ineCode] : []))
+  const expected = new Set([...knownCoruna].filter((ine) => !AUTO_EXCLUDED_INE.has(ine)))
+  const unknownCoruna = records.filter((record) => record.municipalityId.startsWith('15') && !knownCoruna.has(record.municipalityId) && !AUTO_EXCLUDED_INE.has(record.municipalityId))
+  const selected = records.filter((record) => knownCoruna.has(record.municipalityId) && !AUTO_EXCLUDED_INE.has(record.municipalityId))
   const errors: string[] = []
+  for (const record of unknownCoruna) errors.push(`Unexpected A Coruña INE ${record.municipalityId}`)
   for (const ine of expected) if (selected.filter((record) => record.municipalityId === ine).length !== 1) errors.push(`INE ${ine} must have exactly one current general instrument`)
   for (const record of selected) {
-    if (!expected.has(record.municipalityId)) errors.push(`Unexpected INE ${record.municipalityId}`)
     if (!record.name || /sin planeamiento/i.test(record.name) || !record.sourceUrl.startsWith('https://siotuga.xunta.gal/')) errors.push(`Invalid official record ${record.municipalityId}`)
   }
   if (errors.length) throw new Error(`SIOTUGA import blocked: ${errors.join('; ')}`)
