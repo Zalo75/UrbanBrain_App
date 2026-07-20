@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, CircleDashed, Loader2, Sparkles, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -11,7 +11,13 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { Municipality, Province } from '@/shared/territory'
 
-import { createExpediente, detectContextAction, getPlanningOptionsAction } from './actions'
+import {
+  createExpediente,
+  detectContextAction,
+  getPlanningOptionsAction,
+  initialCreateExpedienteState,
+  type CreateExpedienteState,
+} from './actions'
 import {
   LAND_CLASS_OPTIONS,
   municipalitiesForProvince,
@@ -26,7 +32,27 @@ function ProgressIcon({ status }: { status: DetectionProgressItem['status'] }) {
   return <CircleDashed className="h-4 w-4 text-muted-foreground" aria-label="No determinado" />
 }
 
-function ProgressPanel({ detection, calculating }: { detection: SmartCaseDetection | null; calculating: boolean }) {
+function sourceLabel(source: string) {
+  return source === 'ideg' ? 'Cartografía oficial de Galicia (IDEG)' : source
+}
+
+function confidenceLabel(confidence: 'high' | 'medium' | 'low') {
+  return {
+    high: 'Confianza alta',
+    medium: 'Confianza media',
+    low: 'Confianza baja',
+  }[confidence]
+}
+
+function ProgressPanel({
+  detection,
+  calculating,
+  detectionInvalidated,
+}: {
+  detection: SmartCaseDetection | null
+  calculating: boolean
+  detectionInvalidated: boolean
+}) {
   const items = calculating
     ? [
         'Referencia catastral validada', 'Parcela localizada', 'Dirección obtenida', 'Provincia identificada',
@@ -35,25 +61,32 @@ function ProgressPanel({ detection, calculating }: { detection: SmartCaseDetecti
       ].map((label, index) => ({ id: String(index), label, status: 'calculating' as const, detail: 'Consultando fuentes oficiales' }))
     : detection?.progress ?? []
 
-  if (!items.length) return null
+  if (!items.length && !detectionInvalidated) return null
   const affectsIncomplete = detection?.sourceChecks.some(
     (check) => check.source === 'ideg' && ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
   )
   return (
     <section aria-live="polite" className="rounded-lg border bg-muted/30 p-4">
       <h2 className="text-base font-semibold">Progreso de la detección</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Cada estado procede del resultado real de las fuentes consultadas.</p>
-      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-        {items.map((item) => (
-          <li key={item.id} className="flex gap-2 text-sm">
-            <span className="mt-0.5"><ProgressIcon status={item.status} /></span>
-            <span>
-              <span className="block font-medium">{item.label}</span>
-              <span className="block text-muted-foreground">{item.detail}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      <p className="mt-1 text-sm text-muted-foreground">Cada estado se basa en el resultado disponible de las fuentes oficiales consultadas.</p>
+      {detectionInvalidated && (
+        <p role="alert" className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          Los datos de localización han cambiado. El contexto territorial anterior ya no se utilizará. Actualice el análisis antes de crear el expediente.
+        </p>
+      )}
+      {!!items.length && (
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+          {items.map((item) => (
+            <li key={item.id} className="flex gap-2 text-sm">
+              <span className="mt-0.5"><ProgressIcon status={item.status} /></span>
+              <span>
+                <span className="block font-medium">{item.label}</span>
+                <span className="block text-muted-foreground">{item.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {detection && (
         <div className="mt-4 border-t pt-4 text-sm">
           <p className="font-medium">Afecciones y cobertura</p>
@@ -61,7 +94,7 @@ function ProgressPanel({ detection, calculating }: { detection: SmartCaseDetecti
             <ul className="mt-2 list-disc space-y-1 pl-5">
               {detection.affects.map((affect) => (
                 <li key={`${affect.category}-${affect.featureId ?? affect.name}`}>
-                  {affect.name} · {affect.confidence} · {affect.evidence.source}
+                  {affect.name} · {confidenceLabel(affect.confidence)} · {sourceLabel(affect.evidence.source)}
                 </li>
               ))}
             </ul>
@@ -76,7 +109,7 @@ function ProgressPanel({ detection, calculating }: { detection: SmartCaseDetecti
             .filter((check) => ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status))
             .map((check) => (
               <p key={`${check.source}-${check.status}`} className="mt-2 text-amber-700 dark:text-amber-400">
-                {check.source.toUpperCase()}: {check.message}
+                {sourceLabel(check.source)}: la fuente no completó la consulta. Puede reintentar o continuar; este dato deberá comprobarse posteriormente.
               </p>
             ))}
         </div>
@@ -86,6 +119,7 @@ function ProgressPanel({ detection, calculating }: { detection: SmartCaseDetecti
 }
 
 export function ExpedienteForm({ provinces, municipalities }: { provinces: Province[]; municipalities: Municipality[] }) {
+  const [name, setName] = useState('')
   const [selectedProvince, setSelectedProvince] = useState('a_coruna')
   const [selectedMunicipality, setSelectedMunicipality] = useState('')
   const [refCatastral, setRefCatastral] = useState('')
@@ -95,10 +129,24 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   const [planeamiento, setPlaneamiento] = useState('')
   const [landClass, setLandClass] = useState('')
   const [urbanPlanningZone, setUrbanPlanningZone] = useState('')
+  const [actionType, setActionType] = useState('')
+  const [notes, setNotes] = useState('')
+  const [contextNoticeAccepted, setContextNoticeAccepted] = useState(false)
   const [planningOptionsByMunicipality, setPlanningOptionsByMunicipality] = useState<Record<string, string[]>>({})
   const [detection, setDetection] = useState<SmartCaseDetection | null>(null)
   const [detectionId, setDetectionId] = useState('')
+  const [detectionInvalidated, setDetectionInvalidated] = useState(false)
   const [isDetecting, setIsDetecting] = useState(false)
+  const submitLock = useRef(false)
+  const guardedCreateExpediente = useCallback(async (
+    previousState: CreateExpedienteState,
+    formData: FormData
+  ) => {
+    if (detectionInvalidated || submitLock.current) return previousState
+    submitLock.current = true
+    return createExpediente(previousState, formData)
+  }, [detectionInvalidated])
+  const [createState, createAction, isCreating] = useActionState(guardedCreateExpediente, initialCreateExpedienteState)
 
   const availableMunicipalities = useMemo(
     () => municipalitiesForProvince(municipalities, selectedProvince),
@@ -120,7 +168,17 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     return () => { active = false }
   }, [selectedMunicipality])
 
+  useEffect(() => {
+    if (!isCreating) submitLock.current = false
+  }, [isCreating])
+
   function invalidateDetection() {
+    if (detection) {
+      setPlaneamiento('')
+      setLandClass('')
+      setUrbanPlanningZone('')
+      setDetectionInvalidated(true)
+    }
     setDetection(null)
     setDetectionId('')
   }
@@ -144,33 +202,42 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       const values = result.detection.detected
       setDetection(result.detection)
       setDetectionId(result.detectionId)
+      setDetectionInvalidated(false)
       if (values.cadastralReference) setRefCatastral(values.cadastralReference)
       if (values.provinceId) setSelectedProvince(values.provinceId)
       if (values.municipalityId) setSelectedMunicipality(values.municipalityId)
       if (values.address) setAddress(values.address)
       if (values.lat !== undefined) setLat(String(values.lat))
       if (values.lng !== undefined) setLng(String(values.lng))
-      if (values.planeamiento) setPlaneamiento(values.planeamiento)
-      if (values.landClass) setLandClass(values.landClass)
-      if (values.urbanPlanningZone) setUrbanPlanningZone(values.urbanPlanningZone)
-      toast.success('Detección completada. Revise los datos antes de crear el expediente.')
+      setPlaneamiento(values.planeamiento ?? '')
+      setLandClass(values.landClass ?? '')
+      setUrbanPlanningZone(values.urbanPlanningZone ?? '')
+      toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
     } catch {
-      toast.error('No se ha podido completar la detección territorial.')
+      toast.error('No se ha podido completar el análisis territorial. Puede reintentar o continuar con los datos pendientes.')
     } finally {
       setIsDetecting(false)
     }
   }
 
   return (
-    <form action={createExpediente} className="space-y-8">
+    <form action={createAction} className="space-y-8" aria-busy={isCreating}>
       <input type="hidden" name="preflightDetectionId" value={detectionId} />
-      <input type="hidden" name="urbanPlanningZone" value={urbanPlanningZone} />
+      <input type="hidden" name="territorialDetectionInvalidated" value={detectionInvalidated ? 'true' : ''} />
+      {!detectionInvalidated && <input type="hidden" name="urbanPlanningZone" value={urbanPlanningZone} />}
+
+      {createState.status === 'error' && (
+        <div id="creation-error" role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+          <p className="font-semibold">Revise el formulario antes de crear el expediente</p>
+          <p className="mt-1">{createState.message}</p>
+        </div>
+      )}
 
       <section className="space-y-6">
         <h2 className="border-b pb-2 text-xl font-semibold">A. Identificación</h2>
         <div className="grid gap-3">
           <Label htmlFor="name" className="text-base font-medium">Nombre del proyecto <span className="text-destructive">*</span></Label>
-          <Input id="name" name="name" placeholder="Ej.: Reforma vivienda unifamiliar" required className="h-12 text-base shadow-sm" autoFocus />
+          <Input id="name" name="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej.: Reforma de vivienda unifamiliar" required aria-invalid={createState.field === 'name'} aria-describedby={createState.field === 'name' ? 'creation-error' : undefined} className={`h-12 text-base shadow-sm ${createState.field === 'name' ? 'border-destructive' : ''}`} autoFocus />
         </div>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="grid gap-3">
@@ -183,7 +250,8 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                 if (selectedMunicipalityData?.provinceId !== provinceId) setSelectedMunicipality('')
                 invalidateDetection()
               }}
-              className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm"
+              aria-invalid={createState.field === 'province'} aria-describedby={createState.field === 'province' ? 'creation-error' : undefined}
+              className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'province' ? 'border-destructive' : ''}`}
             >
               {provinces.map((province) => <option key={province.id} value={province.id} disabled={!province.enabled}>{province.name}</option>)}
             </select>
@@ -193,14 +261,15 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <select
               id="municipio" name="municipio" required value={selectedMunicipality}
               onChange={(event) => { setSelectedMunicipality(event.target.value); invalidateDetection() }}
-              className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm"
+              aria-invalid={createState.field === 'municipio'} aria-describedby={createState.field === 'municipio' ? 'creation-error' : undefined}
+              className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'municipio' ? 'border-destructive' : ''}`}
             >
               <option value="" disabled>Seleccione un municipio</option>
               {availableMunicipalities.map((municipality) => (
                 <option key={municipality.id} value={municipality.id} disabled={!municipality.enabled}>{municipality.name}</option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">Se guarda el identificador estable del catálogo; no se admiten variantes de texto libre.</p>
+            <p className="text-xs text-muted-foreground">Seleccione el municipio para mantener el contexto territorial coherente.</p>
           </div>
         </div>
         <div className="grid gap-3">
@@ -217,24 +286,24 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <Input
               id="refCatastral" name="refCatastral" value={refCatastral}
               onChange={(event) => { setRefCatastral(event.target.value); invalidateDetection() }}
-              placeholder="14 o 20 caracteres" className="h-12 flex-1 font-mono text-base shadow-sm"
+              placeholder="14 o 20 caracteres" aria-invalid={createState.field === 'refCatastral'} aria-describedby={createState.field === 'refCatastral' ? 'creation-error' : undefined} className={`h-12 flex-1 font-mono text-base shadow-sm ${createState.field === 'refCatastral' ? 'border-destructive' : ''}`}
             />
             <Button type="button" variant="secondary" className="h-12 px-4" onClick={handleDetectContext} disabled={isDetecting}>
               {isDetecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-amber-500" />}
-              <span className="ml-2 hidden sm:inline">Detectar</span>
+              <span className="ml-2 hidden sm:inline">{detectionInvalidated ? 'Actualizar análisis' : 'Analizar parcela'}</span>
             </Button>
           </div>
           {detection?.detected.parcelReference && <p className="text-sm text-muted-foreground">Referencia parcelaria: <span className="font-mono">{detection.detected.parcelReference}</span></p>}
         </div>
-        <ProgressPanel detection={detection} calculating={isDetecting} />
+        <ProgressPanel detection={detection} calculating={isDetecting} detectionInvalidated={detectionInvalidated} />
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="grid gap-3">
             <Label htmlFor="address" className="text-base font-medium">Dirección aproximada</Label>
-            <Input id="address" name="address" value={address} onChange={(event) => { setAddress(event.target.value); invalidateDetection() }} placeholder="Se completa desde Catastro cuando está disponible" className="h-12 text-base shadow-sm" />
+            <Input id="address" name="address" value={address} onChange={(event) => { setAddress(event.target.value); invalidateDetection() }} placeholder="Se completa desde Catastro cuando está disponible" aria-invalid={createState.field === 'address'} aria-describedby={createState.field === 'address' ? 'creation-error' : undefined} className={`h-12 text-base shadow-sm ${createState.field === 'address' ? 'border-destructive' : ''}`} />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label htmlFor="lat" className="text-sm font-medium">Latitud</Label><Input id="lat" name="lat" type="number" step="any" value={lat} onChange={(event) => { setLat(event.target.value); invalidateDetection() }} className="h-12" /></div>
-            <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => { setLng(event.target.value); invalidateDetection() }} className="h-12" /></div>
+            <div className="grid gap-2"><Label htmlFor="lat" className="text-sm font-medium">Latitud</Label><Input id="lat" name="lat" type="number" step="any" value={lat} onChange={(event) => { setLat(event.target.value); invalidateDetection() }} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
+            <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => { setLng(event.target.value); invalidateDetection() }} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
           </div>
         </div>
       </section>
@@ -243,16 +312,16 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         <h2 className="border-b pb-2 text-xl font-semibold">C. Contexto urbanístico</h2>
         <div className="grid gap-3">
           <Label htmlFor="planeamiento" className="text-base font-medium">Planeamiento general</Label>
-          <select id="planeamiento" name="planeamiento" value={planeamiento} onChange={(event) => setPlaneamiento(event.target.value)} className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm">
+          <select id="planeamiento" name="planeamiento" value={planeamiento} onChange={(event) => setPlaneamiento(event.target.value)} aria-invalid={createState.field === 'planeamiento'} aria-describedby={createState.field === 'planeamiento' ? 'creation-error' : undefined} className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'planeamiento' ? 'border-destructive' : ''}`}>
             <option value="">{detection ? 'No determinado por las fuentes disponibles' : 'Seleccione municipio o detecte la parcela'}</option>
             {detection?.detected.planeamiento && <option value={detection.detected.planeamiento}>{detection.detected.planeamiento}</option>}
             {planningOptions.filter((option) => option !== detection?.detected.planeamiento).map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
-          <p className="text-xs text-muted-foreground">Las opciones manuales proceden exclusivamente del catálogo municipal vigente disponible para el municipio seleccionado.</p>
+          <p className="text-xs text-muted-foreground">Las opciones disponibles proceden del catálogo municipal vigente. Si no aparece ninguna, puede dejar este dato pendiente.</p>
         </div>
         <div className="grid gap-3">
           <Label htmlFor="landClass" className="text-base font-medium">Clasificación del suelo</Label>
-          <select id="landClass" name="landClass" value={landClass} onChange={(event) => setLandClass(event.target.value)} className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm">
+          <select id="landClass" name="landClass" value={landClass} onChange={(event) => setLandClass(event.target.value)} aria-invalid={createState.field === 'landClass'} aria-describedby={createState.field === 'landClass' ? 'creation-error' : undefined} className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'landClass' ? 'border-destructive' : ''}`}>
             <option value="">Seleccionar si no se ha determinado</option>
             {LAND_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -264,19 +333,22 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         <h2 className="border-b pb-2 text-xl font-semibold">D. Datos del encargo</h2>
         <div className="grid gap-3">
           <Label htmlFor="actionType" className="text-base font-medium">Tipo de actuación</Label>
-          <select id="actionType" name="actionType" className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm">
+          <select id="actionType" name="actionType" value={actionType} onChange={(event) => setActionType(event.target.value)} className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm">
             <option value="">Seleccionar (opcional)</option><option value="consulta_urbanistica">Consulta urbanística</option><option value="informe_urbanistico">Informe urbanístico</option><option value="vivienda_unifamiliar">Vivienda unifamiliar</option><option value="reforma">Reforma</option><option value="segregacion">Segregación</option><option value="parcelacion">Parcelación</option><option value="cambio_de_uso">Cambio de uso</option><option value="nave">Nave industrial/agrícola</option><option value="legalizacion">Legalización</option><option value="demolicion">Demolición</option><option value="otro">Otro</option>
           </select>
         </div>
-        <div className="grid gap-3"><Label htmlFor="notes" className="text-base font-medium">Notas / observaciones</Label><Textarea id="notes" name="notes" placeholder="Añada información relevante del encargo." className="min-h-[100px] resize-y" /></div>
+        <div className="grid gap-3"><Label htmlFor="notes" className="text-base font-medium">Notas / observaciones</Label><Textarea id="notes" name="notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Añada información relevante del encargo." className="min-h-[100px] resize-y" /></div>
       </section>
 
-      <label className="flex cursor-pointer items-start gap-3 rounded-md border bg-background p-4 shadow-sm">
-        <input type="checkbox" name="initialContextNoticeAccepted" value="true" required className="mt-0.5 h-4 w-4 accent-primary" />
+      <label className={`flex cursor-pointer items-start gap-3 rounded-md border bg-background p-4 shadow-sm ${createState.field === 'contextNotice' ? 'border-destructive' : ''}`}>
+        <input type="checkbox" name="initialContextNoticeAccepted" value="true" checked={contextNoticeAccepted} onChange={(event) => setContextNoticeAccepted(event.target.checked)} required aria-invalid={createState.field === 'contextNotice'} aria-describedby={createState.field === 'contextNotice' ? 'creation-error' : undefined} className="mt-0.5 h-4 w-4 accent-primary" />
         <span className="text-sm font-medium leading-tight">Entiendo que el contexto inicial es orientativo y debe validarse técnicamente antes de utilizarlo.</span>
       </label>
       <div className="flex items-center gap-4 border-t border-border/50 pt-6">
-        <Button type="submit" className="h-11 px-8">Crear expediente</Button>
+        <Button type="submit" className="h-11 px-8" disabled={isCreating || detectionInvalidated}>
+          {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isCreating ? 'Creando expediente...' : 'Crear expediente'}
+        </Button>
         <Link href="/dashboard"><Button type="button" variant="ghost" className="h-11">Cancelar</Button></Link>
       </div>
     </form>

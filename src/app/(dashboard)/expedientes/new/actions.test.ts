@@ -37,7 +37,7 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   },
 }))
 
-import { createExpediente } from './actions'
+import { createExpediente, initialCreateExpedienteState } from './actions'
 import { storePreflightDetection } from './preflightDetectionCache'
 import { summarizeSmartCaseDetection } from './smartCaseDetection'
 import type { TerritorialResolution } from '@/domain/territorial-resolver/types'
@@ -86,7 +86,7 @@ describe('createExpediente smart preflight', () => {
   it('reuses a server-side preflight and persists normalized selections without repeating official queries', async () => {
     const detectionId = storePreflightDetection('user-a', summarizeSmartCaseDetection(result))
 
-    await expect(createExpediente(form(detectionId))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(createExpediente(initialCreateExpedienteState, form(detectionId))).rejects.toThrow('NEXT_REDIRECT')
 
     expect(mocks.detectStateless).not.toHaveBeenCalled()
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
@@ -101,19 +101,71 @@ describe('createExpediente smart preflight', () => {
     const manipulated = form(detectionId)
     manipulated.set('municipio', 'abegondo')
 
-    await expect(createExpediente(manipulated)).rejects.toThrow('NEXT_REDIRECT')
+    await expect(createExpediente(initialCreateExpedienteState, manipulated)).resolves.toMatchObject({
+      status: 'error',
+      field: 'municipio',
+    })
 
     expect(mocks.insert).not.toHaveBeenCalled()
     expect(mocks.detectStateless).not.toHaveBeenCalled()
-    expect(mocks.redirect).toHaveBeenCalledWith('/expedientes/new?error=detection_mismatch')
+    expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
   it('recalculates on a preflight cache miss instead of trusting the browser values', async () => {
     mocks.detectStateless.mockResolvedValue(result)
 
-    await expect(createExpediente(form('expired-preflight'))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(createExpediente(initialCreateExpedienteState, form('expired-preflight'))).rejects.toThrow('NEXT_REDIRECT')
 
     expect(mocks.detectStateless).toHaveBeenCalledWith({ cadastralReference: '7709702NH4970N0001SZ' })
     expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith('exp-a', 'user-a', result)
+  })
+
+  it('marks an address mismatch on the address field instead of the cadastral reference', async () => {
+    const detectionId = storePreflightDetection('user-a', summarizeSmartCaseDetection(result))
+    const manipulated = form(detectionId)
+    manipulated.set('address', 'Nueva dirección')
+
+    await expect(createExpediente(initialCreateExpedienteState, manipulated)).resolves.toMatchObject({
+      status: 'error',
+      field: 'address',
+    })
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it('does not persist territorial values when the server cannot re-resolve an expired preflight', async () => {
+    mocks.detectStateless.mockRejectedValue(new Error('official source unavailable'))
+
+    await expect(createExpediente(initialCreateExpedienteState, form('expired-preflight'))).resolves.toMatchObject({
+      status: 'error',
+      field: 'refCatastral',
+    })
+
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.values).not.toHaveBeenCalled()
+  })
+
+  it('rejects a form explicitly marked as territorially invalidated before writing', async () => {
+    const stale = form('')
+    stale.set('territorialDetectionInvalidated', 'true')
+
+    await expect(createExpediente(initialCreateExpedienteState, stale)).resolves.toMatchObject({
+      status: 'error',
+      field: 'territorialContext',
+    })
+    expect(mocks.detectStateless).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it('returns a clear error without redirecting when a required value is missing', async () => {
+    const incomplete = form('')
+    incomplete.delete('name')
+
+    await expect(createExpediente(initialCreateExpedienteState, incomplete)).resolves.toEqual({
+      status: 'error',
+      message: 'Indique un nombre para identificar el expediente.',
+      field: 'name',
+    })
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.redirect).not.toHaveBeenCalled()
   })
 })

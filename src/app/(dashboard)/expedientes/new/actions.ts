@@ -17,10 +17,26 @@ import { getPreflightDetection, storePreflightDetection } from './preflightDetec
 import {
   LAND_CLASS_OPTIONS,
   summarizeSmartCaseDetection,
+  type PreflightDetection,
   validateSmartCaseSubmission,
 } from './smartCaseDetection'
 
 type Membership = { orgId: string; role: 'owner' | 'admin' | 'member' | 'viewer' }
+
+export interface CreateExpedienteState {
+  status: 'idle' | 'error'
+  message?: string
+  field?: 'name' | 'province' | 'municipio' | 'refCatastral' | 'address' | 'coordinates' | 'planeamiento' | 'landClass' | 'contextNotice' | 'territorialContext'
+}
+
+export const initialCreateExpedienteState: CreateExpedienteState = { status: 'idle' }
+
+function creationError(
+  message: string,
+  field?: CreateExpedienteState['field']
+): CreateExpedienteState {
+  return { status: 'error', message, field }
+}
 
 async function creatorMembership(userId: string): Promise<Membership | null> {
   const [membership] = await db
@@ -47,11 +63,37 @@ function coordinatesFromForm(formData: FormData) {
   return { lat, lng }
 }
 
-function errorRedirect(error: string): never {
-  redirect(`/expedientes/new?error=${error}`)
+function detectionMismatchField(
+  detection: PreflightDetection | undefined,
+  input: {
+    provinceId: string
+    municipalityId: string
+    cadastralReference: string | null
+    address: string
+    lat: number | null
+    lng: number | null
+    planeamiento: string
+    landClass: string | null
+    urbanPlanningZone: string
+  }
+): CreateExpedienteState['field'] {
+  const expected = detection?.detected
+  if (!expected) return 'territorialContext'
+  if (expected.cadastralReference && input.cadastralReference !== expected.cadastralReference) return 'refCatastral'
+  if (expected.provinceId && input.provinceId !== expected.provinceId) return 'province'
+  if (expected.municipalityId && input.municipalityId !== expected.municipalityId) return 'municipio'
+  if (expected.address && input.address !== expected.address) return 'address'
+  if (expected.lat !== undefined && input.lat !== expected.lat) return 'coordinates'
+  if (expected.lng !== undefined && input.lng !== expected.lng) return 'coordinates'
+  if (expected.planeamiento && input.planeamiento !== expected.planeamiento) return 'planeamiento'
+  if (expected.landClass && input.landClass !== expected.landClass) return 'landClass'
+  return 'territorialContext'
 }
 
-export async function createExpediente(formData: FormData) {
+export async function createExpediente(
+  _previousState: CreateExpedienteState,
+  formData: FormData
+): Promise<CreateExpedienteState> {
   const userId = await authProvider.getUserId()
   if (!userId) redirect('/login')
 
@@ -59,11 +101,11 @@ export async function createExpediente(formData: FormData) {
   try {
     membership = await creatorMembership(userId)
   } catch {
-    errorRedirect('creation_failed')
+    return creationError('No hemos podido preparar la creación del expediente. Inténtelo de nuevo.')
   }
   if (!membership) redirect('/onboarding')
   if (!hasOrganizationPermission(membership.role, 'expediente.create')) {
-    errorRedirect('forbidden')
+    return creationError('No dispone de permisos para crear expedientes.')
   }
 
   const name = formText(formData, 'name')
@@ -83,16 +125,29 @@ export async function createExpediente(formData: FormData) {
   const notes = formText(formData, 'notes')
   const initialContextAcceptance = getInitialContextAcceptance(formData)
 
-  if (!name) errorRedirect('name_required')
-  if (!provinceId || !municipalityId) errorRedirect('territory_required')
-  if (!getProvinceById(provinceId)?.enabled) errorRedirect('province_invalid')
-  if (!initialContextAcceptance.noticeAccepted) errorRedirect('context_notice_required')
-  if (!coordinates) errorRedirect('coordinates_invalid')
+  if (!name) return creationError('Indique un nombre para identificar el expediente.', 'name')
+  if (!provinceId || !municipalityId) {
+    return creationError('Seleccione la provincia y el municipio antes de crear el expediente.', 'municipio')
+  }
+  if (!getProvinceById(provinceId)?.enabled) {
+    return creationError('La provincia seleccionada no está disponible para esta beta.', 'province')
+  }
+  if (!initialContextAcceptance.noticeAccepted) {
+    return creationError('Confirme que el contexto inicial debe validarse técnicamente.', 'contextNotice')
+  }
+  if (!coordinates) {
+    return creationError('Introduzca latitud y longitud juntas, o deje ambos campos vacíos.', 'coordinates')
+  }
   if (!refCatastral && !address && coordinates.lat === null && coordinates.lng === null && !urbanPlanningZone) {
-    errorRedirect('location_required')
+    return creationError('Indique una referencia catastral, una dirección o unas coordenadas para localizar el expediente.', 'refCatastral')
   }
   const municipality = getMunicipalityById(municipalityId)
-  if (!municipality?.enabled) errorRedirect('municipality_disabled')
+  if (!municipality?.enabled) {
+    return creationError('El municipio seleccionado no está disponible. Revise la provincia y el municipio.', 'municipio')
+  }
+  if (formText(formData, 'territorialDetectionInvalidated') === 'true') {
+    return creationError('Los datos de localización han cambiado. Actualice la detección antes de crear el expediente.', 'territorialContext')
+  }
 
   const cached = getPreflightDetection(userId, formText(formData, 'preflightDetectionId') || null)
   let preflight = cached ?? undefined
@@ -106,7 +161,7 @@ export async function createExpediente(formData: FormData) {
         await engine.detectStateless({ cadastralReference: refCatastral })
       )
     } catch {
-      preflight = undefined
+      return creationError('No se ha podido verificar la detección territorial. Actualice el análisis antes de crear el expediente.', 'refCatastral')
     }
   }
 
@@ -124,22 +179,52 @@ export async function createExpediente(formData: FormData) {
     },
     preflight
   )
-  if (validationError) errorRedirect(validationError)
-  if (!preflight?.detected.planeamiento && planeamiento) {
-    const rows = await db
-      .select({ name: municipalPlanning.name })
-      .from(municipalPlanning)
-      .where(
-        and(
-          eq(municipalPlanning.municipalityId, municipality?.ineCode ?? ''),
-          eq(municipalPlanning.status, 'vigente'),
-          eq(municipalPlanning.name, planeamiento)
-        )
-      )
-      .limit(1)
-    if (!rows.length) errorRedirect('planning_invalid')
+  if (validationError) {
+    if (validationError === 'municipality_province_mismatch') {
+      return creationError('El municipio no pertenece a la provincia seleccionada. Revise ambos campos.', 'municipio')
+    }
+    if (validationError === 'detection_mismatch') {
+      const field = detectionMismatchField(preflight, {
+        provinceId,
+        municipalityId,
+        cadastralReference: refCatastral,
+        address,
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        planeamiento,
+        landClass,
+        urbanPlanningZone,
+      })
+      return creationError('Los datos no coinciden con la detección territorial verificada. Actualice el análisis antes de crear el expediente.', field)
+    }
+    return creationError('Revise el municipio seleccionado antes de crear el expediente.', 'municipio')
   }
-  if (!landClass && landClassRaw) errorRedirect('land_class_invalid')
+  if (!preflight && (landClass || urbanPlanningZone)) {
+    return creationError('La clasificación o el ámbito deben proceder de una detección territorial verificada. Actualice el análisis antes de crear el expediente.', 'territorialContext')
+  }
+  if (!preflight?.detected.planeamiento && planeamiento) {
+    try {
+      const rows = await db
+        .select({ name: municipalPlanning.name })
+        .from(municipalPlanning)
+        .where(
+          and(
+            eq(municipalPlanning.municipalityId, municipality?.ineCode ?? ''),
+            eq(municipalPlanning.status, 'vigente'),
+            eq(municipalPlanning.name, planeamiento)
+          )
+        )
+        .limit(1)
+      if (!rows.length) {
+        return creationError('El planeamiento seleccionado ya no está disponible para este municipio. Seleccione otra opción o déjelo pendiente.', 'planeamiento')
+      }
+    } catch {
+      return creationError('No se ha podido comprobar el planeamiento seleccionado. Puede dejarlo pendiente e intentarlo más tarde.', 'planeamiento')
+    }
+  }
+  if (!landClass && landClassRaw) {
+    return creationError('La clasificación seleccionada no es válida. Elija una opción de la lista.', 'landClass')
+  }
 
   let newExpedienteId: string
   try {
@@ -176,7 +261,7 @@ export async function createExpediente(formData: FormData) {
       // The expediente remains usable if a non-critical follow-up persistence fails.
     }
   } catch {
-    errorRedirect('creation_failed')
+    return creationError('No se ha podido crear el expediente. Sus datos siguen en el formulario; inténtelo de nuevo.')
   }
 
   revalidatePath('/dashboard')
