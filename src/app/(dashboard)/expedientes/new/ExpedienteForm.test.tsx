@@ -143,4 +143,96 @@ describe('ExpedienteForm', () => {
 
     finishCreation?.({ status: 'idle' })
   })
+
+  it('clears Betanzos inputs before analysing a newly selected Culleredo parcel', async () => {
+    vi.mocked(detectContextAction)
+      .mockResolvedValueOnce({
+        detectionId: '00000000-0000-4000-8000-000000000010',
+        detection: {
+          detected: {
+            cadastralReference: '15009A01300255',
+            parcelReference: '15009A01300255',
+            provinceId: 'a_coruna',
+            municipalityId: 'betanzos',
+            address: 'Parcela de Betanzos',
+            lat: 43.270567277279795,
+            lng: -8.216584723963274,
+            planeamiento: 'PXOM Betanzos',
+            landClass: 'nucleo_rural',
+            urbanPlanningZone: 'CASCAS',
+            locationSource: 'cadastral_reference',
+          },
+          progress: [], sourceChecks: [], affects: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        detectionId: '00000000-0000-4000-8000-000000000011',
+        detection: {
+          detected: {
+            cadastralReference: '7709702NH4970N0001SZ',
+            parcelReference: '7709702NH4970N',
+            provinceId: 'a_coruna',
+            municipalityId: 'culleredo',
+            address: 'LG LEDOÑO CULLEREDO (A CORUÑA)',
+            lat: 43.316,
+            lng: -8.336,
+            planeamiento: 'Plan general de ordenación urbana',
+            locationSource: 'cadastral_reference',
+          },
+          progress: [], sourceChecks: [], affects: [],
+        },
+      })
+
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    const reference = screen.getByLabelText(/Referencia catastral/i) as HTMLInputElement
+    fireEvent.change(reference, { target: { value: '15009A01300255' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+    await screen.findByText(/Referencia parcelaria/i)
+
+    fireEvent.change(reference, { target: { value: '7709702NH4970N0001SZ' } })
+    expect((screen.getByLabelText(/^Latitud$/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/^Longitud$/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/Dirección aproximada/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/^Municipio/) as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText(/Planeamiento general/i) as HTMLSelectElement).value).toBe('')
+
+    fireEvent.click(screen.getByRole('button', { name: /actualizar análisis/i }))
+    await waitFor(() => expect(detectContextAction).toHaveBeenCalledTimes(2))
+    const secondRequest = vi.mocked(detectContextAction).mock.calls[1][0]
+    expect(secondRequest.get('refCatastral')).toBe('7709702NH4970N0001SZ')
+    expect(secondRequest.get('lat')).toBeNull()
+    expect(secondRequest.get('lng')).toBeNull()
+    await waitFor(() => expect((screen.getByLabelText(/^Municipio/) as HTMLSelectElement).value).toBe('culleredo'))
+  })
+
+  it('discards a stale analysis response after the user changes the cadastral reference', async () => {
+    let resolveDetection: ((value: Awaited<ReturnType<typeof detectContextAction>>) => void) | undefined
+    vi.mocked(detectContextAction).mockImplementation(() => new Promise((resolve) => {
+      resolveDetection = resolve
+    }))
+
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    const reference = screen.getByLabelText(/Referencia catastral/i) as HTMLInputElement
+    fireEvent.change(reference, { target: { value: '7709702NH4970N0001SZ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+    fireEvent.change(reference, { target: { value: '7709702NH4970N0002SZ' } })
+
+    resolveDetection?.({
+      detectionId: '00000000-0000-4000-8000-000000000099',
+      detection: {
+        detected: {
+          cadastralReference: '7709702NH4970N0001SZ',
+          municipalityId: 'culleredo',
+          planeamiento: 'Plan antiguo',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+
+    await waitFor(() => expect(reference.value).toBe('7709702NH4970N0002SZ'))
+    expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/Planeamiento general/i) as HTMLSelectElement).value).toBe('')
+  })
 })

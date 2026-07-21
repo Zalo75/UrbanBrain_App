@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   values: vi.fn(),
   returning: vi.fn(),
+  update: vi.fn(),
+  set: vi.fn(),
   detectStateless: vi.fn(),
   detectContext: vi.fn(),
   persistAuthorizedDetection: vi.fn(),
@@ -20,6 +22,7 @@ vi.mock('@/infrastructure/auth', () => ({ authProvider: { getUserId: mocks.getUs
 vi.mock('@/infrastructure/db/client', () => ({ db: {
   select: mocks.select,
   insert: mocks.insert,
+  update: mocks.update,
 } }))
 vi.mock('@/infrastructure/db/schema', () => ({
   expedientes: { id: 'id' },
@@ -37,7 +40,7 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   },
 }))
 
-import { createExpediente } from './actions'
+import { createExpediente, detectContextAction } from './actions'
 import { initialCreateExpedienteState } from './creationState'
 import { storePreflightDetection } from './preflightDetectionCache'
 import { summarizeSmartCaseDetection } from './smartCaseDetection'
@@ -80,6 +83,8 @@ describe('createExpediente smart preflight', () => {
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockReturnValue({ returning: mocks.returning })
     mocks.returning.mockResolvedValue([{ id: 'exp-a' }])
+    mocks.update.mockReturnValue({ set: mocks.set })
+    mocks.set.mockReturnValue({ where: mocks.where })
     mocks.persistAuthorizedDetection.mockResolvedValue(true)
     mocks.redirect.mockImplementation(() => { throw new Error('NEXT_REDIRECT') })
   })
@@ -117,7 +122,9 @@ describe('createExpediente smart preflight', () => {
 
     await expect(createExpediente(initialCreateExpedienteState, form('expired-preflight'))).rejects.toThrow('NEXT_REDIRECT')
 
-    expect(mocks.detectStateless).toHaveBeenCalledWith({ cadastralReference: '7709702NH4970N0001SZ' })
+    expect(mocks.detectStateless).toHaveBeenCalledWith({
+      cadastralReference: '7709702NH4970N0001SZ',
+    })
     expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith('exp-a', 'user-a', result)
   })
 
@@ -139,6 +146,22 @@ describe('createExpediente smart preflight', () => {
     await expect(createExpediente(initialCreateExpedienteState, form('expired-preflight'))).resolves.toMatchObject({
       status: 'error',
       field: 'refCatastral',
+    })
+
+    expect(mocks.insert).not.toHaveBeenCalled()
+    expect(mocks.values).not.toHaveBeenCalled()
+  })
+
+  it('does not persist planning or classification inherited from a stale form after an unresolved re-check', async () => {
+    const unresolved = {
+      ...result,
+      planning: { status: 'not_determined' as const, evidence: [], warnings: [] },
+    }
+    mocks.detectStateless.mockResolvedValue(unresolved)
+
+    await expect(createExpediente(initialCreateExpedienteState, form('expired-preflight'))).resolves.toMatchObject({
+      status: 'error',
+      field: 'planeamiento',
     })
 
     expect(mocks.insert).not.toHaveBeenCalled()
@@ -168,5 +191,99 @@ describe('createExpediente smart preflight', () => {
     })
     expect(mocks.insert).not.toHaveBeenCalled()
     expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it('resolves a coordinate-only preflight without requiring a cadastral reference', async () => {
+    mocks.detectStateless.mockResolvedValue(result)
+    const coordinateForm = form('')
+    coordinateForm.delete('refCatastral')
+    coordinateForm.set('lat', '43.316')
+    coordinateForm.set('lng', '-8.336')
+
+    const response = await detectContextAction(coordinateForm)
+
+    expect(response).toHaveProperty('detectionId')
+    expect(mocks.detectStateless).toHaveBeenCalledWith({
+      coordinates: { lat: 43.316, lng: -8.336 },
+    })
+  })
+
+  it('never forwards stale coordinates when a cadastral reference is the selected input', async () => {
+    mocks.detectStateless.mockResolvedValue(result)
+    const mixedForm = form('')
+    mixedForm.set('territorialInputSource', 'cadastral_reference')
+    mixedForm.set('lat', '43.270567277279795')
+    mixedForm.set('lng', '-8.216584723963274')
+
+    const response = await detectContextAction(mixedForm)
+
+    expect(response).toHaveProperty('detectionId')
+    expect(mocks.detectStateless).toHaveBeenCalledWith({
+      cadastralReference: '7709702NH4970N0001SZ',
+    })
+  })
+
+  it('uses only the selected address when a new address replaces prior parcel fields', async () => {
+    mocks.detectStateless.mockResolvedValue(result)
+    const addressForm = form('')
+    addressForm.set('territorialInputSource', 'address')
+    addressForm.set('address', 'Lugar nuevo, Culleredo')
+
+    const response = await detectContextAction(addressForm)
+
+    expect(response).toHaveProperty('detectionId')
+    expect(mocks.detectStateless).toHaveBeenCalledWith({ address: 'Lugar nuevo, Culleredo' })
+  })
+
+  it('creates a coordinate-only case with the canonical values resolved by the server', async () => {
+    const coordinateResult = {
+      ...result,
+      inputMethod: 'coordinates' as const,
+      coordinates: { lat: 43.3161, lng: -8.3361 },
+    }
+    mocks.detectStateless.mockResolvedValue(coordinateResult)
+    const coordinateForm = form('expired-preflight')
+    coordinateForm.delete('refCatastral')
+    coordinateForm.delete('address')
+    coordinateForm.delete('planeamiento')
+    coordinateForm.delete('landClass')
+
+    await expect(createExpediente(initialCreateExpedienteState, coordinateForm)).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
+      refCatastral: '7709702NH4970N0001SZ',
+      province: 'a_coruna',
+      municipio: 'culleredo',
+      lat: 43.3161,
+      lng: -8.3361,
+    }))
+  })
+
+  it('rejects a non-empty invalid cadastral reference instead of silently discarding it', async () => {
+    const invalid = form('')
+    invalid.set('refCatastral', 'INVALIDA')
+
+    await expect(createExpediente(initialCreateExpedienteState, invalid)).resolves.toMatchObject({
+      status: 'error',
+      field: 'refCatastral',
+    })
+    expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it('keeps the expediente and marks its context pending when detection persistence fails', async () => {
+    const detectionId = storePreflightDetection('user-a', summarizeSmartCaseDetection(result))
+    mocks.persistAuthorizedDetection.mockRejectedValue(new Error('write failed'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await expect(createExpediente(initialCreateExpedienteState, form(detectionId))).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.values).toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalled()
+    expect(mocks.set).toHaveBeenCalledWith({ status: 'territorial_context_pending' })
+    expect(errorSpy).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'territorial_context_persistence_failed',
+      expedienteId: 'exp-a',
+    }))
+    errorSpy.mockRestore()
   })
 })

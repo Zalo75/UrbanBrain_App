@@ -6,13 +6,16 @@ const mocks = vi.hoisted(() => ({
   loadAuthorizedParcelInputs: vi.fn(),
   insert: vi.fn(),
   values: vi.fn(),
+  update: vi.fn(),
+  set: vi.fn(),
+  where: vi.fn(),
 }))
 
 vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
   loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
 }))
 vi.mock('@/infrastructure/db/client', () => ({
-  db: { insert: mocks.insert },
+  db: { insert: mocks.insert, update: mocks.update },
 }))
 
 import { ContextDetectionEngine } from './ContextDetectionEngine'
@@ -83,6 +86,9 @@ describe('ContextDetectionEngine source resilience', () => {
     vi.clearAllMocks()
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockResolvedValue(undefined)
+    mocks.update.mockReturnValue({ set: mocks.set })
+    mocks.set.mockReturnValue({ where: mocks.where })
+    mocks.where.mockResolvedValue(undefined)
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: { id: 'exp-a', orgId: 'org-a', municipio: 'betanzos' },
       detected: null,

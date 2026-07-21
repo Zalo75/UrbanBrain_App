@@ -10,6 +10,10 @@ import {
   resolveMunicipalityIdentity,
 } from '@/shared/territory'
 import type { Municipality } from '@/shared/territory'
+import {
+  territorialFieldConfirmations,
+  type TerritorialFieldConfirmation,
+} from '@/application/territorial-resolver/fieldConfirmations'
 
 export const LAND_CLASS_OPTIONS = [
   { value: 'urbano_consolidado', label: 'Urbano consolidado' },
@@ -90,10 +94,14 @@ function progress(
   label: string,
   value: string | number | undefined,
   incomplete = false,
-  notDeterminedDetail = 'No determinado'
+  notDeterminedDetail = 'No determinado',
+  confirmation: TerritorialFieldConfirmation = 'confirmed',
+  pendingDetail = 'Pendiente de confirmar'
 ): DetectionProgressItem {
   if (value !== undefined && value !== '') {
-    return { id, label, status: 'success', detail: String(value) }
+    return confirmation === 'confirmed'
+      ? { id, label, status: 'success', detail: String(value) }
+      : { id, label, status: 'pending', detail: pendingDetail }
   }
   return {
     id,
@@ -127,6 +135,10 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
   const classification = result.planning.classification
   const landClass = landClassFromClassification(classification)
   const affects = result.affects.detected
+  const confirmations = territorialFieldConfirmations(result)
+  const locationPendingDetail = result.status === 'probable'
+    ? 'Dato orientativo; pendiente de confirmar'
+    : 'Pendiente de confirmar'
 
   return {
     detected: {
@@ -156,15 +168,15 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
               : undefined,
     },
     progress: [
-      progress('reference', 'Referencia catastral validada', result.cadastralReference),
-      progress('parcel', 'Parcela localizada', result.parcelGeometry ? 'Geometría oficial' : undefined),
-      progress('address', 'Dirección obtenida', result.normalizedAddress),
-      progress('province', 'Provincia identificada', province?.name),
-      progress('municipality', 'Municipio identificado', municipality?.name),
-      progress('ine', 'Código INE obtenido', municipality?.ineCode ?? result.municipalityCode),
-      progress('coordinates', 'Coordenadas obtenidas', result.coordinates ? 'Coordenadas oficiales' : undefined),
-      progress('planning', 'Planeamiento consultado', result.planning.instrument, siotuga.hasIncomplete),
-      progress('classification', 'Clasificación consultada', classification?.label, siotuga.hasIncomplete),
+      progress('reference', 'Referencia catastral', result.cadastralReference, false, 'No determinada', confirmations.cadastralReference),
+      progress('parcel', 'Parcela localizada', result.parcelGeometry ? 'Geometría oficial' : undefined, false, 'No determinada', confirmations.cadastralReference),
+      progress('address', 'Dirección', result.normalizedAddress, false, 'No determinada', confirmations.municipality, locationPendingDetail),
+      progress('province', 'Provincia', province?.name, false, 'No determinada', confirmations.province, locationPendingDetail),
+      progress('municipality', 'Municipio', municipality?.name, false, 'No determinado', confirmations.municipality, locationPendingDetail),
+      progress('ine', 'Código INE', municipality?.ineCode ?? result.municipalityCode, false, 'No determinado', confirmations.municipalityCode, locationPendingDetail),
+      progress('coordinates', 'Coordenadas', result.coordinates ? (result.inputMethod === 'coordinates' && confirmations.coordinates === 'pending' ? 'Punto aportado' : 'Coordenadas resueltas') : undefined, false, 'No determinadas', confirmations.coordinates, result.inputMethod === 'coordinates' ? 'Punto aportado; pendiente de confirmar' : locationPendingDetail),
+      progress('planning', 'Planeamiento consultado', result.planning.instrument, siotuga.hasIncomplete, 'No determinado', confirmations.planning),
+      progress('classification', 'Clasificación consultada', classification?.label, siotuga.hasIncomplete, 'No determinada', confirmations.classification),
       affects.length
         ? { id: 'affects', label: 'Afecciones consultadas', status: 'success', detail: `${affects.length} positiva(s) detectada(s)` }
         : progress(
@@ -204,14 +216,14 @@ export function validateSmartCaseSubmission(
   if (!detection) return null
   const expected = detection.detected
   const normalizedReference = input.cadastralReference?.replace(/[^a-z0-9]/gi, '').toUpperCase()
-  if (expected.cadastralReference && normalizedReference !== expected.cadastralReference) return 'detection_mismatch'
+  if (expected.cadastralReference && normalizedReference && normalizedReference !== expected.cadastralReference) return 'detection_mismatch'
   if (expected.provinceId && input.provinceId !== expected.provinceId) return 'detection_mismatch'
   if (expected.municipalityId && input.municipalityId !== expected.municipalityId) return 'detection_mismatch'
-  if (expected.address && input.address?.trim() !== expected.address) return 'detection_mismatch'
-  if (expected.lat !== undefined && input.lat !== expected.lat) return 'detection_mismatch'
-  if (expected.lng !== undefined && input.lng !== expected.lng) return 'detection_mismatch'
-  if (expected.planeamiento && input.planeamiento?.trim() !== expected.planeamiento) return 'detection_mismatch'
-  if (expected.landClass && input.landClass !== expected.landClass) return 'detection_mismatch'
-  if (expected.urbanPlanningZone && input.urbanPlanningZone?.trim() !== expected.urbanPlanningZone) return 'detection_mismatch'
+  if (expected.address && input.address?.trim() && input.address.trim() !== expected.address) return 'detection_mismatch'
+  if (expected.locationSource !== 'coordinates' && expected.lat !== undefined && input.lat !== expected.lat) return 'detection_mismatch'
+  if (expected.locationSource !== 'coordinates' && expected.lng !== undefined && input.lng !== expected.lng) return 'detection_mismatch'
+  if (expected.planeamiento && input.planeamiento?.trim() && input.planeamiento.trim() !== expected.planeamiento) return 'detection_mismatch'
+  if (expected.landClass && input.landClass && input.landClass !== expected.landClass) return 'detection_mismatch'
+  if (expected.urbanPlanningZone && input.urbanPlanningZone?.trim() && input.urbanPlanningZone.trim() !== expected.urbanPlanningZone) return 'detection_mismatch'
   return null
 }

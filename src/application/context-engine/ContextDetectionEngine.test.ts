@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   loadAuthorizedParcelInputs: vi.fn(),
   insert: vi.fn(),
   values: vi.fn(),
+  update: vi.fn(),
+  set: vi.fn(),
+  where: vi.fn(),
 }))
 
 vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
@@ -11,7 +14,7 @@ vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
 }))
 
 vi.mock('@/infrastructure/db/client', () => ({
-  db: { insert: mocks.insert },
+  db: { insert: mocks.insert, update: mocks.update },
 }))
 
 import { ContextDetectionEngine } from './ContextDetectionEngine'
@@ -54,6 +57,9 @@ describe('ContextDetectionEngine tenant boundary', () => {
     vi.clearAllMocks()
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockResolvedValue(undefined)
+    mocks.update.mockReturnValue({ set: mocks.set })
+    mocks.set.mockReturnValue({ where: mocks.where })
+    mocks.where.mockResolvedValue(undefined)
   })
 
   it('no resuelve ni persiste si el usuario no tiene acceso al expediente', async () => {
@@ -78,6 +84,7 @@ describe('ContextDetectionEngine tenant boundary', () => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({ expediente: { id: 'expediente-org-a' } })
     await expect(engine.persistAuthorizedDetection('expediente-org-a', 'usuario-org-a', resolution)).resolves.toBe(true)
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ expedienteId: 'expediente-org-a' }))
+    expect(mocks.set).toHaveBeenCalledWith({ status: 'active' })
   })
 
   it('usa exclusivamente la localización cargada después de autorizar', async () => {
@@ -102,8 +109,6 @@ describe('ContextDetectionEngine tenant boundary', () => {
 
     expect(resolver).toHaveBeenCalledWith({
       cadastralReference: '8424001NJ4082S',
-      coordinates: { lat: 43.371, lng: -8.404 },
-      address: 'Dirección autorizada',
       declaredMunicipality: 'a_coruna',
     })
     expect(mocks.values).toHaveBeenCalledWith(

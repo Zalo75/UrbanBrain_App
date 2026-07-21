@@ -83,6 +83,44 @@ function detectionMismatchField(
   return 'territorialContext'
 }
 
+type TerritorialInputSource = 'cadastral_reference' | 'coordinates' | 'address'
+
+function territorialInputSource(formData: FormData): TerritorialInputSource | null {
+  const value = formText(formData, 'territorialInputSource')
+  return value === 'cadastral_reference' || value === 'coordinates' || value === 'address'
+    ? value
+    : null
+}
+
+/**
+ * A detection must have one canonical location input. In particular, never mix
+ * a newly entered cadastral reference with coordinates auto-filled for a
+ * previous parcel.
+ */
+function resolutionInputFromForm({
+  source,
+  cadastralReference,
+  coordinates,
+  address,
+}: {
+  source: TerritorialInputSource | null
+  cadastralReference: string | null
+  coordinates: { lat: number | null; lng: number | null } | null
+  address: string
+}) {
+  const hasCoordinates = coordinates?.lat !== null && coordinates?.lng !== null
+  const selected = source ?? (
+    cadastralReference ? 'cadastral_reference' : hasCoordinates ? 'coordinates' : address ? 'address' : null
+  )
+  if (selected === 'cadastral_reference') {
+    return cadastralReference ? { cadastralReference } : null
+  }
+  if (selected === 'coordinates') {
+    return hasCoordinates ? { coordinates: { lat: coordinates!.lat!, lng: coordinates!.lng! } } : null
+  }
+  return selected === 'address' && address ? { address } : null
+}
+
 export async function createExpediente(
   _previousState: CreateExpedienteState,
   formData: FormData
@@ -104,9 +142,17 @@ export async function createExpediente(
   const name = formText(formData, 'name')
   const provinceId = formText(formData, 'province')
   const municipalityId = formText(formData, 'municipio')
-  const refCatastral = normalizeCadastralReference(formText(formData, 'refCatastral'))
+  const rawRefCatastral = formText(formData, 'refCatastral')
+  const refCatastral = normalizeCadastralReference(rawRefCatastral)
   const address = formText(formData, 'address')
   const coordinates = coordinatesFromForm(formData)
+  const inputSource = territorialInputSource(formData)
+  const resolutionInput = resolutionInputFromForm({
+    source: inputSource,
+    cadastralReference: refCatastral,
+    coordinates,
+    address,
+  })
   const planeamiento = formText(formData, 'planeamiento')
   const urbanPlanningZone = formText(formData, 'urbanPlanningZone')
   const landClassRaw = formText(formData, 'landClass')
@@ -118,6 +164,9 @@ export async function createExpediente(
   const notes = formText(formData, 'notes')
   const initialContextAcceptance = getInitialContextAcceptance(formData)
 
+  if ((!inputSource || inputSource === 'cadastral_reference') && rawRefCatastral && !refCatastral) {
+    return creationError('La referencia catastral debe tener 14, 18 o 20 caracteres alfanuméricos.', 'refCatastral')
+  }
   if (!name) return creationError('Indique un nombre para identificar el expediente.', 'name')
   if (!provinceId || !municipalityId) {
     return creationError('Seleccione la provincia y el municipio antes de crear el expediente.', 'municipio')
@@ -131,7 +180,7 @@ export async function createExpediente(
   if (!coordinates) {
     return creationError('Introduzca latitud y longitud juntas, o deje ambos campos vacíos.', 'coordinates')
   }
-  if (!refCatastral && !address && coordinates.lat === null && coordinates.lng === null && !urbanPlanningZone) {
+  if (!resolutionInput && !urbanPlanningZone) {
     return creationError('Indique una referencia catastral, una dirección o unas coordenadas para localizar el expediente.', 'refCatastral')
   }
   const municipality = getMunicipalityById(municipalityId)
@@ -148,10 +197,10 @@ export async function createExpediente(
 
   // A cache miss can happen after a server restart or a request routed to another
   // process. Re-resolve before insertion instead of trusting client-populated data.
-  if (!preflight && refCatastral) {
+  if (!preflight && resolutionInput) {
     try {
       preflight = summarizeSmartCaseDetection(
-        await engine.detectStateless({ cadastralReference: refCatastral })
+        await engine.detectStateless(resolutionInput)
       )
     } catch {
       return creationError('No se ha podido verificar la detección territorial. Actualice el análisis antes de crear el expediente.', 'refCatastral')
@@ -195,6 +244,15 @@ export async function createExpediente(
   if (!preflight && (landClass || urbanPlanningZone)) {
     return creationError('La clasificación o el ámbito deben proceder de una detección territorial verificada. Actualice el análisis antes de crear el expediente.', 'territorialContext')
   }
+  if (preflight && !preflight.detected.planeamiento && planeamiento) {
+    return creationError('El planeamiento no ha quedado determinado por la detección territorial actual. Déjelo pendiente o actualice el análisis.', 'planeamiento')
+  }
+  if (preflight && !preflight.detected.landClass && landClass) {
+    return creationError('La clasificación no ha quedado determinada por la detección territorial actual. Déjela pendiente o actualice el análisis.', 'landClass')
+  }
+  if (preflight && !preflight.detected.urbanPlanningZone && urbanPlanningZone) {
+    return creationError('El ámbito no ha quedado determinado por la detección territorial actual. Déjelo pendiente o actualice el análisis.', 'territorialContext')
+  }
   if (!preflight?.detected.planeamiento && planeamiento) {
     try {
       const rows = await db
@@ -219,39 +277,75 @@ export async function createExpediente(
     return creationError('La clasificación seleccionada no es válida. Elija una opción de la lista.', 'landClass')
   }
 
+  const canonical = preflight?.detected
+  const canonicalCoordinates =
+    canonical?.lat !== undefined && canonical.lng !== undefined
+      ? { lat: canonical.lat, lng: canonical.lng }
+      : coordinates
+  const canonicalProvinceId = canonical?.provinceId ?? provinceId
+  const canonicalMunicipalityId = canonical?.municipalityId ?? municipalityId
+  const canonicalReference = canonical?.cadastralReference ?? refCatastral
+  const canonicalAddress = canonical?.address ?? address
+
   let newExpedienteId: string
   try {
     const [newExpediente] = await db.insert(expedientes).values({
       orgId: membership.orgId,
       name,
-      province: provinceId,
-      municipio: municipalityId,
-      address: address || null,
-      refCatastral: refCatastral ?? null,
-      lat: coordinates.lat,
-      lng: coordinates.lng,
-      location: coordinates.lat !== null && coordinates.lng !== null
-        ? [coordinates.lng, coordinates.lat]
+      province: canonicalProvinceId,
+      municipio: canonicalMunicipalityId,
+      address: canonicalAddress || null,
+      refCatastral: canonicalReference ?? null,
+      lat: canonicalCoordinates.lat,
+      lng: canonicalCoordinates.lng,
+      location: canonicalCoordinates.lat !== null && canonicalCoordinates.lng !== null
+        ? [canonicalCoordinates.lng, canonicalCoordinates.lat]
         : null,
-      locationSource: preflight?.detected.locationSource ?? (coordinates.lat !== null ? 'coordinates' : address ? 'address' : 'manual'),
-      urbanPlanningZone: urbanPlanningZone || null,
-      landClass,
+      locationSource: canonical?.locationSource ?? (canonicalCoordinates.lat !== null ? 'coordinates' : canonicalAddress ? 'address' : 'manual'),
+      urbanPlanningZone: preflight ? preflight.detected.urbanPlanningZone ?? null : urbanPlanningZone || null,
+      landClass: preflight ? preflight.detected.landClass ?? null : landClass,
       actionType: actionType as typeof expedientes.$inferInsert.actionType,
       notes: notes || null,
-      planeamiento: planeamiento || null,
+      planeamiento: preflight ? preflight.detected.planeamiento ?? null : planeamiento || null,
       contextoValidadoPorTecnico: initialContextAcceptance.technicallyReviewed,
       status: 'active',
     }).returning({ id: expedientes.id })
     newExpedienteId = newExpediente.id
 
+    let territorialContextPending = false
     try {
       if (preflight) {
-        await engine.persistAuthorizedDetection(newExpedienteId, userId, preflight.result)
+        if (!await engine.persistAuthorizedDetection(newExpedienteId, userId, preflight.result)) {
+          throw new Error('territorial_context_not_persisted')
+        }
       } else {
-        await engine.detectContext(newExpedienteId, userId)
+        if (!await engine.detectContext(newExpedienteId, userId)) {
+          throw new Error('territorial_context_not_persisted')
+        }
       }
-    } catch {
-      // The expediente remains usable if a non-critical follow-up persistence fails.
+    } catch (error) {
+      territorialContextPending = true
+      console.error({
+        event: 'territorial_context_persistence_failed',
+        expedienteId: newExpedienteId,
+        errorType: error instanceof Error ? error.name : 'unknown',
+      })
+      try {
+        await db
+          .update(expedientes)
+          .set({ status: 'territorial_context_pending' })
+          .where(eq(expedientes.id, newExpedienteId))
+      } catch (statusError) {
+        console.error({
+          event: 'territorial_context_pending_status_failed',
+          expedienteId: newExpedienteId,
+          errorType: statusError instanceof Error ? statusError.name : 'unknown',
+        })
+      }
+    }
+
+    if (territorialContextPending) {
+      revalidatePath(`/expedientes/${newExpedienteId}`)
     }
   } catch {
     return creationError('No se ha podido crear el expediente. Sus datos siguen en el formulario; inténtelo de nuevo.')
@@ -275,13 +369,28 @@ export async function detectContextAction(formData: FormData) {
     return { error: 'No se ha podido comprobar el acceso.' }
   }
 
-  const refCatastral = normalizeCadastralReference(formText(formData, 'refCatastral'))
-  if (!refCatastral) return { error: 'Debe introducir una referencia catastral válida.' }
+  const rawRefCatastral = formText(formData, 'refCatastral')
+  const refCatastral = normalizeCadastralReference(rawRefCatastral)
+  const coordinates = coordinatesFromForm(formData)
+  const address = formText(formData, 'address')
+  const inputSource = territorialInputSource(formData)
+  const resolutionInput = resolutionInputFromForm({
+    source: inputSource,
+    cadastralReference: refCatastral,
+    coordinates,
+    address,
+  })
+  if ((!inputSource || inputSource === 'cadastral_reference') && rawRefCatastral && !refCatastral) {
+    return { error: 'La referencia catastral debe tener 14, 18 o 20 caracteres alfanuméricos.' }
+  }
+  if (!resolutionInput) {
+    return { error: 'Introduzca una referencia catastral válida, las dos coordenadas o una dirección.' }
+  }
 
   try {
     const engine = new ContextDetectionEngine()
     const detection = summarizeSmartCaseDetection(
-      await engine.detectStateless({ cadastralReference: refCatastral })
+      await engine.detectStateless(resolutionInput)
     )
     const detectionId = storePreflightDetection(userId, detection)
     const clientDetection = {

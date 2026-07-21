@@ -80,6 +80,23 @@ describe('smart case detection', () => {
     expect(detected.progress.find((item) => item.id === 'affects')?.detail).not.toMatch(/sin afecciones/i)
   })
 
+  it('no presenta como validada una ubicación probable resuelta sólo por CartoCiudad', () => {
+    const detected = summarizeSmartCaseDetection(resolution({
+      status: 'probable',
+      confidence: 'medium',
+      inputMethod: 'coordinates',
+      cadastralReference: undefined,
+      evidence: [{ source: 'cartociudad', sourceUrl: 'https://official.test/cartociudad', retrievedAt: '2026-07-20T00:00:00.000Z', method: 'fixture' }],
+      planning: { status: 'not_determined', evidence: [], warnings: [] },
+    }))
+
+    for (const id of ['address', 'province', 'municipality', 'ine', 'coordinates']) {
+      expect(detected.progress.find((item) => item.id === id)).toMatchObject({ status: 'pending' })
+    }
+    expect(detected.progress.find((item) => item.id === 'coordinates')?.detail).toMatch(/punto aportado/i)
+    expect(detected.progress.some((item) => /validada|oficial/i.test(item.label))).toBe(false)
+  })
+
   it('acepta clasificaciones normalizadas manuales y bloquea valores del resultado alterados', () => {
     const detected = summarizeSmartCaseDetection(resolution())
     expect(validateSmartCaseSubmission({

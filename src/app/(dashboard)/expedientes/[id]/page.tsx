@@ -116,6 +116,12 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         context={territorialContext}
       />
 
+      {expediente.status === 'territorial_context_pending' && (
+        <div role="alert" className="mx-4 mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200 lg:mx-6">
+          El expediente se creó, pero la confirmación territorial quedó pendiente. Revise o actualice el contexto antes de utilizar datos urbanísticos.
+        </div>
+      )}
+
       {/* Workspace Layout: Split Screen */}
       <div className="flex flex-1 overflow-hidden">
         

@@ -11,7 +11,8 @@ import {
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity'
 import { db } from '@/infrastructure/db/client'
-import { contextDetections } from '@/infrastructure/db/schema'
+import { contextDetections, expedientes } from '@/infrastructure/db/schema'
+import { and, eq } from 'drizzle-orm'
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository'
 import { CatastroOfficialAdapter } from '@/infrastructure/territorial-resolver/CatastroOfficialAdapter'
 import { CartoCiudadOfficialAdapter } from '@/infrastructure/territorial-resolver/CartoCiudadOfficialAdapter'
@@ -19,8 +20,16 @@ import { DatabasePlanningAdapter } from '@/infrastructure/territorial-resolver/D
 import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/BetanzosPlanningAdapter'
 import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
 import { getMunicipalityByName, getProvinceByName } from '@/shared/territory'
+import { territorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
+
+function canonicalLocationInput(input: ResolveParcelLocationInput): ResolveParcelLocationInput {
+  if (input.cadastralReference) return { cadastralReference: input.cadastralReference }
+  if (input.coordinates) return { coordinates: input.coordinates }
+  if (input.address?.trim()) return { address: input.address.trim() }
+  return {}
+}
 
 function officialResolver(): Resolver {
   const dependencies = {
@@ -121,6 +130,7 @@ function detectionSummary(result: TerritorialResolution) {
     conflicts: result.conflicts,
     affects: effective?.affects ?? result.affects,
     resolvedAt: result.resolvedAt,
+    fieldConfirmations: territorialFieldConfirmations(effective ?? result),
   }
 }
 
@@ -133,12 +143,14 @@ export class ContextDetectionEngine {
     if (!authorized) return null
 
     return this.resolveAndPersist(expedienteId, authorized, {
-      cadastralReference: authorized.expediente.refCatastral,
-      coordinates:
-        authorized.expediente.lat !== null && authorized.expediente.lng !== null
-          ? { lat: authorized.expediente.lat!, lng: authorized.expediente.lng! }
-          : undefined,
-      address: authorized.expediente.address,
+      ...canonicalLocationInput({
+        cadastralReference: authorized.expediente.refCatastral,
+        coordinates:
+          authorized.expediente.lat !== null && authorized.expediente.lng !== null
+            ? { lat: authorized.expediente.lat!, lng: authorized.expediente.lng! }
+            : undefined,
+        address: authorized.expediente.address,
+      }),
       declaredMunicipality: authorized.expediente.municipio,
     }, attemptStartedAt)
   }
@@ -152,7 +164,7 @@ export class ContextDetectionEngine {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
     return this.resolveAndPersist(expedienteId, authorized, {
-      ...input,
+      ...canonicalLocationInput(input),
       declaredMunicipality: authorized.expediente.municipio,
     }, attemptStartedAt)
   }
@@ -220,6 +232,15 @@ export class ContextDetectionEngine {
       geometryStored: Boolean(effective?.parcelGeometry),
       sourceApis: [...new Set(allEvidence.map((item) => item.source))],
     })
+    await db
+      .update(expedientes)
+      .set({ status: 'active' })
+      .where(
+        and(
+          eq(expedientes.id, expedienteId),
+          eq(expedientes.status, 'territorial_context_pending')
+        )
+      )
   }
 
   async detectStateless(

@@ -43,6 +43,14 @@ function confidenceLabel(confidence: 'high' | 'medium' | 'low') {
   }[confidence]
 }
 
+type TerritorialInputSource = 'cadastral_reference' | 'coordinates' | 'address'
+
+function traceTerritorialDetection(event: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === 'development') {
+    console.debug('[territorial-detection]', { event, ...details })
+  }
+}
+
 function ProgressPanel({
   detection,
   calculating,
@@ -136,7 +144,10 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   const [detectionId, setDetectionId] = useState('')
   const [detectionInvalidated, setDetectionInvalidated] = useState(false)
   const [isDetecting, setIsDetecting] = useState(false)
+  const [territorialInputSource, setTerritorialInputSource] = useState<TerritorialInputSource | null>(null)
   const submitLock = useRef(false)
+  const territorialRevision = useRef(0)
+  const latestDetectionRequest = useRef(0)
   const guardedCreateExpediente = useCallback(async (
     previousState: CreateExpedienteState,
     formData: FormData
@@ -171,37 +182,111 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     if (!isCreating) submitLock.current = false
   }, [isCreating])
 
-  function invalidateDetection() {
-    if (detection) {
-      setPlaneamiento('')
-      setLandClass('')
-      setUrbanPlanningZone('')
+  useEffect(() => () => {
+    traceTerritorialDetection('form_unmounted', {
+      requestId: latestDetectionRequest.current,
+      revision: territorialRevision.current,
+    })
+  }, [])
+
+  function invalidateDetection(reason: string) {
+    territorialRevision.current += 1
+    const hadDetection = Boolean(detection || detectionId)
+    traceTerritorialDetection('context_invalidated', {
+      reason,
+      requestId: latestDetectionRequest.current,
+      revision: territorialRevision.current,
+      source: territorialInputSource,
+      hadDetection,
+    })
+    if (hadDetection) {
       setDetectionInvalidated(true)
+      setSelectedMunicipality('')
     }
+    setPlaneamiento('')
+    setLandClass('')
+    setUrbanPlanningZone('')
     setDetection(null)
     setDetectionId('')
   }
 
+  function changeLocationInput(source: TerritorialInputSource, value: string, coordinate?: 'lat' | 'lng') {
+    invalidateDetection(source)
+    setTerritorialInputSource(source)
+    if (source !== 'cadastral_reference') setRefCatastral('')
+    if (source !== 'address') setAddress('')
+    if (source !== 'coordinates') {
+      setLat('')
+      setLng('')
+    }
+    if (source === 'cadastral_reference') setRefCatastral(value)
+    if (source === 'address') setAddress(value)
+    if (source === 'coordinates' && coordinate === 'lat') setLat(value)
+    if (source === 'coordinates' && coordinate === 'lng') setLng(value)
+  }
+
   async function handleDetectContext() {
-    if (refCatastral.replace(/[^a-z0-9]/gi, '').length < 14) {
-      toast.error('Introduzca una referencia catastral válida (14 o 20 caracteres).')
+    const normalizedReference = refCatastral.replace(/[^a-z0-9]/gi, '')
+    const hasReference = [14, 18, 20].includes(normalizedReference.length)
+    const parsedLat = Number(lat)
+    const parsedLng = Number(lng)
+    const hasCoordinates = lat.trim() !== '' && lng.trim() !== '' &&
+      Number.isFinite(parsedLat) && Number.isFinite(parsedLng)
+    const hasAddress = address.trim() !== ''
+    const source = territorialInputSource ?? (
+      hasReference ? 'cadastral_reference' : hasCoordinates ? 'coordinates' : hasAddress ? 'address' : null
+    )
+    const hasSelectedInput =
+      (source === 'cadastral_reference' && hasReference) ||
+      (source === 'coordinates' && hasCoordinates) ||
+      (source === 'address' && hasAddress)
+    if (!source || !hasSelectedInput) {
+      toast.error('Introduzca una referencia catastral válida, las dos coordenadas o una dirección para analizar la parcela.')
       return
     }
 
+    const requestId = latestDetectionRequest.current + 1
+    latestDetectionRequest.current = requestId
+    const requestRevision = territorialRevision.current
+    traceTerritorialDetection('detection_started', {
+      requestId,
+      revision: requestRevision,
+      source,
+      cadastralReference: source === 'cadastral_reference' ? refCatastral : undefined,
+      coordinates: source === 'coordinates' ? { lat, lng } : undefined,
+    })
     setIsDetecting(true)
     try {
       const formData = new FormData()
-      formData.append('refCatastral', refCatastral)
+      formData.append('territorialInputSource', source)
+      if (source === 'cadastral_reference') formData.append('refCatastral', refCatastral)
+      if (source === 'coordinates') {
+        formData.append('lat', lat)
+        formData.append('lng', lng)
+      }
+      if (source === 'address') formData.append('address', address)
       const result = await detectContextAction(formData)
       if ('error' in result) {
+        if (requestId !== latestDetectionRequest.current || requestRevision !== territorialRevision.current) return
         toast.error(result.error)
         return
       }
 
+      if (requestId !== latestDetectionRequest.current || requestRevision !== territorialRevision.current) return
+
       const values = result.detection.detected
+      traceTerritorialDetection('detection_received', {
+        requestId,
+        source,
+        cadastralReference: values.cadastralReference,
+        coordinates: values.lat !== undefined && values.lng !== undefined ? { lat: values.lat, lng: values.lng } : undefined,
+        municipality: values.municipalityCode,
+        planningDocument: values.planeamiento,
+      })
       setDetection(result.detection)
       setDetectionId(result.detectionId)
       setDetectionInvalidated(false)
+      setTerritorialInputSource(values.locationSource ?? source)
       if (values.cadastralReference) setRefCatastral(values.cadastralReference)
       if (values.provinceId) setSelectedProvince(values.provinceId)
       if (values.municipalityId) setSelectedMunicipality(values.municipalityId)
@@ -213,9 +298,10 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       setUrbanPlanningZone(values.urbanPlanningZone ?? '')
       toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
     } catch {
+      if (requestId !== latestDetectionRequest.current || requestRevision !== territorialRevision.current) return
       toast.error('No se ha podido completar el análisis territorial. Puede reintentar o continuar con los datos pendientes.')
     } finally {
-      setIsDetecting(false)
+      if (requestId === latestDetectionRequest.current) setIsDetecting(false)
     }
   }
 
@@ -223,6 +309,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     <form action={createAction} className="space-y-8" aria-busy={isCreating}>
       <input type="hidden" name="preflightDetectionId" value={detectionId} />
       <input type="hidden" name="territorialDetectionInvalidated" value={detectionInvalidated ? 'true' : ''} />
+      <input type="hidden" name="territorialInputSource" value={territorialInputSource ?? ''} />
       {!detectionInvalidated && <input type="hidden" name="urbanPlanningZone" value={urbanPlanningZone} />}
 
       {createState.status === 'error' && (
@@ -243,12 +330,12 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <Label htmlFor="province" className="text-base font-medium">Provincia <span className="text-destructive">*</span></Label>
             <select
               id="province" name="province" required value={selectedProvince}
-              onChange={(event) => {
-                const provinceId = event.target.value
-                setSelectedProvince(provinceId)
-                if (selectedMunicipalityData?.provinceId !== provinceId) setSelectedMunicipality('')
-                invalidateDetection()
-              }}
+               onChange={(event) => {
+                 const provinceId = event.target.value
+                 invalidateDetection('province')
+                 setSelectedProvince(provinceId)
+                 if (selectedMunicipalityData?.provinceId !== provinceId) setSelectedMunicipality('')
+               }}
               aria-invalid={createState.field === 'province'} aria-describedby={createState.field === 'province' ? 'creation-error' : undefined}
               className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'province' ? 'border-destructive' : ''}`}
             >
@@ -259,7 +346,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <Label htmlFor="municipio" className="text-base font-medium">Municipio <span className="text-destructive">*</span></Label>
             <select
               id="municipio" name="municipio" required value={selectedMunicipality}
-              onChange={(event) => { setSelectedMunicipality(event.target.value); invalidateDetection() }}
+               onChange={(event) => { invalidateDetection('municipality'); setSelectedMunicipality(event.target.value) }}
               aria-invalid={createState.field === 'municipio'} aria-describedby={createState.field === 'municipio' ? 'creation-error' : undefined}
               className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'municipio' ? 'border-destructive' : ''}`}
             >
@@ -284,7 +371,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
           <div className="flex gap-2">
             <Input
               id="refCatastral" name="refCatastral" value={refCatastral}
-              onChange={(event) => { setRefCatastral(event.target.value); invalidateDetection() }}
+               onChange={(event) => changeLocationInput('cadastral_reference', event.target.value)}
               placeholder="14 o 20 caracteres" aria-invalid={createState.field === 'refCatastral'} aria-describedby={createState.field === 'refCatastral' ? 'creation-error' : undefined} className={`h-12 flex-1 font-mono text-base shadow-sm ${createState.field === 'refCatastral' ? 'border-destructive' : ''}`}
             />
             <Button type="button" variant="secondary" className="h-12 px-4" onClick={handleDetectContext} disabled={isDetecting}>
@@ -298,11 +385,11 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="grid gap-3">
             <Label htmlFor="address" className="text-base font-medium">Dirección aproximada</Label>
-            <Input id="address" name="address" value={address} onChange={(event) => { setAddress(event.target.value); invalidateDetection() }} placeholder="Se completa desde Catastro cuando está disponible" aria-invalid={createState.field === 'address'} aria-describedby={createState.field === 'address' ? 'creation-error' : undefined} className={`h-12 text-base shadow-sm ${createState.field === 'address' ? 'border-destructive' : ''}`} />
+            <Input id="address" name="address" value={address} onChange={(event) => changeLocationInput('address', event.target.value)} placeholder="Se completa desde Catastro cuando está disponible" aria-invalid={createState.field === 'address'} aria-describedby={createState.field === 'address' ? 'creation-error' : undefined} className={`h-12 text-base shadow-sm ${createState.field === 'address' ? 'border-destructive' : ''}`} />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label htmlFor="lat" className="text-sm font-medium">Latitud</Label><Input id="lat" name="lat" type="number" step="any" value={lat} onChange={(event) => { setLat(event.target.value); invalidateDetection() }} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
-            <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => { setLng(event.target.value); invalidateDetection() }} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
+            <div className="grid gap-2"><Label htmlFor="lat" className="text-sm font-medium">Latitud</Label><Input id="lat" name="lat" type="number" step="any" value={lat} onChange={(event) => changeLocationInput('coordinates', event.target.value, 'lat')} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
+            <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => changeLocationInput('coordinates', event.target.value, 'lng')} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
           </div>
         </div>
       </section>
