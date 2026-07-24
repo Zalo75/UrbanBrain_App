@@ -5,6 +5,9 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 vi.mock('./territorialActions', () => ({
   resolveTerritorialContextAction: vi.fn(async () => ({ status: 'success', message: 'ok' })),
 }))
+vi.mock('@/components/maps/ParcelMap', () => ({
+  ParcelMap: () => <div data-testid="parcel-map">Visor cartográfico</div>,
+}))
 
 import { TerritorialContextPanel } from './TerritorialContextPanel'
 
@@ -73,6 +76,7 @@ describe('TerritorialContextPanel', () => {
     )
 
     expect(screen.getByText('Conflictivo')).toBeTruthy()
+    expect(screen.getByTestId('parcel-map')).toBeTruthy()
     expect(screen.getByText(/no demuestra ausencia de otras afecciones/i)).toBeTruthy()
     expect(screen.getByText(/se abst.* de dar par.*metros/i)).toBeTruthy()
   })

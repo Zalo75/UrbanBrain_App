@@ -21,6 +21,7 @@ export interface TerritorialContextView {
   parcelReference?: string;
   address?: string;
   coordinates?: TerritorialResolution['coordinates'];
+  parcelGeometry?: TerritorialResolution['parcelGeometry'];
   municipality?: string;
   municipalityCode?: string;
   province?: string;
@@ -134,6 +135,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     parcelReference: effective?.parcelReference,
     address: effective?.normalizedAddress ?? manual?.address,
     coordinates: effective?.coordinates ?? manual?.coordinates,
+    parcelGeometry: effective?.parcelGeometry,
     municipality: effective?.municipality ?? manual?.municipality,
     municipalityCode: effective?.municipalityCode,
     province: effective?.province,

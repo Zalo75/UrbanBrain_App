@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel';
+import { ParcelMap } from '@/components/maps/ParcelMap';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -354,6 +355,11 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                     ))}
                   </div>
                 )}
+
+                <ParcelMap
+                  geometry={context.parcelGeometry}
+                  coordinates={context.coordinates}
+                />
 
                 <div className="bg-background rounded-lg border p-4">
                   <h3 className="text-sm font-semibold">Afecciones positivas detectadas</h3>

@@ -52,9 +52,15 @@ describe('buildTerritorialContextView', () => {
   });
 
   it('expone las coordenadas reales de la detección como fuente canónica de la interfaz', () => {
+    const parcelGeometry: TerritorialResolution['parcelGeometry'] = {
+      type: 'MultiPolygon',
+      crs: 'EPSG:4326',
+      coordinates: [[[[-8.218, 43.271], [-8.217, 43.271], [-8.218, 43.271]]]],
+    };
     const view = buildTerritorialContextView({
       ...base,
       coordinates: { lat: 43.271234, lng: -8.217654 },
+      parcelGeometry,
       municipality: 'Betanzos',
       evidence: [
         {
@@ -69,6 +75,7 @@ describe('buildTerritorialContextView', () => {
     expect(view).toMatchObject({
       municipality: 'Betanzos',
       coordinates: { lat: 43.271234, lng: -8.217654 },
+      parcelGeometry,
       technicallyReviewed: false,
     });
   });
