@@ -91,6 +91,7 @@ describe('POST /api/chat parcel context boundary', () => {
       detected: {
         municipalityName: 'Betanzos',
         municipalityId: 'betanzos',
+        municipalityCode: '15009',
         locationSource: 'catastro',
         locationStatus: 'confirmed',
         locationConfidence: 'high',
@@ -114,7 +115,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(response.status).toBe(200)
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks',
-      expect.objectContaining({ filter_municipio: 'Betanzos' })
+      expect.objectContaining({ filter_municipio_codigo: '15009' })
     )
   })
 
@@ -161,7 +162,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks',
       expect.objectContaining({
-        filter_municipio: '__urbanbrain_unconfirmed_municipality__',
+        filter_municipio_codigo: '__urbanbrain_unconfirmed_municipality__',
       })
     )
   })
@@ -173,6 +174,7 @@ describe('POST /api/chat parcel context boundary', () => {
         cadastralReference: '15009A01300255',
         municipalityName: 'Betanzos',
         municipalityId: 'betanzos',
+        municipalityCode: '15009',
         locationSource: 'catastro',
         locationStatus: 'confirmed',
         locationConfidence: 'high',

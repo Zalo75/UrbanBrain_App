@@ -329,6 +329,7 @@ export async function createExpediente(
   try {
     const [newExpediente] = await db.insert(expedientes).values({
       orgId: membership.orgId,
+      ownerId: userId,
       name,
       province: canonicalProvinceId,
       municipio: canonicalMunicipalityId,
@@ -400,7 +401,7 @@ export async function createExpediente(
         await db
           .update(expedientes)
           .set({ status: 'territorial_context_pending' })
-          .where(eq(expedientes.id, newExpedienteId))
+          .where(and(eq(expedientes.id, newExpedienteId), eq(expedientes.ownerId, userId)))
       } catch (statusError) {
         console.error({
           event: 'territorial_context_pending_status_failed',

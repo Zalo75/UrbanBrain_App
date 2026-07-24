@@ -1,13 +1,14 @@
 import { redirect } from 'next/navigation'
 import { authProvider } from '@/infrastructure/auth'
 import { db } from '@/infrastructure/db/client'
-import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
-import { eq, desc, ne, and } from 'drizzle-orm'
+import { organizationMembers } from '@/infrastructure/db/schema'
+import { eq } from 'drizzle-orm'
 import { Button } from '@/components/ui/button'
 import { Plus, FolderOpen, MapPin } from 'lucide-react'
 import Link from 'next/link'
 import { ExpedienteActions } from '@/components/expedientes/ExpedienteActions'
 import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
+import { buildOwnedExpedientesListQuery } from '@/infrastructure/db/expedienteOwnershipQueries'
 
 export const metadata = {
   title: 'Expedientes - UrbanBrain',
@@ -20,14 +21,15 @@ export default async function ExpedientesListPage() {
   const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
   if (memberships.length === 0) redirect('/onboarding')
   
-  const { orgId, role: membershipRole } = memberships[0]
-  const canCreate = hasOrganizationPermission(membershipRole, 'expediente.create')
+  const canCreate = memberships.some(({ role }) =>
+    hasOrganizationPermission(role, 'expediente.create')
+  )
 
-  const expedientesList = await db
-    .select()
-    .from(expedientes)
-    .where(and(eq(expedientes.orgId, orgId), ne(expedientes.status, 'archived')))
-    .orderBy(desc(expedientes.createdAt))
+  const expedienteRows = await buildOwnedExpedientesListQuery(db, userId)
+  const expedientesList = expedienteRows.map(({ expediente, membershipRole }) => ({
+    expediente,
+    membershipRole: membershipRole ?? 'viewer',
+  }))
 
   if (expedientesList.length === 0) {
     return (
@@ -83,7 +85,7 @@ export default async function ExpedientesListPage() {
         
         {/* Filas */}
         <div className="divide-y">
-          {expedientesList.map((exp) => (
+          {expedientesList.map(({ expediente: exp, membershipRole }) => (
             <div key={exp.id} className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 p-4 items-center hover:bg-accent/40 transition-colors">
               {/* Nombre - clickable */}
               <Link href={`/expedientes/${exp.id}`} className="flex items-center gap-3 group">

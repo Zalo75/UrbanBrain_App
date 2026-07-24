@@ -2,13 +2,14 @@ import { redirect } from 'next/navigation'
 import { authProvider } from '@/infrastructure/auth'
 import { db } from '@/infrastructure/db/client'
 import { expedientes, organizationMembers } from '@/infrastructure/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { InferSelectModel } from 'drizzle-orm'
 import { Button } from '@/components/ui/button'
 import { Plus, FolderOpen } from 'lucide-react'
 import Link from 'next/link'
 import { formatActionType } from '@/shared/utils/formatters'
 import { getProvinceNameById, getMunicipalityNameById } from '@/shared/territory'
+import { buildOwnedRecentExpedientesQuery } from '@/infrastructure/db/expedienteOwnershipQueries'
 
 export const metadata = {
   title: 'Dashboard - UrbanBrain',
@@ -29,14 +30,7 @@ export default async function DashboardPage() {
     const memberships = await db.select().from(organizationMembers).where(eq(organizationMembers.profileId, userId))
     if (memberships.length > 0) {
       hasMemberships = true;
-      const orgId = memberships[0].orgId
-
-      recentExpedientes = await db
-        .select()
-        .from(expedientes)
-        .where(eq(expedientes.orgId, orgId))
-        .orderBy(desc(expedientes.createdAt))
-        .limit(5)
+      recentExpedientes = await buildOwnedRecentExpedientesQuery(db, userId)
     }
   } catch (error: unknown) {
     const err = error as Error & { code?: string };

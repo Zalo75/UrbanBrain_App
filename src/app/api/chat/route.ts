@@ -7,7 +7,7 @@ import { chatMessages } from '@/infrastructure/db/schema';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
 import {
   buildNormalizedParcelContext,
-  trustedMunicipalityFilter,
+  trustedMunicipalityCodeFilter,
 } from '@/application/parcel-context/normalizeParcelContext';
 import {
   evaluateApplicability,
@@ -134,8 +134,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       userMessages: [...parcelInputs.userMessages, message],
     });
     // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
-    const municipio =
-      trustedMunicipalityFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
+    const municipioCodigo =
+      trustedMunicipalityCodeFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
 
     // Guardar mensaje del usuario
@@ -203,7 +203,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const { data: chunks, error: rpcError } = await supabase.rpc('match_normativa_chunks', {
       query_embedding,
       match_count: 8,
-      filter_municipio: municipio,
+      filter_municipio_codigo: municipioCodigo,
     }).abortSignal(signal);
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);

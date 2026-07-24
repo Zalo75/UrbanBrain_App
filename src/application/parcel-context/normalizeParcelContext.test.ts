@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildNormalizedParcelContext,
+  trustedMunicipalityCodeFilter,
   trustedMunicipalityFilter,
 } from './normalizeParcelContext'
 
@@ -172,6 +173,7 @@ describe('buildNormalizedParcelContext', () => {
       detected: {
         municipalityName: 'Betanzos',
         municipalityId: 'betanzos',
+        municipalityCode: '15009',
         locationSource: 'catastro',
         locationStatus: 'confirmed',
         locationConfidence: 'high',
@@ -184,9 +186,25 @@ describe('buildNormalizedParcelContext', () => {
       verification: 'confirmed',
     })
     expect(trustedMunicipalityFilter(context)).toBe('Betanzos')
+    expect(trustedMunicipalityCodeFilter(context)).toBe('15009')
     expect(context.conflicts).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'municipality' })])
     )
+  })
+
+  it('recupera el INE del cat\u00e1logo para detecciones oficiales anteriores que s\u00f3lo guardaron el nombre', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { municipio: 'betanzos' },
+      detected: {
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+      },
+    })
+
+    expect(trustedMunicipalityCodeFilter(context)).toBe('15009')
   })
 
   it('no usa un municipio manual como filtro RAG autorizado', () => {

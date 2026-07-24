@@ -5,6 +5,7 @@ import { getExpedienteAccess } from '@/application/authorization/expedienteAcces
 import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
 import { db } from '@/infrastructure/db/client'
 import { documents } from '@/infrastructure/db/schema'
+import { expedienteStoragePrefix } from '@/infrastructure/supabase/deleteExpedienteStorageFiles'
 
 const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 
@@ -42,6 +43,10 @@ export async function registerDocument(data: {
 }) {
   const access = await getExpedienteAccess(data.expedienteId)
   if (!access.ok || !hasOrganizationPermission(access.membershipRole, 'document.upload')) {
+    throw new Error('Expediente not found or access denied')
+  }
+  const expectedPrefix = expedienteStoragePrefix(access.orgId, data.expedienteId)
+  if (!data.storagePath.startsWith(expectedPrefix)) {
     throw new Error('Expediente not found or access denied')
   }
 

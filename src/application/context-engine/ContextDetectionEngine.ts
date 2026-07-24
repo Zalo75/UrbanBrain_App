@@ -192,7 +192,7 @@ export class ContextDetectionEngine {
   ): Promise<boolean> {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return false
-    await this.persist(expedienteId, result)
+    await this.persist(expedienteId, authorized.expediente.ownerId, result)
     return true
   }
 
@@ -205,7 +205,7 @@ export class ContextDetectionEngine {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
     const result = createManualAttempt(input, manualContext, authorized.latestDetectionRaw)
-    await this.persist(expedienteId, result)
+    await this.persist(expedienteId, authorized.expediente.ownerId, result)
     return result
   }
 
@@ -218,11 +218,11 @@ export class ContextDetectionEngine {
     const current = await this.resolver(input)
     current.attemptStartedAt = attemptStartedAt
     const result = attachContinuity(current, input, authorized.latestDetectionRaw)
-    await this.persist(expedienteId, result)
+    await this.persist(expedienteId, authorized.expediente.ownerId, result)
     return result
   }
 
-  private async persist(expedienteId: string, result: TerritorialResolution) {
+  private async persist(expedienteId: string, ownerId: string, result: TerritorialResolution) {
     const effective = officialContextForUse(result)
     const allEvidence = [
       ...result.evidence,
@@ -249,6 +249,7 @@ export class ContextDetectionEngine {
       .where(
         and(
           eq(expedientes.id, expedienteId),
+          eq(expedientes.ownerId, ownerId),
           eq(expedientes.status, 'territorial_context_pending')
         )
       )

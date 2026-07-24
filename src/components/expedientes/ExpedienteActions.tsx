@@ -1,12 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { MoreHorizontal, Edit2, Archive } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { MoreHorizontal, Edit2, Archive, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -19,7 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { updateExpediente, archiveExpediente } from '@/app/(dashboard)/expedientes/actions'
+import { updateExpediente, archiveExpediente, deleteExpediente } from '@/app/(dashboard)/expedientes/actions'
 import { hasOrganizationPermission, type OrganizationRole } from '@/application/authorization/organizationRoles'
 
 interface Expediente {
@@ -30,13 +33,17 @@ interface Expediente {
 }
 
 export function ExpedienteActions({ expediente, membershipRole }: { expediente: Expediente; membershipRole: OrganizationRole }) {
+  const router = useRouter()
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isArchiveOpen, setIsArchiveOpen] = useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [isPending, setIsPending] = useState(false)
   const canEdit = hasOrganizationPermission(membershipRole, 'expediente.edit')
   const canArchive = hasOrganizationPermission(membershipRole, 'expediente.archive')
+  const canDelete = true
 
-  if (!canEdit && !canArchive) return null
+  if (!canEdit && !canArchive && !canDelete) return null
 
   async function handleArchive() {
     setIsPending(true)
@@ -63,6 +70,26 @@ export function ExpedienteActions({ expediente, membershipRole }: { expediente: 
     }
   }
 
+  async function handleDelete() {
+    setIsPending(true)
+    setDeleteError('')
+    try {
+      const result = await deleteExpediente(expediente.id)
+      if (!result.success) {
+        setDeleteError(result.error)
+        return
+      }
+      setIsDeleteOpen(false)
+      toast.success('Expediente eliminado permanentemente.')
+      router.push('/expedientes')
+      router.refresh()
+    } catch {
+      setDeleteError('No se ha podido completar la eliminación. Inténtelo de nuevo.')
+    } finally {
+      setIsPending(false)
+    }
+  }
+
   return (
     <>
       <DropdownMenu>
@@ -77,10 +104,22 @@ export function ExpedienteActions({ expediente, membershipRole }: { expediente: 
           </DropdownMenuItem>}
           {canArchive && <DropdownMenuItem
             onClick={() => setIsArchiveOpen(true)} 
-            className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
+            className="cursor-pointer"
           >
             <Archive className="mr-2 h-4 w-4" />
             <span>Archivar</span>
+          </DropdownMenuItem>}
+          {canDelete && <DropdownMenuSeparator />}
+          {canDelete && <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              setDeleteError('')
+              setIsDeleteOpen(true)
+            }}
+            className="cursor-pointer"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            <span>Eliminar expediente</span>
           </DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -132,6 +171,30 @@ export function ExpedienteActions({ expediente, membershipRole }: { expediente: 
             </Button>
             <Button variant="destructive" onClick={handleArchive} disabled={isPending}>
               {isPending ? 'Archivando...' : 'Archivar expediente'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Eliminar expediente permanentemente</DialogTitle>
+            <DialogDescription>
+              Esta acción eliminará permanentemente el expediente, sus documentos y su historial. No se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {deleteError}
+            </p>
+          )}
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsDeleteOpen(false)} disabled={isPending}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDelete} disabled={isPending}>
+              {isPending ? 'Eliminando...' : 'Eliminar definitivamente'}
             </Button>
           </DialogFooter>
         </DialogContent>

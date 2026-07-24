@@ -91,11 +91,14 @@ describe('createExpediente smart preflight', () => {
 
   it('reuses a server-side preflight and persists normalized selections without repeating official queries', async () => {
     const detectionId = storePreflightDetection('user-a', summarizeSmartCaseDetection(result))
+    const submitted = form(detectionId)
+    submitted.set('ownerId', 'attacker-controlled-user')
 
-    await expect(createExpediente(initialCreateExpedienteState, form(detectionId))).rejects.toThrow('NEXT_REDIRECT')
+    await expect(createExpediente(initialCreateExpedienteState, submitted)).rejects.toThrow('NEXT_REDIRECT')
 
     expect(mocks.detectStateless).not.toHaveBeenCalled()
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
+      ownerId: 'user-a',
       province: 'a_coruna', municipio: 'culleredo', refCatastral: '7709702NH4970N0001SZ',
       planeamiento: 'Plan general trazable', landClass: 'urbano_consolidado',
     }))

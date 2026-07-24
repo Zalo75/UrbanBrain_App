@@ -20,10 +20,10 @@ values
   ('a0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000002', 'owner'),
   ('b0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000002', 'owner');
 
-insert into public.expedientes (id, org_id, name, municipio)
+insert into public.expedientes (id, org_id, owner_id, name, municipio)
 values
-  ('a0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'RLS expediente A', 'betanzos'),
-  ('b0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'RLS expediente B', 'betanzos');
+  ('a0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000002', 'RLS expediente A', 'betanzos'),
+  ('b0000000-0000-4000-8000-000000000003', 'b0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000002', 'RLS expediente B', 'betanzos');
 
 insert into public.chat_messages (id, expediente_id, user_id, role, content)
 values
@@ -154,8 +154,8 @@ select extensions.ok(
   'authenticated users cannot fabricate memberships'
 );
 select extensions.ok(
-  not has_table_privilege('authenticated', 'public.expedientes', 'INSERT,UPDATE,DELETE'),
-  'authenticated users cannot bypass server-side expediente authorization'
+  has_table_privilege('authenticated', 'public.expedientes', 'SELECT,INSERT,UPDATE,DELETE'),
+  'authenticated expediente DML remains constrained by individual-owner RLS'
 );
 select extensions.ok(
   case

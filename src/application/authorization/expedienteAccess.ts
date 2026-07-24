@@ -29,20 +29,20 @@ export function buildExpedienteAccessQuery(
   return database
     .select({ expediente: expedientes, membershipRole: organizationMembers.role })
     .from(expedientes)
-    .innerJoin(
+    .leftJoin(
       organizationMembers,
       and(
         eq(organizationMembers.orgId, expedientes.orgId),
         eq(organizationMembers.profileId, userId)
       )
     )
-    .where(eq(expedientes.id, expedienteId))
+    .where(and(eq(expedientes.id, expedienteId), eq(expedientes.ownerId, userId)))
     .limit(1)
 }
 
 /**
- * Loads an expediente only when the authenticated user belongs to its organization.
- * The joined query avoids selecting an arbitrary "first" organization membership.
+ * Loads an expediente only when the authenticated user is its individual owner.
+ * Organization membership is joined only to retain the existing role-based UI rules.
  */
 export async function getExpedienteAccess(
   expedienteId: string
@@ -63,7 +63,7 @@ export async function getExpedienteAccess(
     ok: true,
     userId,
     orgId: result.expediente.orgId,
-    membershipRole: result.membershipRole,
+    membershipRole: result.membershipRole ?? 'viewer',
     expediente: result.expediente,
   }
 }

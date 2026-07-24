@@ -179,6 +179,9 @@ export const expedientes = pgTable('expedientes', {
   orgId: uuid('org_id')
     .references(() => organizations.id, { onDelete: 'cascade' })
     .notNull(),
+  ownerId: uuid('owner_id')
+    .references(() => profiles.id, { onDelete: 'restrict' })
+    .notNull(),
   name: text('name').notNull(),
   province: text('province'),
   municipio: text('municipio').notNull(),
@@ -204,7 +207,9 @@ export const expedientes = pgTable('expedientes', {
   contextoValidadoPorTecnico: boolean('contexto_validado_por_tecnico').default(false).notNull(),
   status: text('status').default('active').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  ownerCreatedAtIdx: index('expedientes_owner_created_at_idx').on(table.ownerId, table.createdAt),
+}));
 
 export const conversations = pgTable('conversations', {
   id: uuid('id').defaultRandom().primaryKey(),

@@ -13,6 +13,7 @@ import { buildTerritorialContextView } from '@/application/territorial-resolver/
 import { TerritorialContextPanel } from './TerritorialContextPanel'
 import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 import { buildTerritorialPresentation } from './territorialPresentation'
+import { ExpedienteActions } from '@/components/expedientes/ExpedienteActions'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
@@ -102,6 +103,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           <Button variant="outline" size="icon" className="h-8 w-8 sm:hidden shrink-0">
             <Settings className="h-4 w-4" />
           </Button>
+          <ExpedienteActions expediente={expediente} membershipRole={membershipRole} />
         </div>
       </div>
 

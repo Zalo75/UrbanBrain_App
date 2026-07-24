@@ -13,11 +13,10 @@ import {
   contextDetections,
   expedienteAfecciones,
   expedientes,
-  organizationMembers,
 } from '@/infrastructure/db/schema'
 
 export interface AuthorizedParcelInputs {
-  expediente: ParcelExpedienteInput & { id: string; orgId: string }
+  expediente: ParcelExpedienteInput & { id: string; orgId: string; ownerId: string }
   detected: DetectedParcelInput | null
   userMessages: string[]
   constraints: KnownConstraintInput[]
@@ -32,14 +31,7 @@ export function buildAuthorizedExpedienteQuery(
   return database
     .select({ expediente: expedientes })
     .from(expedientes)
-    .innerJoin(
-      organizationMembers,
-      and(
-        eq(organizationMembers.orgId, expedientes.orgId),
-        eq(organizationMembers.profileId, userId)
-      )
-    )
-    .where(eq(expedientes.id, expedienteId))
+    .where(and(eq(expedientes.id, expedienteId), eq(expedientes.ownerId, userId)))
     .limit(1)
 }
 

@@ -183,7 +183,7 @@ export async function resolveTerritorialContextAction(
             ? false
             : access.expediente.contextoValidadoPorTecnico,
         })
-        .where(and(eq(expedientes.id, expedienteId), eq(expedientes.orgId, access.orgId)));
+        .where(and(eq(expedientes.id, expedienteId), eq(expedientes.ownerId, access.userId)));
     }
   } catch {
     return {

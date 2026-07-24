@@ -13,7 +13,7 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }))
 
 import { prepareDocumentUpload, processDocumentAction, registerDocument } from './actions'
 
-const documentInput = { expedienteId: 'exp-a', filename: 'norma.pdf', storagePath: 'org-a/exp-a/norma.pdf', documentType: 'normativa' as const }
+const documentInput = { expedienteId: 'exp-a', filename: 'norma.pdf', storagePath: 'organizations/org-a/expedientes/exp-a/norma.pdf', documentType: 'normativa' as const }
 
 describe('document mutation roles', () => {
   beforeEach(() => {
@@ -64,6 +64,16 @@ describe('document mutation roles', () => {
     mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: `${role}-a`, orgId: 'org-a', membershipRole: role, expediente: { id: 'exp-a', orgId: 'org-a' } })
     await expect(registerDocument(documentInput)).resolves.toEqual({ success: true })
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({ expedienteId: 'exp-a', uploadedBy: `${role}-a` }))
+  })
+
+  it('rejects document metadata pointing outside the authorized expediente prefix', async () => {
+    mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: 'owner-a', orgId: 'org-a', membershipRole: 'owner', expediente: { id: 'exp-a', orgId: 'org-a', ownerId: 'owner-a' } })
+
+    await expect(registerDocument({
+      ...documentInput,
+      storagePath: 'organizations/org-a/expedientes/exp-b/private.pdf',
+    })).rejects.toThrow('access denied')
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('keeps processing disabled without writing for every role', async () => {

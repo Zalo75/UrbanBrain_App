@@ -1,4 +1,9 @@
-import { allMunicipalities, getMunicipalityNameById, getProvinceNameById } from '@/shared/territory'
+import {
+  allMunicipalities,
+  getMunicipalityNameById,
+  getProvinceNameById,
+  resolveMunicipalityIdentity,
+} from '@/shared/territory'
 import type {
   NormalizedParcelContext,
   ParcelContextField,
@@ -27,6 +32,7 @@ export interface DetectedParcelInput {
   provinceName?: string | null
   municipalityId?: string | null
   municipalityName?: string | null
+  municipalityCode?: string | null
   address?: string | null
   lat?: number | null
   lng?: number | null
@@ -392,10 +398,19 @@ export function buildNormalizedParcelContext(
     ? allMunicipalities.find((municipality) => municipality.id === municipalityId)
     : undefined
   if (detected?.municipalityName?.trim() && hasConfirmedOfficialLocation) {
+    const municipalityCode = detected.municipalityCode?.trim()
+    const knownDetectedMunicipality = resolveMunicipalityIdentity({
+      municipality: detected.municipalityName,
+      municipalityCode,
+    })
     context.municipality = field(
       {
         id: detected.municipalityId ?? undefined,
         name: detected.municipalityName.trim(),
+        ineCode:
+          municipalityCode && /^\d{5}$/.test(municipalityCode)
+            ? municipalityCode
+            : knownDetectedMunicipality?.ineCode,
       },
       'catastro',
       detectedLocationConfidence,
@@ -840,4 +855,19 @@ export function trustedMunicipalityFilter(context: NormalizedParcelContext): str
     return null
   }
   return municipality.value.name
+}
+
+export function trustedMunicipalityCodeFilter(context: NormalizedParcelContext): string | null {
+  const municipality = context.municipality
+  const ineCode = municipality?.value.ineCode?.trim()
+  if (
+    municipality?.source !== 'catastro' ||
+    municipality.verification !== 'confirmed' ||
+    municipality.confidence < 0.9 ||
+    !ineCode ||
+    !/^\d{5}$/.test(ineCode)
+  ) {
+    return null
+  }
+  return ineCode
 }

@@ -10,7 +10,7 @@ GEMINI_MODEL = "gemini-embedding-001"
 EMBED_DIM = 768
 
 pregunta = "¿Cuál es la ocupación máxima en Oza-Cesuras?"
-municipio = "Oza"
+municipio_codigo = "15902"
 
 gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -38,7 +38,7 @@ matches = supabase.rpc(
     {
         "query_embedding": emb,
         "match_count": 8,
-        "filter_municipio": municipio,
+        "filter_municipio_codigo": municipio_codigo,
     },
 ).execute()
 
