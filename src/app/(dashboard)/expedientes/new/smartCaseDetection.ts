@@ -52,6 +52,7 @@ export interface SmartCaseDetection {
     address?: string
     lat?: number
     lng?: number
+    parcelGeometry?: TerritorialResolution['parcelGeometry']
     planeamiento?: string
     landClass?: LandClassValue
     urbanPlanningZone?: string
@@ -170,6 +171,7 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
       address: result.normalizedAddress,
       lat: result.coordinates?.lat,
       lng: result.coordinates?.lng,
+      parcelGeometry: result.parcelGeometry,
       planeamiento: result.planning.instrument,
       landClass,
       urbanPlanningZone:

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel'
+import { ParcelMap } from '@/components/maps/ParcelMap'
 import type { Municipality, Province } from '@/shared/territory'
 import type { ClassificationCandidate } from '@/domain/territorial-resolver/types'
 
@@ -170,6 +171,16 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   )
   const selectedMunicipalityData = municipalities.find((municipality) => municipality.id === selectedMunicipality)
   const planningOptions = planningOptionsByMunicipality[selectedMunicipality] ?? []
+  const detectedMapCoordinates = useMemo(() => {
+    if (
+      detectionInvalidated ||
+      detection?.detected.lat === undefined ||
+      detection.detected.lng === undefined
+    ) {
+      return undefined
+    }
+    return { lat: detection.detected.lat, lng: detection.detected.lng }
+  }, [detection, detectionInvalidated])
 
   useEffect(() => {
     let active = true
@@ -441,6 +452,10 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => changeLocationInput('coordinates', event.target.value, 'lng')} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
           </div>
         </div>
+        <ParcelMap
+          geometry={detectionInvalidated ? undefined : detection?.detected.parcelGeometry}
+          coordinates={detectedMapCoordinates}
+        />
       </section>
 
       <section className="space-y-6 pt-4">

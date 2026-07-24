@@ -7,6 +7,22 @@ vi.mock('./actions', () => ({
   getPlanningOptionsAction: vi.fn(async () => []),
 }))
 
+vi.mock('@/components/maps/ParcelMap', () => ({
+  ParcelMap: ({
+    geometry,
+    coordinates,
+  }: {
+    geometry?: unknown
+    coordinates?: { lat: number; lng: number }
+  }) => (
+    <div
+      data-testid="parcel-map"
+      data-has-geometry={geometry ? 'true' : 'false'}
+      data-coordinates={coordinates ? `${coordinates.lat},${coordinates.lng}` : ''}
+    />
+  ),
+}))
+
 import { ExpedienteForm } from './ExpedienteForm'
 import { createExpediente, detectContextAction } from './actions'
 
@@ -58,6 +74,68 @@ describe('ExpedienteForm', () => {
     })
     expect(screen.getByText(/Cartografía oficial de Galicia/i)).toBeTruthy()
     expect(screen.queryByText('No se han detectado afecciones positivas.')).toBeNull()
+  })
+
+  it('shows the current parcel geometry and its resolved coordinates after detection', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000020',
+      detection: {
+        detected: {
+          cadastralReference: '3995302NH5939N0001HQ',
+          lat: 43.331,
+          lng: -8.354,
+          parcelGeometry: {
+            type: 'MultiPolygon',
+            crs: 'EPSG:4326',
+            coordinates: [[[[-8.355, 43.33], [-8.354, 43.33], [-8.354, 43.331], [-8.355, 43.33]]]],
+          },
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '3995302NH5939N0001HQ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('parcel-map').getAttribute('data-has-geometry')).toBe('true')
+    })
+    expect(screen.getByTestId('parcel-map').getAttribute('data-coordinates')).toBe('43.331,-8.354')
+  })
+
+  it('uses resolved coordinates when the detection has no parcel geometry', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000021',
+      detection: {
+        detected: { lat: 43.316, lng: -8.336 },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '7709702NH4970N0001SZ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('parcel-map').getAttribute('data-coordinates')).toBe('43.316,-8.336')
+    })
+    expect(screen.getByTestId('parcel-map').getAttribute('data-has-geometry')).toBe('false')
+  })
+
+  it('renders the map empty state inputs before a location is detected', () => {
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+
+    expect(screen.getByTestId('parcel-map').getAttribute('data-has-geometry')).toBe('false')
+    expect(screen.getByTestId('parcel-map').getAttribute('data-coordinates')).toBe('')
   })
 
   it('keeps entered values and shows a server error on its related field', async () => {
@@ -117,6 +195,8 @@ describe('ExpedienteForm', () => {
     expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('')
     expect((document.querySelector('input[name="urbanPlanningZone"]') as HTMLInputElement).value).toBe('')
     expect(screen.queryByText(/Ámbito detectado/i)).toBeNull()
+    expect(screen.getByTestId('parcel-map').getAttribute('data-has-geometry')).toBe('false')
+    expect(screen.getByTestId('parcel-map').getAttribute('data-coordinates')).toBe('')
     expect((screen.getByRole('button', { name: /Crear expediente/i }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/El contexto territorial anterior ya no se utilizará/i)).toBeTruthy()
   })

@@ -59,6 +59,18 @@ describe('smart case detection', () => {
     })
   })
 
+  it('expone la geometría parcelaria oficial en el modelo de presentación', () => {
+    const parcelGeometry: TerritorialResolution['parcelGeometry'] = {
+      type: 'MultiPolygon',
+      crs: 'EPSG:4326',
+      coordinates: [[[[-8.337, 43.315], [-8.336, 43.315], [-8.336, 43.316], [-8.337, 43.315]]]],
+    }
+
+    const detected = summarizeSmartCaseDetection(resolution({ parcelGeometry }))
+
+    expect(detected.detected.parcelGeometry).toEqual(parcelGeometry)
+  })
+
   it.each(['15009', '15031'])('confirma A Coruña desde el prefijo del INE %s aunque falte el texto provincial', (municipalityCode) => {
     const detected = summarizeSmartCaseDetection(resolution({
       municipalityCode,
