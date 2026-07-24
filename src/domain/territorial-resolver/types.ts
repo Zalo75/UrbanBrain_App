@@ -51,6 +51,7 @@ export interface TerritorialEvidence {
   sourceUrl: string
   retrievedAt: string
   method: string
+  scope?: 'location' | 'planning_instrument' | 'planning_classification' | 'affect'
 }
 
 export interface TerritorialConflict {
@@ -92,6 +93,113 @@ export interface PlanningArea {
   sourceFeatureIds: string[]
 }
 
+export type ClassificationResolutionStatus =
+  | 'clear'
+  | 'multiple_intersections'
+  | 'review_required'
+  | 'not_available'
+  | 'source_unavailable'
+
+export type ClassificationNextAction =
+  | 'auto_accept'
+  | 'manual_selection'
+  | 'review_official_sources'
+  | 'retry_source'
+
+export type ClassificationReviewReason =
+  | 'point_geometry_mismatch'
+  | 'instrument_traceability_pending'
+  | 'instrument_layer_mismatch'
+  | 'source_disagreement'
+  | 'incomplete_source_check'
+  | 'ambiguous_code_mapping'
+  | 'insufficient_geometry'
+
+export type ClassificationEvidenceBasis =
+  | 'parcel_geometry'
+  | 'representative_point'
+  | 'official_document'
+
+export type ClassificationInstrumentTraceability = 'verified' | 'pending' | 'mismatch'
+
+export interface ClassificationCandidate {
+  id: string
+  classification: PlanningClassification
+  areas: PlanningArea[]
+  source: Exclude<TerritorialEvidence['source'], 'urbanbrain'>
+  evidence: TerritorialEvidence[]
+  confidence: TerritorialConfidence
+  evidenceBasis: ClassificationEvidenceBasis
+  instrumentTraceability: ClassificationInstrumentTraceability
+  normalizationStatus: 'mapped' | 'unmapped'
+}
+
+export interface ClassificationDiscrepancyAssertion {
+  candidateId?: string
+  value: string
+  source: TerritorialEvidence['source']
+  evidence: TerritorialEvidence[]
+}
+
+export interface ClassificationDiscrepancy {
+  reason: ClassificationReviewReason
+  field: 'classification' | 'category' | 'area' | 'instrument' | 'coverage'
+  explanation: string
+  assertions: ClassificationDiscrepancyAssertion[]
+}
+
+export interface ClassificationProposal {
+  candidateId: string
+  explanation: string
+  confidence: TerritorialConfidence
+  requiresProfessionalReview: boolean
+}
+
+export interface ClassificationSelection {
+  origin: 'automatic' | 'urbanbrain_proposal' | 'manual'
+  candidateId?: string
+  classificationCode?: string
+  categoryCode?: string
+  operationalValue?: string
+  areaNames: string[]
+  reason?: string
+  selectedAt?: string
+  selectedBy?: string
+  technicianValidated: boolean
+  resolutionFingerprint?: string
+}
+
+export interface OfficialResourceLink {
+  kind:
+    | 'catastro_viewer'
+    | 'siotuga_viewer'
+    | 'municipal_viewer'
+    | 'planning_document'
+    | 'official_map'
+  label: string
+  url: string
+  source: OfficialSource | 'municipal'
+  scope: 'parcel' | 'municipality' | 'instrument' | 'layer'
+}
+
+export interface ClassificationSourceCheck extends OfficialSourceCheck {
+  requiredForAutomaticDecision: boolean
+}
+
+export interface ClassificationResolution {
+  status: ClassificationResolutionStatus
+  nextAction: ClassificationNextAction
+  candidates: ClassificationCandidate[]
+  discrepancies: ClassificationDiscrepancy[]
+  reviewReasons: ClassificationReviewReason[]
+  proposal?: ClassificationProposal
+  automaticSelection?: ClassificationSelection
+  finalSelection?: ClassificationSelection
+  sourceChecks: ClassificationSourceCheck[]
+  officialLinks: OfficialResourceLink[]
+  evidence: TerritorialEvidence[]
+}
+
 export interface PlanningInstrumentReference {
   id: string
   name: string
@@ -117,6 +225,7 @@ export interface PlanningApplicability {
   approvalDate?: string
   sourceUrl?: string
   classification?: PlanningClassification
+  classificationResolution?: ClassificationResolution
   areas?: PlanningArea[]
   applicableInstruments?: PlanningInstrumentReference[]
   cataloguedInstruments?: PlanningInstrumentReference[]

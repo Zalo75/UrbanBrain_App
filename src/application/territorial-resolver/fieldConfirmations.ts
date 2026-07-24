@@ -1,4 +1,5 @@
 import type { TerritorialResolution } from '@/domain/territorial-resolver/types'
+import { getProvinceByMunicipalityIneCode } from '@/shared/territory'
 
 export type TerritorialFieldConfirmation = 'confirmed' | 'pending'
 
@@ -17,6 +18,51 @@ function hasOfficialEvidence(result: TerritorialResolution, source: 'catastro' |
     result.planning.evidence.some((item) => item.source === source)
 }
 
+function hasOfficialPlanningEvidence(result: TerritorialResolution) {
+  return result.planning.evidence.some(
+    (item) =>
+      item.source === 'siotuga' &&
+      item.scope === 'planning_instrument' &&
+      Boolean(item.sourceUrl.trim()) &&
+      Boolean(item.method.trim())
+  )
+}
+
+function hasOfficialClassificationEvidence(result: TerritorialResolution) {
+  return result.planning.evidence.some(
+    (item) => item.source === 'siotuga' && item.scope === 'planning_classification'
+  )
+}
+
+function sameInstrumentName(first?: string, second?: string) {
+  const normalize = (value?: string) =>
+    value
+      ?.normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLocaleLowerCase('es-ES')
+  return Boolean(normalize(first)) && normalize(first) === normalize(second)
+}
+
+function planningStatusConfirmsInstrument(result: TerritorialResolution) {
+  switch (result.planning.status) {
+    case 'determined':
+    case 'partial':
+      return true
+    case 'conflict':
+      return Boolean(
+        result.planning.applicableInstruments?.some(
+          (instrument) =>
+            instrument.status === 'current' &&
+            sameInstrumentName(instrument.name, result.planning.instrument)
+        )
+      )
+    case 'not_determined':
+    default:
+      return false
+  }
+}
+
 /**
  * A field is confirmed only when the resolver has coherent official evidence for
  * it. Values inferred from a point geocode, manual selection or an incomplete
@@ -27,7 +73,15 @@ export function territorialFieldConfirmations(
 ): TerritorialFieldConfirmations {
   const officialParcel = result.status === 'confirmed' && hasOfficialEvidence(result, 'catastro')
   const officialPlanning =
-    result.planning.status === 'determined' && hasOfficialEvidence(result, 'siotuga')
+    Boolean(result.planning.instrument?.trim()) &&
+    planningStatusConfirmsInstrument(result) &&
+    hasOfficialPlanningEvidence(result)
+  const officialClassification =
+    result.planning.status === 'determined' &&
+    hasOfficialClassificationEvidence(result)
+  const provinceResolvedFromOfficialData = Boolean(
+    getProvinceByMunicipalityIneCode(result.municipalityCode) ?? result.province?.trim()
+  )
 
   return {
     cadastralReference:
@@ -38,9 +92,14 @@ export function territorialFieldConfirmations(
         ? 'confirmed'
         : 'pending',
     municipalityCode: officialParcel && Boolean(result.municipalityCode) ? 'confirmed' : 'pending',
-    province: officialParcel && Boolean(result.province) ? 'confirmed' : 'pending',
+    province: officialParcel && provinceResolvedFromOfficialData ? 'confirmed' : 'pending',
     planning: officialPlanning && Boolean(result.planning.instrument) ? 'confirmed' : 'pending',
     classification:
-      officialPlanning && Boolean(result.planning.classification?.label) ? 'confirmed' : 'pending',
+      officialPlanning &&
+      officialClassification &&
+      Boolean(result.planning.classification?.code?.trim()) &&
+      Boolean(result.planning.classification?.label?.trim())
+        ? 'confirmed'
+        : 'pending',
   }
 }

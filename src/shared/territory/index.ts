@@ -54,6 +54,22 @@ export function getProvinceById(provinceId: string): Province | undefined {
   return allProvinces.find((province) => province.id === provinceId);
 }
 
+const provinceIdByMunicipalityInePrefix: Record<string, string> = {
+  '15': 'a_coruna',
+  '27': 'lugo',
+  '32': 'ourense',
+  '36': 'pontevedra',
+};
+
+/** Resolves the province encoded in a current five-digit Spanish municipality INE code. */
+export function getProvinceByMunicipalityIneCode(
+  municipalityIneCode: string | null | undefined
+): Province | undefined {
+  const normalized = municipalityIneCode?.trim();
+  if (!normalized || !/^\d{5}$/.test(normalized)) return undefined;
+  return getProvinceById(provinceIdByMunicipalityInePrefix[normalized.slice(0, 2)] ?? '');
+}
+
 export function getMunicipalityNameById(municipalityId: string): string {
   const mun = allMunicipalities.find(m => m.id === municipalityId);
   return mun ? mun.name : municipalityId;

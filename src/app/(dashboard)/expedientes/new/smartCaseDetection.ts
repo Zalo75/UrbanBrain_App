@@ -1,10 +1,13 @@
 import type {
+  ClassificationCandidate,
   OfficialSourceCheck,
   PlanningClassification,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types'
+import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks'
 import {
   getMunicipalityById,
+  getProvinceByMunicipalityIneCode,
   getProvinceById,
   getProvinceByName,
   resolveMunicipalityIdentity,
@@ -57,6 +60,7 @@ export interface SmartCaseDetection {
   progress: DetectionProgressItem[]
   sourceChecks: OfficialSourceCheck[]
   affects: TerritorialResolution['affects']['detected']
+  classificationResolution?: TerritorialResolution['planning']['classificationResolution']
 }
 
 export interface PreflightDetection extends SmartCaseDetection {
@@ -111,12 +115,19 @@ function progress(
   }
 }
 
-function landClassFromClassification(classification?: PlanningClassification): LandClassValue | undefined {
+export function landClassFromClassification(classification?: PlanningClassification): LandClassValue | undefined {
   if (!classification) return undefined
+  if (classification.code === 'SU' && classification.categoryCode === 'SUNC') {
+    return 'urbano_no_consolidado'
+  }
   if (classification.code === 'SU') return 'urbano_consolidado'
   if (classification.code === 'SNR') return 'nucleo_rural'
   if (classification.code === 'SR') return 'rustico_no_urbanizable'
   return undefined
+}
+
+export function landClassFromCandidate(candidate?: ClassificationCandidate) {
+  return landClassFromClassification(candidate?.classification)
 }
 
 /** Maps an official resolver response to values that the creation form can safely reuse. */
@@ -127,12 +138,19 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
     municipalityCode: result.municipalityCode,
     address: result.normalizedAddress,
   })
-  const province = municipality
-    ? getProvinceById(municipality.provinceId)
-    : getProvinceByName(result.province ?? '')
+  const province =
+    getProvinceByMunicipalityIneCode(result.municipalityCode) ??
+    (municipality ? getProvinceById(municipality.provinceId) : undefined) ??
+    getProvinceByName(result.province ?? '')
   const siotuga = sourceState(checks, 'siotuga')
   const ideg = sourceState(checks, 'ideg')
   const classification = result.planning.classification
+  const classificationResolution = result.planning.classificationResolution
+    ? {
+        ...result.planning.classificationResolution,
+        officialLinks: officialResourceLinks(result),
+      }
+    : undefined
   const landClass = landClassFromClassification(classification)
   const affects = result.affects.detected
   const confirmations = territorialFieldConfirmations(result)
@@ -176,7 +194,20 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
       progress('ine', 'Código INE', municipality?.ineCode ?? result.municipalityCode, false, 'No determinado', confirmations.municipalityCode, locationPendingDetail),
       progress('coordinates', 'Coordenadas', result.coordinates ? (result.inputMethod === 'coordinates' && confirmations.coordinates === 'pending' ? 'Punto aportado' : 'Coordenadas resueltas') : undefined, false, 'No determinadas', confirmations.coordinates, result.inputMethod === 'coordinates' ? 'Punto aportado; pendiente de confirmar' : locationPendingDetail),
       progress('planning', 'Planeamiento consultado', result.planning.instrument, siotuga.hasIncomplete, 'No determinado', confirmations.planning),
-      progress('classification', 'Clasificación consultada', classification?.label, siotuga.hasIncomplete, 'No determinada', confirmations.classification),
+      progress(
+        'classification',
+        'Clasificación consultada',
+        classification?.label,
+        classificationResolution?.status === 'source_unavailable' || siotuga.hasIncomplete,
+        classificationResolution?.status === 'multiple_intersections'
+          ? `${classificationResolution.candidates.length} clasificaciones detectadas; seleccione el valor operativo`
+          : classificationResolution?.status === 'review_required'
+            ? 'Existe evidencia oficial, pero requiere revisión profesional'
+            : classificationResolution?.status === 'not_available'
+              ? 'Las fuentes consultadas no ofrecen información suficiente'
+              : 'No determinada',
+        confirmations.classification
+      ),
       affects.length
         ? { id: 'affects', label: 'Afecciones consultadas', status: 'success', detail: `${affects.length} positiva(s) detectada(s)` }
         : progress(
@@ -189,6 +220,7 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
     ],
     sourceChecks: checks,
     affects,
+    classificationResolution,
     result,
   }
 }
@@ -222,8 +254,5 @@ export function validateSmartCaseSubmission(
   if (expected.address && input.address?.trim() && input.address.trim() !== expected.address) return 'detection_mismatch'
   if (expected.locationSource !== 'coordinates' && expected.lat !== undefined && input.lat !== expected.lat) return 'detection_mismatch'
   if (expected.locationSource !== 'coordinates' && expected.lng !== undefined && input.lng !== expected.lng) return 'detection_mismatch'
-  if (expected.planeamiento && input.planeamiento?.trim() && input.planeamiento.trim() !== expected.planeamiento) return 'detection_mismatch'
-  if (expected.landClass && input.landClass && input.landClass !== expected.landClass) return 'detection_mismatch'
-  if (expected.urbanPlanningZone && input.urbanPlanningZone?.trim() && input.urbanPlanningZone.trim() !== expected.urbanPlanningZone) return 'detection_mismatch'
   return null
 }

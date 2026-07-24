@@ -1,9 +1,12 @@
 import type {
+  ClassificationResolution,
+  OfficialResourceLink,
   TerritorialEvidence,
   ManualTerritorialContext,
   OfficialSourceCheck,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types';
+import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks';
 import {
   allSourceChecks,
   officialContextForUse,
@@ -22,6 +25,8 @@ export interface TerritorialContextView {
   municipalityCode?: string;
   province?: string;
   classification?: TerritorialResolution['planning']['classification'];
+  classificationResolution?: ClassificationResolution;
+  officialLinks?: OfficialResourceLink[];
   areas: string[];
   instrument?: string;
   affects: Array<{ category: string; name: string; confidence: string }>;
@@ -72,6 +77,12 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     ...result.conflicts.map((conflict) => conflict.reason),
     ...(effective?.planning.conflicts ?? result.planning.conflicts ?? []),
   ];
+  const classificationResolution = effective?.planning.classificationResolution
+    ? {
+        ...effective.planning.classificationResolution,
+        officialLinks: officialResourceLinks(effective),
+      }
+    : undefined;
   const territorialContextComplete = Boolean(
     effective?.status === 'confirmed' &&
       effective.municipality?.trim() &&
@@ -81,9 +92,13 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       effective.planning.classification?.label.trim()
   );
   const status =
-    conflicts.length || result.planning.status === 'conflict'
+    result.conflicts.length ||
+    (!classificationResolution && (effective?.planning.status ?? result.planning.status) === 'conflict')
       ? 'conflict'
-      : manual || result.continuity?.usingPreviousOfficialContext || incompleteSource
+      : manual ||
+          result.continuity?.usingPreviousOfficialContext ||
+          incompleteSource ||
+          Boolean(classificationResolution && classificationResolution.status !== 'clear')
         ? 'provisional'
       : territorialContextComplete
         ? 'confirmed'
@@ -133,6 +148,8 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
             sourceFeatureIds: [],
           }
         : undefined),
+    classificationResolution,
+    officialLinks: effective ? officialResourceLinks(effective) : [],
     areas:
       effective?.planning.areas?.map((area) => area.name) ?? (manual?.area ? [manual.area] : []),
     instrument: effective?.planning.instrument,

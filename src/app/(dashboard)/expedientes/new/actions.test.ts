@@ -286,4 +286,80 @@ describe('createExpediente smart preflight', () => {
     }))
     errorSpy.mockRestore()
   })
+
+  it('persists a reviewed manual selection separately from the automatic evidence', async () => {
+    const candidate = {
+      id: 'official-layer:SU|SUC',
+      classification: {
+        code: 'SU',
+        categoryCode: 'SUC',
+        label: 'Suelo urbano',
+        sourceFeatureIds: ['feature-1'],
+      },
+      areas: [{ type: 'zone' as const, name: 'Zona oficial', sourceFeatureIds: ['feature-1'] }],
+      source: 'siotuga' as const,
+      evidence: [],
+      confidence: 'medium' as const,
+      evidenceBasis: 'parcel_geometry' as const,
+      instrumentTraceability: 'pending' as const,
+      normalizationStatus: 'mapped' as const,
+    }
+    const reviewResult: TerritorialResolution = {
+      ...result,
+      planning: {
+        ...result.planning,
+        classification: undefined,
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [candidate],
+          discrepancies: [],
+          reviewReasons: ['instrument_traceability_pending'],
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'La capa requiere revisión.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          },
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+      },
+    }
+    const detectionId = storePreflightDetection(
+      'user-a',
+      summarizeSmartCaseDetection(reviewResult)
+    )
+    const manual = form(detectionId)
+    manual.set('classificationCandidateId', candidate.id)
+    manual.set('classificationSelectionReason', 'Comprobado en el visor oficial por el técnico.')
+    manual.set('urbanPlanningZone', 'Zona oficial')
+
+    await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
+      'NEXT_REDIRECT'
+    )
+
+    expect(mocks.values).toHaveBeenCalledWith(
+      expect.objectContaining({ landClass: 'urbano_consolidado', urbanPlanningZone: 'Zona oficial' })
+    )
+    expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({
+        planning: expect.objectContaining({
+          classification: undefined,
+          classificationResolution: expect.objectContaining({
+            proposal: expect.objectContaining({ candidateId: candidate.id }),
+            finalSelection: expect.objectContaining({
+              origin: 'manual',
+              candidateId: candidate.id,
+              operationalValue: 'urbano_consolidado',
+              reason: 'Comprobado en el visor oficial por el técnico.',
+            }),
+          }),
+        }),
+      })
+    )
+  })
 })

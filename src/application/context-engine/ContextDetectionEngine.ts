@@ -18,8 +18,14 @@ import { CatastroOfficialAdapter } from '@/infrastructure/territorial-resolver/C
 import { CartoCiudadOfficialAdapter } from '@/infrastructure/territorial-resolver/CartoCiudadOfficialAdapter'
 import { DatabasePlanningAdapter } from '@/infrastructure/territorial-resolver/DatabasePlanningAdapter'
 import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/BetanzosPlanningAdapter'
+import { SiotugaClassificationAdapter } from '@/infrastructure/territorial-resolver/SiotugaClassificationAdapter'
 import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
-import { getMunicipalityByName, getProvinceByName } from '@/shared/territory'
+import {
+  getMunicipalityByName,
+  getProvinceById,
+  getProvinceByMunicipalityIneCode,
+  getProvinceByName,
+} from '@/shared/territory'
 import { territorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
@@ -35,7 +41,9 @@ function officialResolver(): Resolver {
   const dependencies = {
     catastro: new CatastroOfficialAdapter(),
     geocoder: new CartoCiudadOfficialAdapter(),
-    planning: new BetanzosPlanningAdapter(new DatabasePlanningAdapter()),
+    planning: new SiotugaClassificationAdapter(
+      new BetanzosPlanningAdapter(new DatabasePlanningAdapter())
+    ),
     affects: new IdegAffectAdapter(),
   }
   return (input) => resolveParcelLocation(input, dependencies)
@@ -44,8 +52,11 @@ function officialResolver(): Resolver {
 function detectionSummary(result: TerritorialResolution) {
   const effective = officialContextForUse(result)
   const manual = result.continuity?.manualContext
-  const province = getProvinceByName(effective?.province ?? '')
   const municipality = getMunicipalityByName(effective?.municipality ?? '')
+  const province =
+    getProvinceByMunicipalityIneCode(effective?.municipalityCode) ??
+    (municipality ? getProvinceById(municipality.provinceId) : undefined) ??
+    getProvinceByName(effective?.province ?? '')
   const landClass =
     effective?.planning.classification?.code === 'SU'
       ? 'urbano'

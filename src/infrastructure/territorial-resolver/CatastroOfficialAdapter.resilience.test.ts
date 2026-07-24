@@ -68,7 +68,7 @@ describe('CatastroOfficialAdapter resilience', () => {
       '8424001NJ4082S'
     )
 
-    expect(result?.municipality).toBe('BETANZOS')
+    expect(result?.municipality).toBe('Betanzos')
     expect(result?.sourceChecks).toContainEqual(
       expect.objectContaining({ source: 'catastro', status: 'partial' })
     )
@@ -110,7 +110,7 @@ describe('CatastroOfficialAdapter resilience', () => {
       '8424001NJ4082S'
     )
 
-    expect(result?.municipality).toBe('BETANZOS')
+    expect(result?.municipality).toBe('Betanzos')
     expect(result?.geometry).toBeUndefined()
     expect(result?.sourceChecks).toContainEqual(
       expect.objectContaining({ source: 'catastro', status: 'partial' })

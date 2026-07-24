@@ -25,7 +25,8 @@ function resolution(overrides: Partial<TerritorialResolution> = {}): Territorial
       instrument: 'PXOM de Culleredo',
       classification: { code: 'SU', label: 'Suelo urbano', sourceFeatureIds: ['zone-1'] },
       evidence: [
-        { source: 'siotuga', sourceUrl: 'https://official.test/siotuga', retrievedAt: '2026-07-21T00:00:00Z', method: 'fixture' },
+        { source: 'siotuga', sourceUrl: 'https://official.test/siotuga/instrument', retrievedAt: '2026-07-21T00:00:00Z', method: 'catálogo oficial', scope: 'planning_instrument' },
+        { source: 'siotuga', sourceUrl: 'https://official.test/siotuga/classification', retrievedAt: '2026-07-21T00:00:00Z', method: 'WFS oficial', scope: 'planning_classification' },
       ],
       warnings: [],
     },
@@ -62,5 +63,115 @@ describe('territorial field confirmations', () => {
       planning: 'pending',
       classification: 'pending',
     })
+  })
+
+  it('confirma el instrumento parcial de Betanzos sin confirmar clasificación ni detalles no resueltos', () => {
+    const confirmations = territorialFieldConfirmations(resolution({
+      municipality: 'Betanzos',
+      municipalityCode: '15009',
+      planning: {
+        status: 'partial',
+        instrument: 'Texto refundido de la revisión de las Normas Subsidiarias de Planeamiento',
+        evidence: [
+          {
+            source: 'siotuga',
+            sourceUrl: 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=15009',
+            retrievedAt: '2026-07-21T00:00:00Z',
+            method: 'registro municipal versionado',
+            scope: 'planning_instrument',
+          },
+        ],
+        warnings: [],
+      },
+    }))
+
+    expect(confirmations.planning).toBe('confirmed')
+    expect(confirmations.classification).toBe('pending')
+  })
+
+  it('mantiene la abstención espacial de Betanzos aunque su instrumento actual esté confirmado por separado', () => {
+    const instrument = 'Texto refundido de la revisión de las Normas Subsidiarias de Planeamiento'
+    const confirmations = territorialFieldConfirmations(resolution({
+      municipality: 'Betanzos',
+      municipalityCode: '15009',
+      planning: {
+        status: 'conflict',
+        instrument,
+        applicableInstruments: [
+          {
+            id: '22221',
+            name: instrument,
+            kind: 'Normas Subsidiarias de Planeamiento',
+            status: 'current',
+            sourceUrl: 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=15009',
+          },
+        ],
+        evidence: [
+          {
+            source: 'siotuga',
+            sourceUrl: 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=15009',
+            retrievedAt: '2026-07-21T00:00:00Z',
+            method: 'registro municipal versionado',
+            scope: 'planning_instrument',
+          },
+        ],
+        conflicts: ['La geometría intersecta clasificaciones incompatibles.'],
+        warnings: [],
+      },
+    }))
+
+    expect(confirmations.planning).toBe('confirmed')
+    expect(confirmations.classification).toBe('pending')
+  })
+
+  it.each([
+    {
+      name: 'instrumento sin evidencia oficial',
+      planning: { status: 'partial' as const, instrument: 'PXOM', evidence: [], warnings: [] },
+    },
+    {
+      name: 'estado no determinado',
+      planning: {
+        status: 'not_determined' as const,
+        instrument: 'PXOM',
+        evidence: [{ source: 'siotuga' as const, sourceUrl: 'https://official.test', retrievedAt: '2026-07-21T00:00:00Z', method: 'catálogo', scope: 'planning_instrument' as const }],
+        warnings: [],
+      },
+    },
+    {
+      name: 'conflicto sin instrumento current independiente',
+      planning: {
+        status: 'conflict' as const,
+        instrument: 'PXOM',
+        evidence: [{ source: 'siotuga' as const, sourceUrl: 'https://official.test', retrievedAt: '2026-07-21T00:00:00Z', method: 'catálogo', scope: 'planning_instrument' as const }],
+        warnings: [],
+      },
+    },
+    {
+      name: 'evidencia SIOTUGA sólo de clasificación',
+      planning: {
+        status: 'partial' as const,
+        instrument: 'PXOM',
+        evidence: [{ source: 'siotuga' as const, sourceUrl: 'https://official.test', retrievedAt: '2026-07-21T00:00:00Z', method: 'WFS', scope: 'planning_classification' as const }],
+        warnings: [],
+      },
+    },
+    {
+      name: 'instrumento vacío',
+      planning: {
+        status: 'partial' as const,
+        instrument: '   ',
+        evidence: [{ source: 'siotuga' as const, sourceUrl: 'https://official.test', retrievedAt: '2026-07-21T00:00:00Z', method: 'catálogo', scope: 'planning_instrument' as const }],
+        warnings: [],
+      },
+    },
+  ])('deja pendiente $name', ({ planning }) => {
+    expect(territorialFieldConfirmations(resolution({ planning })).planning).toBe('pending')
+  })
+
+  it('rechaza de forma cerrada un estado futuro desconocido', () => {
+    const result = resolution()
+    result.planning.status = 'future_status' as typeof result.planning.status
+    expect(territorialFieldConfirmations(result).planning).toBe('pending')
   })
 })

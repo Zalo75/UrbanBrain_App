@@ -78,8 +78,6 @@ function detectionMismatchField(
   if (expected.address && input.address !== expected.address) return 'address'
   if (expected.lat !== undefined && input.lat !== expected.lat) return 'coordinates'
   if (expected.lng !== undefined && input.lng !== expected.lng) return 'coordinates'
-  if (expected.planeamiento && input.planeamiento !== expected.planeamiento) return 'planeamiento'
-  if (expected.landClass && input.landClass !== expected.landClass) return 'landClass'
   return 'territorialContext'
 }
 
@@ -159,6 +157,8 @@ export async function createExpediente(
   const landClass = LAND_CLASS_OPTIONS.some((option) => option.value === landClassRaw)
     ? landClassRaw as (typeof LAND_CLASS_OPTIONS)[number]['value']
     : null
+  const classificationCandidateId = formText(formData, 'classificationCandidateId')
+  const classificationSelectionReason = formText(formData, 'classificationSelectionReason')
   const actionTypeRaw = formText(formData, 'actionType')
   const actionType = actionTypeRaw || null
   const notes = formText(formData, 'notes')
@@ -244,16 +244,7 @@ export async function createExpediente(
   if (!preflight && (landClass || urbanPlanningZone)) {
     return creationError('La clasificación o el ámbito deben proceder de una detección territorial verificada. Actualice el análisis antes de crear el expediente.', 'territorialContext')
   }
-  if (preflight && !preflight.detected.planeamiento && planeamiento) {
-    return creationError('El planeamiento no ha quedado determinado por la detección territorial actual. Déjelo pendiente o actualice el análisis.', 'planeamiento')
-  }
-  if (preflight && !preflight.detected.landClass && landClass) {
-    return creationError('La clasificación no ha quedado determinada por la detección territorial actual. Déjela pendiente o actualice el análisis.', 'landClass')
-  }
-  if (preflight && !preflight.detected.urbanPlanningZone && urbanPlanningZone) {
-    return creationError('El ámbito no ha quedado determinado por la detección territorial actual. Déjelo pendiente o actualice el análisis.', 'territorialContext')
-  }
-  if (!preflight?.detected.planeamiento && planeamiento) {
+  if (planeamiento && planeamiento !== preflight?.detected.planeamiento) {
     try {
       const rows = await db
         .select({ name: municipalPlanning.name })
@@ -275,6 +266,53 @@ export async function createExpediente(
   }
   if (!landClass && landClassRaw) {
     return creationError('La clasificación seleccionada no es válida. Elija una opción de la lista.', 'landClass')
+  }
+  if (!cached && preflight && !preflight.detected.planeamiento && planeamiento) {
+    return creationError(
+      'El planeamiento anterior no ha podido verificarse en la nueva consulta. Selecciónelo de nuevo o déjelo pendiente.',
+      'planeamiento'
+    )
+  }
+  if (
+    !cached &&
+    preflight &&
+    !preflight.result.planning.classificationResolution &&
+    ((!preflight.detected.landClass && landClass) ||
+      (!preflight.detected.urbanPlanningZone && urbanPlanningZone))
+  ) {
+    return creationError(
+      'La clasificación o el ámbito anteriores no han podido verificarse en la nueva consulta. Revise la selección.',
+      'landClass'
+    )
+  }
+
+  const classificationResolution = preflight?.result.planning.classificationResolution
+  const selectedCandidate = classificationResolution?.candidates.find(
+    (candidate) => candidate.id === classificationCandidateId
+  )
+  if (classificationCandidateId && !selectedCandidate) {
+    return creationError(
+      'La evidencia de clasificación seleccionada ya no pertenece al análisis actual. Actualice la detección.',
+      'landClass'
+    )
+  }
+  const automaticLandClass = preflight?.detected.landClass ?? null
+  const automaticZone = preflight?.detected.urbanPlanningZone ?? ''
+  const manualClassificationSelection = Boolean(
+    classificationResolution &&
+      ((landClass && landClass !== automaticLandClass) ||
+        (urbanPlanningZone && urbanPlanningZone !== automaticZone) ||
+        classificationResolution.status !== 'clear')
+  )
+  if (
+    manualClassificationSelection &&
+    (landClass || urbanPlanningZone) &&
+    !classificationSelectionReason
+  ) {
+    return creationError(
+      'Indique brevemente el criterio utilizado para la selección manual de clasificación o ámbito.',
+      'landClass'
+    )
   }
 
   const canonical = preflight?.detected
@@ -302,8 +340,8 @@ export async function createExpediente(
         ? [canonicalCoordinates.lng, canonicalCoordinates.lat]
         : null,
       locationSource: canonical?.locationSource ?? (canonicalCoordinates.lat !== null ? 'coordinates' : canonicalAddress ? 'address' : 'manual'),
-      urbanPlanningZone: preflight ? preflight.detected.urbanPlanningZone ?? null : urbanPlanningZone || null,
-      landClass: preflight ? preflight.detected.landClass ?? null : landClass,
+      urbanPlanningZone: urbanPlanningZone || null,
+      landClass,
       actionType: actionType as typeof expedientes.$inferInsert.actionType,
       notes: notes || null,
       planeamiento: preflight ? preflight.detected.planeamiento ?? null : planeamiento || null,
@@ -315,7 +353,35 @@ export async function createExpediente(
     let territorialContextPending = false
     try {
       if (preflight) {
-        if (!await engine.persistAuthorizedDetection(newExpedienteId, userId, preflight.result)) {
+        const resultForPersistence = classificationResolution
+          ? {
+              ...preflight.result,
+              planning: {
+                ...preflight.result.planning,
+                classificationResolution: {
+                  ...classificationResolution,
+                  finalSelection:
+                    manualClassificationSelection && (landClass || urbanPlanningZone)
+                      ? {
+                          origin: 'manual' as const,
+                          candidateId: selectedCandidate?.id,
+                          classificationCode: selectedCandidate?.classification.code,
+                          categoryCode: selectedCandidate?.classification.categoryCode,
+                          operationalValue: landClass ?? undefined,
+                          areaNames: urbanPlanningZone ? [urbanPlanningZone] : [],
+                          reason: classificationSelectionReason,
+                          selectedAt: new Date().toISOString(),
+                          selectedBy: userId,
+                          technicianValidated: false,
+                          resolutionFingerprint:
+                            formText(formData, 'preflightDetectionId') || undefined,
+                        }
+                      : classificationResolution.automaticSelection,
+                },
+              },
+            }
+          : preflight.result
+        if (!await engine.persistAuthorizedDetection(newExpedienteId, userId, resultForPersistence)) {
           throw new Error('territorial_context_not_persisted')
         }
       } else {
@@ -398,6 +464,9 @@ export async function detectContextAction(formData: FormData) {
       progress: detection.progress,
       sourceChecks: detection.sourceChecks,
       affects: detection.affects,
+      ...(detection.classificationResolution
+        ? { classificationResolution: detection.classificationResolution }
+        : {}),
     }
     return { detectionId, detection: clientDetection }
   } catch {

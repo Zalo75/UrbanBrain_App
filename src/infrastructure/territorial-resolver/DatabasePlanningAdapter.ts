@@ -71,6 +71,7 @@ export class DatabasePlanningAdapter implements PlanningPort {
           sourceUrl: planning.sourceUrl!,
           retrievedAt: new Date().toISOString(),
           method: 'catálogo de planeamiento municipal',
+          scope: 'planning_instrument',
         },
       ],
       warnings: [],

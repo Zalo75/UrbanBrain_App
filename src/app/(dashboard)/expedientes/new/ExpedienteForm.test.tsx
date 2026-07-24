@@ -115,7 +115,7 @@ describe('ExpedienteForm', () => {
     expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe('')
     expect((screen.getByLabelText(/Planeamiento general/i) as HTMLSelectElement).value).toBe('')
     expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('')
-    expect(document.querySelector('input[name="urbanPlanningZone"]')).toBeNull()
+    expect((document.querySelector('input[name="urbanPlanningZone"]') as HTMLInputElement).value).toBe('')
     expect(screen.queryByText(/Ámbito detectado/i)).toBeNull()
     expect((screen.getByRole('button', { name: /Crear expediente/i }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/El contexto territorial anterior ya no se utilizará/i)).toBeTruthy()
@@ -205,6 +205,44 @@ describe('ExpedienteForm', () => {
     await waitFor(() => expect((screen.getByLabelText(/^Municipio/) as HTMLSelectElement).value).toBe('culleredo'))
   })
 
+  it('replaces a derived province when the next official parcel belongs to another province', async () => {
+    vi.mocked(detectContextAction)
+      .mockResolvedValueOnce({
+        detectionId: '00000000-0000-4000-8000-000000000012',
+        detection: { detected: { cadastralReference: '15009A01300255', provinceId: 'a_coruna', municipalityId: 'betanzos' }, progress: [], sourceChecks: [], affects: [] },
+      })
+      .mockResolvedValueOnce({
+        detectionId: '00000000-0000-4000-8000-000000000013',
+        detection: { detected: { cadastralReference: '27028000000000', provinceId: 'lugo', municipalityId: 'lugo' }, progress: [], sourceChecks: [], affects: [] },
+      })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    const reference = screen.getByLabelText(/Referencia catastral/i)
+    const province = screen.getByLabelText(/^Provincia/) as HTMLSelectElement
+
+    fireEvent.change(reference, { target: { value: '15009A01300255' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+    await waitFor(() => expect(province.value).toBe('a_coruna'))
+
+    fireEvent.change(reference, { target: { value: '27028000000000' } })
+    expect(province.value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: /actualizar análisis/i }))
+    await waitFor(() => expect(province.value).toBe('lugo'))
+  })
+
+  it('overrides a contradictory manual province with the official province derived from the INE', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000014',
+      detection: { detected: { cadastralReference: '7709702NH4970N0001SZ', provinceId: 'a_coruna', municipalityId: 'culleredo' }, progress: [], sourceChecks: [], affects: [] },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    const province = screen.getByLabelText(/^Provincia/) as HTMLSelectElement
+    fireEvent.change(province, { target: { value: 'lugo' } })
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '7709702NH4970N0001SZ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => expect(province.value).toBe('a_coruna'))
+  })
+
   it('discards a stale analysis response after the user changes the cadastral reference', async () => {
     let resolveDetection: ((value: Awaited<ReturnType<typeof detectContextAction>>) => void) | undefined
     vi.mocked(detectContextAction).mockImplementation(() => new Promise((resolve) => {
@@ -213,6 +251,8 @@ describe('ExpedienteForm', () => {
 
     render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
     const reference = screen.getByLabelText(/Referencia catastral/i) as HTMLInputElement
+    const province = screen.getByLabelText(/^Provincia/) as HTMLSelectElement
+    fireEvent.change(province, { target: { value: 'lugo' } })
     fireEvent.change(reference, { target: { value: '7709702NH4970N0001SZ' } })
     fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
     fireEvent.change(reference, { target: { value: '7709702NH4970N0002SZ' } })
@@ -222,6 +262,7 @@ describe('ExpedienteForm', () => {
       detection: {
         detected: {
           cadastralReference: '7709702NH4970N0001SZ',
+          provinceId: 'a_coruna',
           municipalityId: 'culleredo',
           planeamiento: 'Plan antiguo',
         },
@@ -234,5 +275,86 @@ describe('ExpedienteForm', () => {
     await waitFor(() => expect(reference.value).toBe('7709702NH4970N0002SZ'))
     expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe('')
     expect((screen.getByLabelText(/Planeamiento general/i) as HTMLSelectElement).value).toBe('')
+    expect(province.value).toBe('lugo')
+  })
+
+  it('preselects a review proposal without presenting it as confirmed and keeps manual controls', async () => {
+    const candidate = {
+      id: 'oleiros-layer:SU|SUC',
+      classification: {
+        code: 'SU',
+        categoryCode: 'SUC',
+        label: 'Suelo urbano',
+        sourceFeatureIds: ['feature-1'],
+      },
+      areas: [{ type: 'zone' as const, name: 'Ámbito oficial', sourceFeatureIds: ['feature-1'] }],
+      source: 'siotuga' as const,
+      evidence: [],
+      confidence: 'medium' as const,
+      evidenceBasis: 'parcel_geometry' as const,
+      instrumentTraceability: 'pending' as const,
+      normalizationStatus: 'mapped' as const,
+    }
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000100',
+      detection: {
+        detected: {
+          cadastralReference: '3995302NH5939N0001HQ',
+          provinceId: 'a_coruna',
+          municipalityId: 'culleredo',
+          planeamiento: 'Plan general trazable',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [candidate],
+          discrepancies: [
+            {
+              reason: 'instrument_traceability_pending',
+              field: 'instrument',
+              explanation: 'La capa y el instrumento requieren comprobación documental.',
+              assertions: [],
+            },
+          ],
+          reviewReasons: ['instrument_traceability_pending'],
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'La geometría es la evidencia disponible más fiable.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          },
+          sourceChecks: [],
+          officialLinks: [
+            {
+              kind: 'catastro_viewer',
+              label: 'Ver en Catastro',
+              url: 'https://www1.sedecatastro.gob.es/Cartografia/mapa.aspx?refcat=3995302NH5939N0001HQ',
+              source: 'catastro',
+              scope: 'parcel',
+            },
+          ],
+          evidence: [],
+        },
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '3995302NH5939N0001HQ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await screen.findByText(/requiere revisión profesional/i)
+    expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe(
+      'urbano_consolidado'
+    )
+    expect((screen.getByLabelText(/Ámbito o zona/i) as HTMLInputElement).value).toBe(
+      'Ámbito oficial'
+    )
+    expect(screen.getByLabelText(/Motivo de la selección manual/i)).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Ver en Catastro/i })).toBeTruthy()
+    expect(screen.queryByText(/^Confirmado$/i)).toBeNull()
   })
 })

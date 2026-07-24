@@ -28,8 +28,11 @@ function resolution(overrides: Partial<TerritorialResolution> = {}): Territorial
     planning: {
       status: 'determined',
       instrument: 'Plan general trazable',
-      classification: { code: 'SU', label: 'Suelo urbano', sourceFeatureIds: ['class-1'] },
-      evidence: [],
+      classification: { code: 'SU', categoryCode: 'SUSC', label: 'Suelo urbano', sourceFeatureIds: ['class-1'] },
+      evidence: [
+        { source: 'siotuga', sourceUrl: 'https://official.test/instrument', retrievedAt: '2026-07-20T00:00:00.000Z', method: 'catálogo oficial', scope: 'planning_instrument' },
+        { source: 'siotuga', sourceUrl: 'https://official.test/classification', retrievedAt: '2026-07-20T00:00:00.000Z', method: 'WFS oficial', scope: 'planning_classification' },
+      ],
       warnings: [],
     },
     affects: {
@@ -54,6 +57,30 @@ describe('smart case detection', () => {
       cadastralReference: '7709702NH4970N0001SZ',
       parcelReference: '7709702NH4970N',
     })
+  })
+
+  it.each(['15009', '15031'])('confirma A Coruña desde el prefijo del INE %s aunque falte el texto provincial', (municipalityCode) => {
+    const detected = summarizeSmartCaseDetection(resolution({
+      municipalityCode,
+      province: undefined,
+    }))
+
+    expect(detected.detected.provinceId).toBe('a_coruna')
+    expect(detected.progress.find((item) => item.id === 'province')).toMatchObject({
+      status: 'success',
+      detail: 'A Coruña',
+    })
+  })
+
+  it('usa la provincia oficial textual como respaldo cuando el INE no es válido', () => {
+    const detected = summarizeSmartCaseDetection(resolution({
+      municipality: undefined,
+      municipalityCode: '1503',
+      province: 'A Coruña',
+    }))
+
+    expect(detected.detected.provinceId).toBe('a_coruna')
+    expect(detected.progress.find((item) => item.id === 'province')).toMatchObject({ status: 'success' })
   })
 
   it('filtra el selector municipal por provincia y rechaza combinaciones incompatibles', () => {
@@ -97,7 +124,7 @@ describe('smart case detection', () => {
     expect(detected.progress.some((item) => /validada|oficial/i.test(item.label))).toBe(false)
   })
 
-  it('acepta clasificaciones normalizadas manuales y bloquea valores del resultado alterados', () => {
+  it('mantiene editables los valores urbanísticos sin permitir alterar la localización resuelta', () => {
     const detected = summarizeSmartCaseDetection(resolution())
     expect(validateSmartCaseSubmission({
       provinceId: 'a_coruna', municipalityId: 'culleredo', cadastralReference: '7709702NH4970N0001SZ',
@@ -108,6 +135,58 @@ describe('smart case detection', () => {
       provinceId: 'a_coruna', municipalityId: 'culleredo', cadastralReference: '7709702NH4970N0001SZ',
       address: 'LG LEDOÑO CULLEREDO (A CORUÑA)', lat: 43.316, lng: -8.336,
       planeamiento: 'Valor alterado', landClass: 'urbano_consolidado',
+    }, detected)).toBeNull()
+    expect(validateSmartCaseSubmission({
+      provinceId: 'a_coruna', municipalityId: 'culleredo', cadastralReference: '7709702NH4970N0001SZ',
+      address: 'Otra localización', lat: 43.316, lng: -8.336,
+      planeamiento: 'Plan general trazable', landClass: 'urbano_consolidado',
     }, detected)).toBe('detection_mismatch')
+  })
+
+  it('muestra por separado el instrumento confirmado y la clasificación pendiente de Betanzos', () => {
+    const detected = summarizeSmartCaseDetection(resolution({
+      municipality: 'Betanzos',
+      municipalityCode: '15009',
+      planning: {
+        status: 'partial',
+        instrument: 'Texto refundido de las Normas Subsidiarias',
+        evidence: [{ source: 'siotuga', sourceUrl: 'https://official.test/betanzos', retrievedAt: '2026-07-20T00:00:00.000Z', method: 'registro municipal', scope: 'planning_instrument' }],
+        warnings: [],
+      },
+    }))
+
+    expect(detected.progress.find((item) => item.id === 'planning')).toMatchObject({ status: 'success' })
+    expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'not_determined' })
+    expect(detected.detected.planeamiento).toBe('Texto refundido de las Normas Subsidiarias')
+    expect(detected.detected.landClass).toBeUndefined()
+    expect(detected.detected.urbanPlanningZone).toBeUndefined()
+  })
+
+  it('mantiene Culleredo confirmado con SU normalizado y el código oficial SUSC trazable', () => {
+    const detected = summarizeSmartCaseDetection(resolution())
+
+    expect(detected.progress.find((item) => item.id === 'planning')).toMatchObject({ status: 'success' })
+    expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'success' })
+    expect(detected.detected.landClass).toBe('urbano_consolidado')
+    expect(detected.result.planning.classification?.categoryCode).toBe('SUSC')
+  })
+
+  it('confirma sólo el instrumento catalogado de Oleiros y mantiene desactivada la clasificación', () => {
+    const detected = summarizeSmartCaseDetection(resolution({
+      cadastralReference: '3995302NH5939N0001HQ',
+      parcelReference: '3995302NH5939N',
+      municipality: 'Oleiros',
+      municipalityCode: '15058',
+      planning: {
+        status: 'determined',
+        instrument: 'Plan general de ordenación municipal',
+        evidence: [{ source: 'siotuga', sourceUrl: 'https://official.test/oleiros', retrievedAt: '2026-07-20T00:00:00.000Z', method: 'catálogo oficial', scope: 'planning_instrument' }],
+        warnings: [{ code: 'planning_classification_pending_traceability', message: 'Capa no activada' }],
+      },
+    }))
+
+    expect(detected.progress.find((item) => item.id === 'planning')).toMatchObject({ status: 'success' })
+    expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'not_determined' })
+    expect(detected.detected.landClass).toBeUndefined()
   })
 })

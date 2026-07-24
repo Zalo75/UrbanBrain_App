@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel'
 import type { Municipality, Province } from '@/shared/territory'
+import type { ClassificationCandidate } from '@/domain/territorial-resolver/types'
 
 import {
   createExpediente,
@@ -19,6 +21,7 @@ import {
 import { initialCreateExpedienteState, type CreateExpedienteState } from './creationState'
 import {
   LAND_CLASS_OPTIONS,
+  landClassFromCandidate,
   municipalitiesForProvince,
   type DetectionProgressItem,
   type SmartCaseDetection,
@@ -128,6 +131,7 @@ function ProgressPanel({
 export function ExpedienteForm({ provinces, municipalities }: { provinces: Province[]; municipalities: Municipality[] }) {
   const [name, setName] = useState('')
   const [selectedProvince, setSelectedProvince] = useState('a_coruna')
+  const [provinceSelectionOrigin, setProvinceSelectionOrigin] = useState<'fallback' | 'manual' | 'derived'>('fallback')
   const [selectedMunicipality, setSelectedMunicipality] = useState('')
   const [refCatastral, setRefCatastral] = useState('')
   const [address, setAddress] = useState('')
@@ -136,6 +140,8 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   const [planeamiento, setPlaneamiento] = useState('')
   const [landClass, setLandClass] = useState('')
   const [urbanPlanningZone, setUrbanPlanningZone] = useState('')
+  const [selectedClassificationCandidateId, setSelectedClassificationCandidateId] = useState('')
+  const [classificationSelectionReason, setClassificationSelectionReason] = useState('')
   const [actionType, setActionType] = useState('')
   const [notes, setNotes] = useState('')
   const [contextNoticeAccepted, setContextNoticeAccepted] = useState(false)
@@ -202,10 +208,16 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     if (hadDetection) {
       setDetectionInvalidated(true)
       setSelectedMunicipality('')
+      if (provinceSelectionOrigin === 'derived') {
+        setSelectedProvince('')
+        setProvinceSelectionOrigin('fallback')
+      }
     }
     setPlaneamiento('')
     setLandClass('')
     setUrbanPlanningZone('')
+    setSelectedClassificationCandidateId('')
+    setClassificationSelectionReason('')
     setDetection(null)
     setDetectionId('')
   }
@@ -288,14 +300,29 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       setDetectionInvalidated(false)
       setTerritorialInputSource(values.locationSource ?? source)
       if (values.cadastralReference) setRefCatastral(values.cadastralReference)
-      if (values.provinceId) setSelectedProvince(values.provinceId)
+      if (values.provinceId && (provinceSelectionOrigin !== 'manual' || selectedProvince !== values.provinceId)) {
+        setSelectedProvince(values.provinceId)
+        setProvinceSelectionOrigin('derived')
+      }
       if (values.municipalityId) setSelectedMunicipality(values.municipalityId)
       if (values.address) setAddress(values.address)
       if (values.lat !== undefined) setLat(String(values.lat))
       if (values.lng !== undefined) setLng(String(values.lng))
       setPlaneamiento(values.planeamiento ?? '')
-      setLandClass(values.landClass ?? '')
-      setUrbanPlanningZone(values.urbanPlanningZone ?? '')
+      const classificationResolution = result.detection.classificationResolution
+      const suggestedCandidateId =
+        classificationResolution?.automaticSelection?.candidateId ??
+        classificationResolution?.proposal?.candidateId
+      const suggestedCandidate = classificationResolution?.candidates.find(
+        (candidate) => candidate.id === suggestedCandidateId
+      )
+      setLandClass(values.landClass ?? landClassFromCandidate(suggestedCandidate) ?? '')
+      setUrbanPlanningZone(
+        values.urbanPlanningZone ??
+          (suggestedCandidate?.areas.length === 1 ? suggestedCandidate.areas[0].name : '')
+      )
+      setSelectedClassificationCandidateId(suggestedCandidateId ?? '')
+      setClassificationSelectionReason('')
       toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
     } catch {
       if (requestId !== latestDetectionRequest.current || requestRevision !== territorialRevision.current) return
@@ -305,12 +332,25 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     }
   }
 
+  function selectClassificationCandidate(candidate: ClassificationCandidate) {
+    const candidateLandClass = landClassFromCandidate(candidate)
+    setSelectedClassificationCandidateId(candidate.id)
+    setLandClass(candidateLandClass ?? '')
+    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
+    setClassificationSelectionReason('')
+    if (!candidateLandClass) {
+      toast.info(
+        'El código oficial se conserva como evidencia, pero no tiene una equivalencia automática segura. Seleccione manualmente el valor operativo.'
+      )
+    }
+  }
+
   return (
     <form action={createAction} className="space-y-8" aria-busy={isCreating}>
       <input type="hidden" name="preflightDetectionId" value={detectionId} />
       <input type="hidden" name="territorialDetectionInvalidated" value={detectionInvalidated ? 'true' : ''} />
       <input type="hidden" name="territorialInputSource" value={territorialInputSource ?? ''} />
-      {!detectionInvalidated && <input type="hidden" name="urbanPlanningZone" value={urbanPlanningZone} />}
+      <input type="hidden" name="classificationCandidateId" value={selectedClassificationCandidateId} />
 
       {createState.status === 'error' && (
         <div id="creation-error" role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
@@ -334,11 +374,13 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                  const provinceId = event.target.value
                  invalidateDetection('province')
                  setSelectedProvince(provinceId)
+                 setProvinceSelectionOrigin('manual')
                  if (selectedMunicipalityData?.provinceId !== provinceId) setSelectedMunicipality('')
                }}
               aria-invalid={createState.field === 'province'} aria-describedby={createState.field === 'province' ? 'creation-error' : undefined}
               className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'province' ? 'border-destructive' : ''}`}
             >
+              <option value="" disabled>Seleccione una provincia</option>
               {provinces.map((province) => <option key={province.id} value={province.id} disabled={!province.enabled}>{province.name}</option>)}
             </select>
           </div>
@@ -382,6 +424,13 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
           {detection?.detected.parcelReference && <p className="text-sm text-muted-foreground">Referencia parcelaria: <span className="font-mono">{detection.detected.parcelReference}</span></p>}
         </div>
         <ProgressPanel detection={detection} calculating={isDetecting} detectionInvalidated={detectionInvalidated} />
+        {detection?.classificationResolution && !detectionInvalidated && (
+          <ClassificationResolutionPanel
+            resolution={detection.classificationResolution}
+            selectedCandidateId={selectedClassificationCandidateId}
+            onSelectCandidate={selectClassificationCandidate}
+          />
+        )}
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="grid gap-3">
             <Label htmlFor="address" className="text-base font-medium">Dirección aproximada</Label>
@@ -407,11 +456,35 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         </div>
         <div className="grid gap-3">
           <Label htmlFor="landClass" className="text-base font-medium">Clasificación del suelo</Label>
-          <select id="landClass" name="landClass" value={landClass} onChange={(event) => setLandClass(event.target.value)} aria-invalid={createState.field === 'landClass'} aria-describedby={createState.field === 'landClass' ? 'creation-error' : undefined} className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'landClass' ? 'border-destructive' : ''}`}>
+          <select id="landClass" name="landClass" value={landClass} onChange={(event) => { setLandClass(event.target.value); setSelectedClassificationCandidateId('') }} aria-invalid={createState.field === 'landClass'} aria-describedby={createState.field === 'landClass' ? 'creation-error' : undefined} className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'landClass' ? 'border-destructive' : ''}`}>
             <option value="">Seleccionar si no se ha determinado</option>
             {LAND_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          {detection?.detected.urbanPlanningZone && <p className="text-sm text-muted-foreground">Ámbito detectado: {detection.detected.urbanPlanningZone}</p>}
+          <Label htmlFor="urbanPlanningZone" className="mt-2 text-sm font-medium">Ámbito o zona</Label>
+          <Input
+            id="urbanPlanningZone"
+            name="urbanPlanningZone"
+            value={urbanPlanningZone}
+            onChange={(event) => { setUrbanPlanningZone(event.target.value); setSelectedClassificationCandidateId('') }}
+            placeholder="Seleccione o introduzca el ámbito aplicable"
+          />
+          {detection?.classificationResolution &&
+            detection.classificationResolution.status !== 'clear' &&
+            landClass && (
+              <div className="grid gap-2">
+                <Label htmlFor="classificationSelectionReason" className="text-sm font-medium">
+                  Motivo de la selección manual
+                </Label>
+                <Textarea
+                  id="classificationSelectionReason"
+                  name="classificationSelectionReason"
+                  value={classificationSelectionReason}
+                  onChange={(event) => setClassificationSelectionReason(event.target.value)}
+                  placeholder="Indique brevemente la comprobación o criterio profesional utilizado."
+                  required
+                />
+              </div>
+            )}
         </div>
       </section>
 

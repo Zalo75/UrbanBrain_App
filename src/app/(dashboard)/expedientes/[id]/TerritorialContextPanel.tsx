@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -328,6 +329,31 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                     )}
                   </div>
                 </div>
+
+                {context.classificationResolution && (
+                  <ClassificationResolutionPanel
+                    resolution={context.classificationResolution}
+                    selectedCandidateId={
+                      context.classificationResolution.finalSelection?.candidateId ??
+                      context.classificationResolution.automaticSelection?.candidateId
+                    }
+                  />
+                )}
+                {!context.classificationResolution && (context.officialLinks?.length ?? 0) > 0 && (
+                  <div className="bg-background flex flex-wrap gap-3 rounded-lg border p-4 text-xs">
+                    {context.officialLinks?.map((link) => (
+                      <a
+                        key={`${link.kind}-${link.url}`}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
+                      >
+                        {link.label} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ))}
+                  </div>
+                )}
 
                 <div className="bg-background rounded-lg border p-4">
                   <h3 className="text-sm font-semibold">Afecciones positivas detectadas</h3>
