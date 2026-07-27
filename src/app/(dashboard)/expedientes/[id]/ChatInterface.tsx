@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, FileText, AlertCircle } from 'lucide-react';
+import { Send, FileText, AlertCircle, ArrowDown } from 'lucide-react';
+
+const BOTTOM_THRESHOLD_PX = 48;
 
 interface Message {
   role: 'user' | 'assistant';
@@ -32,11 +34,37 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const inFlightRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const autoScrollEnabledRef = useRef(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
+  const updateAutoScroll = useCallback((enabled: boolean) => {
+    autoScrollEnabledRef.current = enabled;
+    setAutoScrollEnabled(enabled);
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    updateAutoScroll(distanceToBottom <= BOTTOM_THRESHOLD_PX);
+  }, [updateAutoScroll]);
+
+  const handleScrollToLatest = useCallback(() => {
+    scrollToBottom('smooth');
+    updateAutoScroll(true);
+  }, [scrollToBottom, updateAutoScroll]);
 
   useEffect(() => {
     async function fetchHistory() {
@@ -74,6 +102,12 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
     }
   }, [expedienteId]);
 
+  useEffect(() => {
+    if (autoScrollEnabledRef.current) {
+      scrollToBottom('auto');
+    }
+  }, [error, loading, messages, scrollToBottom]);
+
   const handleSend = async () => {
     if (!input.trim() || inFlightRef.current) return;
 
@@ -83,6 +117,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
       return;
     }
     inFlightRef.current = true;
+    updateAutoScroll(true);
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
     setLoading(true);
@@ -122,8 +157,13 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
 
   return (
     <div className="bg-background flex h-full min-h-0 w-full flex-col overflow-hidden xl:flex-row">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r">
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r">
+        <div
+          ref={scrollContainerRef}
+          data-testid="chat-scroll-container"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+          onScroll={handleMessagesScroll}
+        >
           <div className="bg-muted max-w-[85%] rounded-lg p-3 text-sm break-words">
             Hola, soy UrbanBrain. ¿Qué necesitas saber sobre la normativa de este expediente?
           </div>
@@ -150,7 +190,23 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
               <span className="min-w-0 break-words">{error}</span>
             </div>
           )}
+
+          <div ref={messagesEndRef} aria-hidden="true" />
         </div>
+
+        {!autoScrollEnabled && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2 shadow-md"
+            onClick={handleScrollToLatest}
+          >
+            <ArrowDown className="h-4 w-4" />
+            Ir al último mensaje
+          </Button>
+        )}
+
         <div className="bg-background flex flex-shrink-0 flex-col gap-2 border-t p-3">
           <div className="flex items-center gap-2">
             <Input
@@ -169,6 +225,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
             />
             <Button
               size="icon"
+              aria-label="Enviar consulta"
               onClick={handleSend}
               disabled={loading || !input.trim()}
               className="flex-shrink-0 shadow-sm"
