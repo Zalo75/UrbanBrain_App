@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel';
 import { ParcelMap } from '@/components/maps/ParcelMap';
+import type { UrbanContextAttention } from './territorialPresentation';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -32,6 +33,7 @@ interface Props {
     lng?: number | null;
   };
   context: TerritorialContextView | null;
+  urbanContextAttention?: UrbanContextAttention | null;
 }
 
 const initialState: TerritorialResolutionActionState = { status: 'idle', message: '' };
@@ -48,23 +50,48 @@ function confidenceLabel(confidence: TerritorialContextView['confidence']) {
   return confidence === 'high' ? 'Alta' : confidence === 'medium' ? 'Media' : 'Baja';
 }
 
-export function TerritorialContextPanel({ expedienteId, initialInput, context }: Props) {
+export function TerritorialContextPanel({
+  expedienteId,
+  initialInput,
+  context,
+  urbanContextAttention,
+}: Props) {
   const router = useRouter();
   const action = resolveTerritorialContextAction.bind(null, expedienteId);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [manualOpen, setManualOpen] = useState(false);
+  const manualOrdinanceRef = useRef<HTMLInputElement>(null);
+  const shouldFocusManualZoneRef = useRef(false);
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
   }, [router, state.status]);
 
-  const status = context ? statusCopy[context.status] : statusCopy.undetermined;
+  useEffect(() => {
+    if (!manualOpen || !shouldFocusManualZoneRef.current) return;
+    shouldFocusManualZoneRef.current = false;
+    manualOrdinanceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    manualOrdinanceRef.current?.focus();
+  }, [manualOpen]);
+
+  const attention = urbanContextAttention ?? null;
+  const status = attention
+    ? {
+        label: attention.label,
+        className: 'bg-red-100 text-red-900 dark:bg-red-950/60 dark:text-red-200',
+      }
+    : context
+      ? statusCopy[context.status]
+      : statusCopy.undetermined;
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
   );
 
   return (
-    <details className="group border-b bg-zinc-50/70 dark:bg-zinc-950/30" open={!context}>
+    <details
+      className="group border-b bg-zinc-50/70 dark:bg-zinc-950/30"
+      open={!context || Boolean(attention)}
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <MapPinned className="text-muted-foreground h-4 w-4 shrink-0" />
@@ -162,6 +189,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                   <Input
                     id="territorial-manual-ordinance"
                     name="manualOrdinance"
+                    ref={manualOrdinanceRef}
                     defaultValue={context?.manualContext?.ordinance ?? ''}
                   />
                 </div>
@@ -280,6 +308,59 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
               </div>
             ) : (
               <>
+                {attention && (
+                  <section
+                    role="alert"
+                    aria-labelledby="urban-zone-attention-heading"
+                    className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+                      <div className="min-w-0 flex-1">
+                        <span className="inline-flex rounded-full bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-900 dark:bg-red-950/70 dark:text-red-100">
+                          {attention.label}
+                        </span>
+                        <h3 id="urban-zone-attention-heading" className="mt-2 text-sm font-semibold">
+                          {attention.kind === 'zone_pending'
+                            ? 'Zona urbanística no determinada'
+                            : 'Faltan datos urbanísticos necesarios'}
+                        </h3>
+                        <p className="mt-1 text-xs leading-relaxed">
+                          {attention.kind === 'zone_pending'
+                            ? 'No se ha podido obtener automáticamente la zona u ordenanza aplicable desde las fuentes oficiales disponibles.'
+                            : `No se han determinado: ${attention.missing.join(', ')}.`}
+                        </p>
+                        <p className="mt-2 text-xs leading-relaxed">
+                          Para obtener respuestas fiables sobre retranqueos, ocupación, edificabilidad,
+                          alturas, parcela mínima y usos, es necesario seleccionar o confirmar
+                          manualmente la ordenanza, calificación, ámbito o ficha correspondiente.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-3 w-full border-red-300 bg-background text-foreground sm:w-auto"
+                          onClick={() => {
+                            if (manualOpen) {
+                              manualOrdinanceRef.current?.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'center',
+                              });
+                              manualOrdinanceRef.current?.focus();
+                            } else {
+                              shouldFocusManualZoneRef.current = true;
+                              setManualOpen(true);
+                            }
+                          }}
+                        >
+                          Seleccionar zona urbanística
+                        </Button>
+                        <p className="mt-2 text-[11px]">
+                          Se abrirá el área de introducción manual existente para documentar el dato.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
                 {(context.usingPreviousOfficialContext || context.manualContext) && (
                   <div
                     role="status"
@@ -310,7 +391,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                   <div className="bg-background rounded-lg border p-3">
                     <p className="text-muted-foreground text-xs">Clasificación / categoría</p>
                     <p className="mt-1 text-sm font-medium">
-                      {context.classification?.label ?? 'No determinada'}
+                      {context.classification?.label ?? 'Clasificación no determinada'}
                     </p>
                     {context.classification?.categoryCode && (
                       <p className="mt-1 font-mono text-xs">
@@ -321,7 +402,7 @@ export function TerritorialContextPanel({ expedienteId, initialInput, context }:
                   <div className="bg-background rounded-lg border p-3">
                     <p className="text-muted-foreground text-xs">Planeamiento</p>
                     <p className="mt-1 text-sm font-medium">
-                      {context.instrument ?? 'No determinado'}
+                      {context.instrument ?? 'Planeamiento no determinado'}
                     </p>
                     {context.areas.length > 0 && (
                       <p className="text-muted-foreground mt-1 text-xs">

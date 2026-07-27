@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+
+import type { TerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 vi.mock('./territorialActions', () => ({
@@ -10,6 +12,42 @@ vi.mock('@/components/maps/ParcelMap', () => ({
 }))
 
 import { TerritorialContextPanel } from './TerritorialContextPanel'
+
+const contextWithPlanning: TerritorialContextView = {
+  status: 'provisional',
+  confidence: 'high',
+  resolvedAt: '2026-07-14T10:00:00.000Z',
+  latestAttemptAt: '2026-07-14T10:00:00.000Z',
+  inputMethod: 'cadastral_reference',
+  cadastralReference: '7709702NH4970N0001SZ',
+  municipality: 'Culleredo',
+  municipalityCode: '15031',
+  classification: {
+    code: 'SU',
+    categoryCode: 'SUSC',
+    label: 'Suelo urbano',
+    sourceFeatureIds: ['feature-a'],
+  },
+  instrument: 'Plan general de ordenación urbana',
+  areas: [],
+  affects: [],
+  conflicts: [],
+  warnings: [],
+  sources: [],
+  canAnswerConcreteParameters: false,
+  canRuleOutUndetectedAffects: false,
+  candidateCount: 0,
+  usingPreviousOfficialContext: false,
+  technicallyReviewed: false,
+  sourceChecks: [],
+}
+
+beforeAll(() => {
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: vi.fn(),
+  })
+})
 
 describe('TerritorialContextPanel', () => {
   it('ofrece resolucion oficial, reintento y continuacion manual diferenciada', () => {
@@ -199,5 +237,81 @@ describe('TerritorialContextPanel', () => {
     )
 
     expect(screen.getByText(/no equivale a ausencia de afecciones/i)).toBeTruthy()
+  })
+
+  it('destaca la zona pendiente con explicación profesional y estado accesible', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={contextWithPlanning}
+        urbanContextAttention={{
+          kind: 'zone_pending',
+          label: 'Zona urbanística pendiente',
+          missing: ['zona urbanística u ordenanza aplicable'],
+        }}
+      />
+    )
+
+    const alert = screen.getByRole('alert', { name: /zona urbanística no determinada/i })
+    expect(alert.className).toContain('border-red-300')
+    expect(screen.getAllByText('Zona urbanística pendiente').length).toBeGreaterThan(0)
+    expect(screen.getByText(/fuentes oficiales disponibles/i)).toBeTruthy()
+    expect(screen.getByText(/retranqueos, ocupación, edificabilidad/i)).toBeTruthy()
+    expect(screen.queryByText('Pendiente de revisión')).toBeNull()
+  })
+
+  it('abre el control manual existente y enfoca la ordenanza', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={contextWithPlanning}
+        urbanContextAttention={{
+          kind: 'zone_pending',
+          label: 'Zona urbanística pendiente',
+          missing: ['zona urbanística u ordenanza aplicable'],
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Seleccionar zona urbanística' }))
+
+    const ordinance = screen.getByLabelText('Ordenanza conocida')
+    expect(document.activeElement).toBe(ordinance)
+    expect(ordinance.closest('fieldset')).toBeTruthy()
+  })
+
+  it('no muestra la alerta cuando la zona urbanística está determinada', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{ ...contextWithPlanning, status: 'confirmed', areas: ['Zona 3'] }}
+        urbanContextAttention={null}
+      />
+    )
+
+    expect(screen.queryByText('Zona urbanística pendiente')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Seleccionar zona urbanística' })).toBeNull()
+  })
+
+  it('prioriza el estado incompleto cuando faltan varios datos urbanísticos', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{ ...contextWithPlanning, instrument: undefined, classification: undefined }}
+        urbanContextAttention={{
+          kind: 'incomplete',
+          label: 'Contexto urbanístico incompleto',
+          missing: ['planeamiento', 'clasificación del suelo', 'zona urbanística u ordenanza aplicable'],
+        }}
+      />
+    )
+
+    expect(screen.getAllByText('Contexto urbanístico incompleto').length).toBeGreaterThan(0)
+    expect(screen.getByText(/planeamiento, clasificación del suelo/i)).toBeTruthy()
+    expect(screen.queryByText('Parcial')).toBeNull()
   })
 })
