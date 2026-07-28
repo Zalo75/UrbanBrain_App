@@ -80,11 +80,24 @@ describe('validateGeneratedAnswer', () => {
     const validation = validateGeneratedAnswer(
       'La altura máxima es de 7 m [Fuente 1].',
       [source],
-      partial
+      partial,
+      true
     )
 
     expect(validation.valid).toBe(false)
     expect(validation.reasons.join(' ')).toMatch(/cifras.*régimen/i)
+  })
+
+  it('permite cifras documentales citadas cuando la pregunta no depende del régimen de parcela', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+    const validation = validateGeneratedAnswer(
+      'El artículo citado establece una altura de 7 m [Fuente 1].',
+      [source],
+      partial,
+      false
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
   })
 
   it('mantiene el circuito CTE V2 con su propia fuente estatal', () => {

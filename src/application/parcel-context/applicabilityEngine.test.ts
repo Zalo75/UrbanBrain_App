@@ -49,6 +49,10 @@ describe('requiresDeterminedParcelRegime', () => {
     expect(requiresDeterminedParcelRegime('¿Qué altura máxima en metros se permite?')).toBe(true)
     expect(requiresDeterminedParcelRegime('¿Qué significa edificabilidad?')).toBe(false)
     expect(requiresDeterminedParcelRegime('¿Cuál es la altura de evacuación según DB-SI?')).toBe(false)
+    expect(requiresDeterminedParcelRegime('Resume las afecciones confirmadas del expediente')).toBe(false)
+    expect(requiresDeterminedParcelRegime('Explica el artículo 12 del planeamiento')).toBe(false)
+    expect(requiresDeterminedParcelRegime('¿Cuántas plantas puedo construir en esta parcela?')).toBe(true)
+    expect(requiresDeterminedParcelRegime('¿Qué ocupación máxima se permite en esta finca?')).toBe(true)
   })
 })
 

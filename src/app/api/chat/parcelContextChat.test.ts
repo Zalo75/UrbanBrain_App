@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   embedContent: vi.fn(),
   rpc: vi.fn(),
   abortSignal: vi.fn(),
+  completionCreate: vi.fn(),
 }))
 
 vi.mock('@/application/authorization/expedienteAccess', () => ({
@@ -33,7 +34,7 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 vi.mock('openai', () => ({
   default: class {
-    chat = { completions: { create: vi.fn() } }
+    chat = { completions: { create: mocks.completionCreate } }
   },
 }))
 
@@ -49,6 +50,9 @@ describe('POST /api/chat parcel context boundary', () => {
     mocks.embedContent.mockResolvedValue({ embedding: { values: new Array(768).fill(0.01) } })
     mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
     mocks.abortSignal.mockResolvedValue({ data: [], error: null })
+    mocks.completionCreate.mockResolvedValue({
+      choices: [{ message: { content: 'El documento vigente se identifica en la fuente [Fuente 1].' } }],
+    })
     mocks.getExpedienteAccess.mockResolvedValue({
       ok: true,
       userId: 'user-org-a',
@@ -213,5 +217,51 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).toContain('CLASIFICACIÓN Y PLANEAMIENTO')
     expect(payload.answer).toContain('COMPROBACIONES PENDIENTES')
     expect(payload.answer).not.toMatch(/edificabilidad\s*[:=]\s*\d/i)
+  })
+
+  it('responde una consulta documental aunque la clasificación de la parcela esté pendiente', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        municipalityCode: '15009',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningApplicabilityStatus: 'conflict',
+        planningCanAnswerConcreteParameters: false,
+        planningConflicts: ['La clasificación requiere revisión profesional.'],
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [
+        {
+          chunk_id: 'chunk-1',
+          texto: 'El documento de planeamiento general vigente es el PXOM.',
+          municipio_nombre: 'Betanzos',
+          nombre_pdf: 'PXOM de Betanzos',
+        },
+      ],
+      error: null,
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: 'Resume el documento de planeamiento recuperado.',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mocks.completionCreate).toHaveBeenCalled()
+    expect(payload.safety.decision).toBe('answer')
+    expect(payload.answer).not.toMatch(/pendiente de clasificación|no puedo determinar/i)
   })
 })

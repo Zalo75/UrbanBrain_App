@@ -89,7 +89,7 @@ function matchesExpected(candidate: NormativeCandidate, expected: string) {
 }
 
 export function requiresDeterminedParcelRegime(question: string): boolean {
-  const urbanParameter = /\b(?:edificabilidad|ocupaci[oó]n|altura|retranqueos?|alineaci[oó]n|parcel[ae]\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:permitidos?|compatibles?|prohibidos?)|condiciones?\s+de\s+cubierta|n[uú]mero\s+de\s+plantas?)\b/i.test(
+  const urbanParameter = /\b(?:edificabilidad|ocupaci[oó]n|altura|retranqueos?|alineaci[oó]n|parcel[ae]\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:permitidos?|compatibles?|prohibidos?)|condiciones?\s+de\s+cubierta|(?:n[uú]mero\s+de|cu[aá]ntas?)\s+plantas?)\b/i.test(
     question
   )
   const conceptual = /\b(?:qu[eé]\s+(?:es|significa)|definici[oó]n|concepto\s+de)\b/i.test(question)

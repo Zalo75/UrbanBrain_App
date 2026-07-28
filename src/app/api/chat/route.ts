@@ -358,9 +358,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     const mustAbstain =
       answerCandidates.length === 0 ||
-      applicability.status === 'CONFLICTIVO' ||
-      applicability.status === 'NO_DETERMINADO' ||
-      (concreteParameterRequested && !applicability.canAnswerConcreteParameters);
+      (concreteParameterRequested &&
+        (applicability.status === 'CONFLICTIVO' ||
+          applicability.status === 'NO_DETERMINADO' ||
+          !applicability.canAnswerConcreteParameters));
 
     if (mustAbstain) {
       const answer = buildSafeAbstention(applicability, parcelContext);
@@ -412,7 +413,8 @@ FUENTES
       systemPrompt = buildMunicipalSafetyPrompt(
         parcelContext,
         applicability,
-        answerCandidates
+        answerCandidates,
+        concreteParameterRequested
       );
     }
 
@@ -452,7 +454,12 @@ ${usedV2 ? v2Citas : 'N/A'}
     }
 
     let answer = completion.choices[0].message.content || '';
-    const validation = validateGeneratedAnswer(answer, answerCandidates, applicability);
+    const validation = validateGeneratedAnswer(
+      answer,
+      answerCandidates,
+      applicability,
+      concreteParameterRequested
+    );
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';
 
