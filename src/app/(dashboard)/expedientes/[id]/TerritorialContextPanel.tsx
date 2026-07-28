@@ -75,14 +75,7 @@ export function TerritorialContextPanel({
   }, [manualOpen]);
 
   const attention = urbanContextAttention ?? null;
-  const status = attention
-    ? {
-        label: attention.label,
-        className: 'bg-red-100 text-red-900 dark:bg-red-950/60 dark:text-red-200',
-      }
-    : context
-      ? statusCopy[context.status]
-      : statusCopy.undetermined;
+  const status = context ? statusCopy[context.status] : statusCopy.undetermined;
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
   );
@@ -543,12 +536,13 @@ export function TerritorialContextPanel({
                   )}
                 </div>
 
-                {!context.canAnswerConcreteParameters && (
+                {!attention && !context.canAnswerConcreteParameters && (
                   <p className="text-muted-foreground text-xs">
                     UrbanBrain se abstendrá de dar parámetros urbanísticos concretos mientras el
                     régimen aplicable no esté determinado inequívocamente.
                   </p>
                 )}
+
               </>
             )}
           </div>

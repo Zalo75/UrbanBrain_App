@@ -120,16 +120,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         urbanContextAttention={urbanContextAttention}
       />
 
-      {urbanContextAttention ? (
-        <div role="alert" className="mx-4 mt-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100 lg:mx-6">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>
-            <strong>{urbanContextAttention.label}.</strong>{' '}
-            Faltan {urbanContextAttention.missing.join(', ')}. Complete estos datos antes de utilizar
-            parámetros urbanísticos concretos.
-          </span>
-        </div>
-      ) : expediente.status === 'territorial_context_pending' ? (
+      {!urbanContextAttention && expediente.status === 'territorial_context_pending' ? (
         <div role="alert" className="mx-4 mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200 lg:mx-6">
           El expediente se creó, pero la confirmación territorial quedó pendiente. Revise o actualice el contexto antes de utilizar datos urbanísticos.
         </div>
@@ -148,11 +139,7 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
                 <MapPin className="h-4 w-4 text-muted-foreground" />
                 Detalles del Proyecto
               </h2>
-              {urbanContextAttention ? (
-                <span className="max-w-[180px] rounded-full bg-red-100 px-2 py-0.5 text-center text-[10px] font-medium leading-tight text-red-900 dark:bg-red-950/60 dark:text-red-200">
-                  {urbanContextAttention.label}
-                </span>
-              ) : technicallyReviewed ? (
+              {!urbanContextAttention && technicallyReviewed ? (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
                   Contexto revisado
                 </span>
@@ -241,24 +228,17 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
         {/* Right Side: Chat / Main Interaction Area */}
         <div className="flex flex-1 flex-col relative bg-background min-w-0">
-          {urbanContextAttention ? (
-            <div className="flex shrink-0 items-start justify-center gap-2 border-b border-red-200 bg-red-50 p-2.5 text-xs text-red-950 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100 sm:items-center">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 sm:mt-0" aria-hidden="true" />
-              <span className="min-w-0 text-center text-[11px] leading-relaxed sm:text-xs">
-                {urbanContextAttention.label}: complete {urbanContextAttention.missing.join(', ')} para obtener respuestas urbanísticas fiables.
-              </span>
-            </div>
-          ) : technicallyReviewed ? (
+          {!urbanContextAttention && technicallyReviewed ? (
             <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
               <MapPin className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
               <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
             </div>
-          ) : (
+          ) : !urbanContextAttention ? (
             <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 p-2.5 text-xs text-amber-800 dark:text-amber-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
               <AlertCircle className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
               <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden a este expediente.</span>
             </div>
-          )}
+          ) : null}
           <ChatInterface expedienteId={expediente.id} />
         </div>
 

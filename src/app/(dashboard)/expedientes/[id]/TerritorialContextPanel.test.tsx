@@ -255,10 +255,10 @@ describe('TerritorialContextPanel', () => {
 
     const alert = screen.getByRole('alert', { name: /zona urbanística no determinada/i })
     expect(alert.className).toContain('border-red-300')
-    expect(screen.getAllByText('Zona urbanística pendiente').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Zona urbanística pendiente')).toHaveLength(1)
     expect(screen.getByText(/fuentes oficiales disponibles/i)).toBeTruthy()
     expect(screen.getByText(/retranqueos, ocupación, edificabilidad/i)).toBeTruthy()
-    expect(screen.queryByText('Pendiente de revisión')).toBeNull()
+    expect(screen.getByText('Parcial')).toBeTruthy()
   })
 
   it('abre el control manual existente y enfoca la ordenanza', () => {
@@ -310,8 +310,8 @@ describe('TerritorialContextPanel', () => {
       />
     )
 
-    expect(screen.getAllByText('Contexto urbanístico incompleto').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Contexto urbanístico incompleto')).toHaveLength(1)
     expect(screen.getByText(/planeamiento, clasificación del suelo/i)).toBeTruthy()
-    expect(screen.queryByText('Parcial')).toBeNull()
+    expect(screen.getByText('Parcial')).toBeTruthy()
   })
 })
