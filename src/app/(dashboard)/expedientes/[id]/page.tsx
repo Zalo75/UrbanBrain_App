@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { db } from '@/infrastructure/db/client'
 import { contextDetections, documents } from '@/infrastructure/db/schema'
 import { eq, desc } from 'drizzle-orm'
-import { MapPin, Settings, AlertCircle } from 'lucide-react'
+import { MapPin, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DocumentList } from './DocumentList'
 import { formatLocationSource, formatLandClass, formatActionType } from '@/shared/utils/formatters'
@@ -65,7 +65,6 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
   const displayedMunicipality = presentation.municipality
   const displayedAddress = presentation.address
   const displayedCoordinates = presentation.coordinates
-  const technicallyReviewed = presentation.technicallyReviewed
   const displayedReference = territorialContext?.cadastralReference ?? expediente.refCatastral
   const displayedPlanning = presentation.planning
   const displayedZone = presentation.zone
@@ -120,12 +119,6 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         urbanContextAttention={urbanContextAttention}
       />
 
-      {!urbanContextAttention && expediente.status === 'territorial_context_pending' ? (
-        <div role="alert" className="mx-4 mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200 lg:mx-6">
-          El expediente se creó, pero la confirmación territorial quedó pendiente. Revise o actualice el contexto antes de utilizar datos urbanísticos.
-        </div>
-      ) : null}
-
       {/* Workspace Layout: Split Screen */}
       <div className="flex flex-1 overflow-hidden">
         
@@ -134,20 +127,11 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           
           {/* Detalles Urbanísticos */}
           <div className="p-4 border-b">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4">
               <h2 className="text-sm font-semibold flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
                 Detalles del Proyecto
               </h2>
-              {!urbanContextAttention && technicallyReviewed ? (
-                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
-                  Contexto revisado
-                </span>
-              ) : (
-                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                  Pendiente de revisión
-                </span>
-              )}
             </div>
             <div className="space-y-4 text-sm">
               {expediente.province && (
@@ -228,17 +212,6 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
         {/* Right Side: Chat / Main Interaction Area */}
         <div className="flex flex-1 flex-col relative bg-background min-w-0">
-          {!urbanContextAttention && technicallyReviewed ? (
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-900 p-2.5 text-xs text-emerald-800 dark:text-emerald-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
-              <MapPin className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
-              <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">UrbanBrain utilizará este contexto para responder a las consultas de este expediente.</span>
-            </div>
-          ) : !urbanContextAttention ? (
-            <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 p-2.5 text-xs text-amber-800 dark:text-amber-400 flex items-start sm:items-center justify-center gap-2 shrink-0">
-              <AlertCircle className="h-4 w-4 mt-0.5 sm:mt-0 shrink-0" />
-              <span className="min-w-0 break-words leading-relaxed text-center text-[11px] sm:text-xs">Revise que el ayuntamiento, el planeamiento y las afecciones aplicables corresponden a este expediente.</span>
-            </div>
-          ) : null}
           <ChatInterface expedienteId={expediente.id} />
         </div>
 
