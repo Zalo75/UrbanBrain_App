@@ -51,9 +51,13 @@ export function matchesRegisteredInstrument(
   planning: PlanningApplicability,
   layer: SiotugaClassificationLayerRegistration
 ) {
+  const currentInstrument = planning.applicableInstruments?.find(
+    (instrument) => instrument.status === 'current'
+  );
   return (
     (planning.status === 'determined' || planning.status === 'partial') &&
-    comparable(planning.instrument) === comparable(layer.instrument.name) &&
+    (currentInstrument?.id === layer.instrument.siotugaDocumentId ||
+      comparable(planning.instrument) === comparable(layer.instrument.name)) &&
     planning.approvalDate?.slice(0, 10) === layer.instrument.approvalDate
   );
 }

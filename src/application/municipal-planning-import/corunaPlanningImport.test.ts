@@ -21,6 +21,9 @@ describe('A Coruña SIOTUGA planning import', () => {
     const otherProvinces = '<tr><td>27001</td><td>Abadín</td><td>Plan general</td><td>2001-01-01</td></tr><tr><td>32001</td><td>Allariz</td><td>Plan general</td><td>2001-01-01</td></tr><tr><td>36001</td><td>Arbo</td><td>Plan general</td><td>2001-01-01</td></tr>'
     const snapshot = createSnapshot(`<table>${valid}${otherProvinces}<tr><td>15902</td><td>Oza-Cesuras</td><td>Plan A</td><td>2001-01-01</td></tr><tr><td>15902</td><td>Oza-Cesuras</td><td>Plan B</td><td>2002-01-01</td></tr></table>`, '2026-07-20T00:00:00.000Z')
     expect(snapshot.records).toHaveLength(89); expect(snapshot.records.some((record) => record.municipalityId === '15031')).toBe(true); expect(snapshot.records.some((record) => record.municipalityId === '15902')).toBe(false)
+    expect(AUTO_EXCLUDED_INE.get('15026')).toContain('Cesuras')
+    expect(AUTO_EXCLUDED_INE.get('15063')).toContain('Oza dos Ríos')
+    expect(AUTO_EXCLUDED_INE.get('15902')).toContain('planeamientos heredados')
   })
   it('fails closed for an unknown A Coruña INE while ignoring other provinces', () => {
     expect(() => createSnapshot(`<table>${valid}<tr><td>15999</td><td>Desconocido</td><td>Plan general</td><td>2001-01-01</td></tr><tr><td>27001</td><td>Abadín</td><td>Plan general</td><td>2001-01-01</td></tr></table>`, '2026-07-20T00:00:00.000Z')).toThrow('15999')

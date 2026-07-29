@@ -269,5 +269,26 @@ describe('SiotugaClassificationAdapter', () => {
         culleredo
       )
     ).toBe(false);
+    expect(
+      matchesRegisteredInstrument(
+        {
+          status: 'partial',
+          instrument: 'Nombre consolidado distinto al inventario general',
+          approvalDate: '1987-07-29',
+          applicableInstruments: [
+            {
+              id: '22310',
+              name: 'Instrumento vigente',
+              kind: 'general',
+              status: 'current',
+              sourceUrl: culleredo.instrument.inventoryUrl,
+            },
+          ],
+          evidence: [],
+          warnings: [],
+        },
+        culleredo
+      )
+    ).toBe(true);
   });
 });

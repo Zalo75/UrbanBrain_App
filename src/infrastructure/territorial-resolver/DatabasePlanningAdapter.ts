@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import type { PlanningApplicability, PlanningPort } from '@/domain/territorial-resolver/types'
 import { db } from '@/infrastructure/db/client'
 import { municipalPlanning } from '@/infrastructure/db/schema'
+import { getActiveP1PlanningKnowledge } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
 
 export function buildApplicablePlanningQuery(database: typeof db, municipalityCode: string) {
   return database
@@ -37,6 +38,37 @@ export class DatabasePlanningAdapter implements PlanningPort {
             message: 'No existe código INE oficial para consultar el planeamiento.',
           },
         ],
+      }
+    }
+
+    const knowledge = getActiveP1PlanningKnowledge(municipalityCode)
+    if (knowledge) {
+      return {
+        status: 'determined',
+        instrument: knowledge.instrument.name,
+        approvalDate: knowledge.instrument.approvalDate,
+        sourceUrl: knowledge.instrument.inventoryUrl,
+        applicableInstruments: [
+          {
+            id: knowledge.instrument.officialId,
+            name: knowledge.instrument.name,
+            kind: 'general',
+            status: 'current',
+            approvalDate: knowledge.instrument.approvalDate,
+            sourceUrl: knowledge.instrument.inventoryUrl,
+          },
+        ],
+        canAnswerConcreteParameters: false,
+        evidence: [
+          {
+            source: 'siotuga',
+            sourceUrl: knowledge.instrument.inventoryUrl,
+            retrievedAt: knowledge.activation.verifiedAt,
+            method: `Planning Knowledge Base ${knowledge.knowledgeVersion}`,
+            scope: 'planning_instrument',
+          },
+        ],
+        warnings: [],
       }
     }
 

@@ -9,9 +9,9 @@ export const AUTO_EXCLUDED_INE = new Map([
   ['15009', 'Betanzos tiene integración específica'],
   ['15034', 'Dumbría excluida'],
   ['15050', 'Monfero excluido'],
-  ['15902', 'Oza-Cesuras requiere revisión manual por ambigüedad histórica'],
-  ['15026', 'Municipio histórico de Oza-Cesuras'],
-  ['15063', 'Municipio histórico de Oza-Cesuras'],
+  ['15902', 'Oza-Cesuras requiere resolución espacial entre los planeamientos heredados'],
+  ['15026', 'Código histórico de Cesuras, integrado en Oza-Cesuras (15902)'],
+  ['15063', 'Código histórico de Oza dos Ríos, integrado en Oza-Cesuras (15902)'],
 ])
 
 export type OfficialPlanningRecord = { municipalityId: string; municipalityName: string; name: string; approvalDate: string; sourceUrl: string; adaptation?: string; externalId: string }
