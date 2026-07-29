@@ -10,8 +10,8 @@ import {
   trustedMunicipalityCodeFilter,
 } from '@/application/parcel-context/normalizeParcelContext';
 import {
+  classifyParcelQuestionScope,
   evaluateApplicability,
-  requiresDeterminedParcelRegime,
 } from '@/application/parcel-context/applicabilityEngine';
 import {
   buildAnswerContract,
@@ -136,7 +136,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
     const municipioCodigo =
       trustedMunicipalityCodeFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
-    const concreteParameterRequested = requiresDeterminedParcelRegime(message);
+    const questionScope = classifyParcelQuestionScope(message);
+    const concreteParameterRequested = questionScope !== 'independent';
 
     // Guardar mensaje del usuario
     await db.insert(chatMessages).values({
@@ -327,6 +328,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     // ----------------------------------
 
     let applicability: ApplicabilityResult;
+    let retrievalApplicability: ApplicabilityResult;
     let answerCandidates: NormativeCandidate[];
     if (usedV2) {
       answerCandidates = v2Candidates;
@@ -347,21 +349,37 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         canAnswerConcreteParameters:
           !concreteParameterRequested && answerCandidates.length > 0,
       };
+      retrievalApplicability = {
+        ...applicability,
+        status: answerCandidates.length > 0 ? 'DETERMINADO' : 'NO_DETERMINADO',
+      };
     } else {
-      applicability = evaluateApplicability(
-        parcelContext,
-        v1Candidates,
-        concreteParameterRequested
-      );
-      answerCandidates = applicability.applicable;
+      retrievalApplicability = evaluateApplicability(parcelContext, v1Candidates, false);
+      const regimeApplicability = concreteParameterRequested
+        ? evaluateApplicability(parcelContext, v1Candidates, true)
+        : retrievalApplicability;
+
+      if (questionScope === 'mixed') {
+        applicability = {
+          ...regimeApplicability,
+          applicable: retrievalApplicability.applicable,
+          rejected: retrievalApplicability.rejected,
+        };
+        answerCandidates = retrievalApplicability.applicable;
+      } else {
+        applicability = regimeApplicability;
+        answerCandidates = applicability.applicable;
+      }
     }
 
+    const regimeUnavailable =
+      applicability.status === 'CONFLICTIVO' ||
+      applicability.status === 'NO_DETERMINADO' ||
+      !applicability.canAnswerConcreteParameters;
     const mustAbstain =
       answerCandidates.length === 0 ||
-      (concreteParameterRequested &&
-        (applicability.status === 'CONFLICTIVO' ||
-          applicability.status === 'NO_DETERMINADO' ||
-          !applicability.canAnswerConcreteParameters));
+      retrievalApplicability.status === 'CONFLICTIVO' ||
+      (questionScope === 'regime' && regimeUnavailable);
 
     if (mustAbstain) {
       const answer = buildSafeAbstention(applicability, parcelContext);
@@ -398,6 +416,9 @@ Reglas:
 3. Si los fragmentos no permiten responder la pregunta de forma completa, dilo expresamente. No completes con conocimiento general.
 4. No presentes tu interpretación como si fuese texto literal de la norma.
 5. Advierte al usuario cuando la respuesta pueda depender además de normativa autonómica o municipal.
+6. ${questionScope === 'mixed'
+    ? 'Responde las partes respaldadas por el contexto y separa la parte que no puede resolverse sin clasificación urbanística. No rechaces toda la consulta.'
+    : 'Limita la respuesta al alcance respaldado por las fuentes recuperadas.'}
 
 FORMATO DE RESPUESTA REQUERIDO:
 
@@ -414,7 +435,7 @@ FUENTES
         parcelContext,
         applicability,
         answerCandidates,
-        concreteParameterRequested
+        questionScope
       );
     }
 
@@ -458,7 +479,7 @@ ${usedV2 ? v2Citas : 'N/A'}
       answer,
       answerCandidates,
       applicability,
-      concreteParameterRequested
+      questionScope
     );
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';

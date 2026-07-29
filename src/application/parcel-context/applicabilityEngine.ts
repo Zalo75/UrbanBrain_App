@@ -26,6 +26,8 @@ export const NORMATIVE_HIERARCHY: NormativeHierarchyLevel[] = [
   'sectorial',
 ]
 
+export type ParcelQuestionScope = 'independent' | 'regime' | 'mixed'
+
 function candidateText(candidate: NormativeCandidate) {
   return [candidate.documentName, candidate.title, candidate.content].filter(Boolean).join('\n')
 }
@@ -89,7 +91,7 @@ function matchesExpected(candidate: NormativeCandidate, expected: string) {
 }
 
 export function requiresDeterminedParcelRegime(question: string): boolean {
-  const urbanParameter = /\b(?:edificabilidad|ocupaci[oó]n|altura|retranqueos?|alineaci[oó]n|parcel[ae]\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:permitidos?|compatibles?|prohibidos?)|condiciones?\s+de\s+cubierta|(?:n[uú]mero\s+de|cu[aá]ntas?)\s+plantas?)\b/i.test(
+  const urbanParameter = /\b(?:clasificaci[oó]n(?:\s+(?:urban[ií]stica|del\s+suelo))?|categor[ií]a\s+del\s+suelo|calificaci[oó]n|ordenanza|par[aá]metros?\s+urban[ií]sticos?|edificabilidad|ocupaci[oó]n|altura|retranqueos?|alineaci[oó]n|parcel[ae]\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:urban[ií]sticos?|permitidos?|compatibles?|prohibidos?)|condiciones?\s+de\s+cubierta|(?:n[uú]mero\s+de|cu[aá]ntas?)\s+plantas?)\b/i.test(
     question
   )
   const conceptual = /\b(?:qu[eé]\s+(?:es|significa)|definici[oó]n|concepto\s+de)\b/i.test(question)
@@ -97,6 +99,17 @@ export function requiresDeterminedParcelRegime(question: string): boolean {
     question
   )
   return urbanParameter && !conceptual && !cteTechnicalParameter
+}
+
+export function classifyParcelQuestionScope(question: string): ParcelQuestionScope {
+  const requiresRegime = requiresDeterminedParcelRegime(question)
+  if (!requiresRegime) return 'independent'
+
+  const includesIndependentScope = /\b(?:afecciones?|carreteras?|aguas?|costas?|patrimonio|red\s+natura|planeamiento\s+vigente|documentos?|referencias?\s+catastrales?|catastro|coordenadas?|normativa\s+general|informaci[oó]n\s+territorial|contexto\s+administrativo|tr[aá]mites?\s+administrativos?)\b/i.test(
+    question
+  )
+
+  return includesIndependentScope ? 'mixed' : 'regime'
 }
 
 export function evaluateApplicability(
@@ -110,7 +123,15 @@ export function evaluateApplicability(
     rejected: [],
     warnings: [],
     missingData: [],
-    conflicts: context.conflicts.map((conflict) => conflict.reason),
+    conflicts: context.conflicts
+      .filter(
+        (conflict) =>
+          concreteParameterRequested ||
+          !['planning', 'landClass', 'qualification', 'planningArea', 'urbanPlanningZone'].includes(
+            conflict.field
+          )
+      )
+      .map((conflict) => conflict.reason),
     canAnswerConcreteParameters: false,
   }
 
@@ -125,19 +146,21 @@ export function evaluateApplicability(
     result.conflicts.push(`La recuperación contiene varios municipios incompatibles: ${municipalityNames.join(', ')}.`)
   }
 
-  const ordinances = uniqueNormalized(candidates.flatMap(extractOrdinances))
-  if (ordinances.length > 1) {
-    result.conflicts.push(`La recuperación contiene varias ordenanzas incompatibles: ${ordinances.join(', ')}.`)
-  }
+  if (concreteParameterRequested) {
+    const ordinances = uniqueNormalized(candidates.flatMap(extractOrdinances))
+    if (ordinances.length > 1) {
+      result.conflicts.push(`La recuperación contiene varias ordenanzas incompatibles: ${ordinances.join(', ')}.`)
+    }
 
-  const landClasses = uniqueNormalized(candidates.flatMap(extractLandClasses))
-  if (landClasses.length > 1) {
-    result.conflicts.push(`La recuperación mezcla clases de suelo incompatibles: ${landClasses.join(', ')}.`)
-  }
+    const landClasses = uniqueNormalized(candidates.flatMap(extractLandClasses))
+    if (landClasses.length > 1) {
+      result.conflicts.push(`La recuperación mezcla clases de suelo incompatibles: ${landClasses.join(', ')}.`)
+    }
 
-  const planningAreas = uniqueNormalized(candidates.flatMap(extractPlanningAreas))
-  if (planningAreas.length > 1) {
-    result.conflicts.push(`La recuperación mezcla ámbitos, sectores o fichas incompatibles: ${planningAreas.join(', ')}.`)
+    const planningAreas = uniqueNormalized(candidates.flatMap(extractPlanningAreas))
+    if (planningAreas.length > 1) {
+      result.conflicts.push(`La recuperación mezcla ámbitos, sectores o fichas incompatibles: ${planningAreas.join(', ')}.`)
+    }
   }
   const hasSpecificAreaCandidate = candidates.some(
     (candidate) => extractPlanningAreas(candidate).length > 0 || candidate.hierarchy === 'ficha'
@@ -147,7 +170,7 @@ export function evaluateApplicability(
       extractPlanningAreas(candidate).length === 0 &&
       /\b(?:normas?|disposiciones?|ordenanza)\s+generales?\b/i.test(candidateText(candidate))
   )
-  if (hasSpecificAreaCandidate && hasUnscopedGeneralCandidate) {
+  if (concreteParameterRequested && hasSpecificAreaCandidate && hasUnscopedGeneralCandidate) {
     result.conflicts.push(
       'La recuperación mezcla regulación general con una ficha o ámbito particular sin demostrar su relación jerárquica.'
     )

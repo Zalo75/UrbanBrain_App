@@ -18,7 +18,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel';
 import { ParcelMap } from '@/components/maps/ParcelMap';
-import type { UrbanContextAttention } from './territorialPresentation';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -33,7 +32,6 @@ interface Props {
     lng?: number | null;
   };
   context: TerritorialContextView | null;
-  urbanContextAttention?: UrbanContextAttention | null;
 }
 
 const initialState: TerritorialResolutionActionState = { status: 'idle', message: '' };
@@ -54,27 +52,17 @@ export function TerritorialContextPanel({
   expedienteId,
   initialInput,
   context,
-  urbanContextAttention,
 }: Props) {
   const router = useRouter();
   const action = resolveTerritorialContextAction.bind(null, expedienteId);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [manualOpen, setManualOpen] = useState(false);
   const manualOrdinanceRef = useRef<HTMLInputElement>(null);
-  const shouldFocusManualZoneRef = useRef(false);
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
   }, [router, state.status]);
 
-  useEffect(() => {
-    if (!manualOpen || !shouldFocusManualZoneRef.current) return;
-    shouldFocusManualZoneRef.current = false;
-    manualOrdinanceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    manualOrdinanceRef.current?.focus();
-  }, [manualOpen]);
-
-  const attention = urbanContextAttention ?? null;
   const status = context ? statusCopy[context.status] : statusCopy.undetermined;
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
@@ -83,7 +71,7 @@ export function TerritorialContextPanel({
   return (
     <details
       className="group border-b bg-zinc-50/70 dark:bg-zinc-950/30"
-      open={!context || Boolean(attention)}
+      open={!context}
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-3">
@@ -301,59 +289,6 @@ export function TerritorialContextPanel({
               </div>
             ) : (
               <>
-                {attention && (
-                  <section
-                    role="alert"
-                    aria-labelledby="urban-zone-attention-heading"
-                    className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100"
-                  >
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-                      <div className="min-w-0 flex-1">
-                        <span className="inline-flex rounded-full bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-900 dark:bg-red-950/70 dark:text-red-100">
-                          {attention.label}
-                        </span>
-                        <h3 id="urban-zone-attention-heading" className="mt-2 text-sm font-semibold">
-                          {attention.kind === 'zone_pending'
-                            ? 'Zona urbanística no determinada'
-                            : 'Faltan datos urbanísticos necesarios'}
-                        </h3>
-                        <p className="mt-1 text-xs leading-relaxed">
-                          {attention.kind === 'zone_pending'
-                            ? 'No se ha podido obtener automáticamente la zona u ordenanza aplicable desde las fuentes oficiales disponibles.'
-                            : `No se han determinado: ${attention.missing.join(', ')}.`}
-                        </p>
-                        <p className="mt-2 text-xs leading-relaxed">
-                          Para obtener respuestas fiables sobre retranqueos, ocupación, edificabilidad,
-                          alturas, parcela mínima y usos, es necesario seleccionar o confirmar
-                          manualmente la ordenanza, calificación, ámbito o ficha correspondiente.
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="mt-3 w-full border-red-300 bg-background text-foreground sm:w-auto"
-                          onClick={() => {
-                            if (manualOpen) {
-                              manualOrdinanceRef.current?.scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'center',
-                              });
-                              manualOrdinanceRef.current?.focus();
-                            } else {
-                              shouldFocusManualZoneRef.current = true;
-                              setManualOpen(true);
-                            }
-                          }}
-                        >
-                          Seleccionar zona urbanística
-                        </Button>
-                        <p className="mt-2 text-[11px]">
-                          Se abrirá el área de introducción manual existente para documentar el dato.
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-                )}
                 {(context.usingPreviousOfficialContext || context.manualContext) && (
                   <div
                     role="status"
@@ -535,13 +470,6 @@ export function TerritorialContextPanel({
                     </p>
                   )}
                 </div>
-
-                {!attention && !context.canAnswerConcreteParameters && (
-                  <p className="text-muted-foreground text-xs">
-                    UrbanBrain se abstendrá de dar parámetros urbanísticos concretos mientras el
-                    régimen aplicable no esté determinado inequívocamente.
-                  </p>
-                )}
 
               </>
             )}

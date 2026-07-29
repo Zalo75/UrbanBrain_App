@@ -116,7 +116,7 @@ describe('TerritorialContextPanel', () => {
     expect(screen.getByText('Conflictivo')).toBeTruthy()
     expect(screen.getByTestId('parcel-map')).toBeTruthy()
     expect(screen.getByText(/no demuestra ausencia de otras afecciones/i)).toBeTruthy()
-    expect(screen.getByText(/se abst.* de dar par.*metros/i)).toBeTruthy()
+    expect(screen.queryByText(/se abst.* de dar par.*metros/i)).toBeNull()
   })
 
   it('muestra el ultimo contexto oficial como provisional y fecha ambos estados', () => {
@@ -239,25 +239,17 @@ describe('TerritorialContextPanel', () => {
     expect(screen.getByText(/no equivale a ausencia de afecciones/i)).toBeTruthy()
   })
 
-  it('destaca la zona pendiente con explicación profesional y estado accesible', () => {
+  it('no duplica dentro del panel el aviso persistente de contexto incompleto', () => {
     render(
       <TerritorialContextPanel
         expedienteId="exp-a"
         initialInput={{}}
         context={contextWithPlanning}
-        urbanContextAttention={{
-          kind: 'zone_pending',
-          label: 'Zona urbanística pendiente',
-          missing: ['zona urbanística u ordenanza aplicable'],
-        }}
       />
     )
 
-    const alert = screen.getByRole('alert', { name: /zona urbanística no determinada/i })
-    expect(alert.className).toContain('border-red-300')
-    expect(screen.getAllByText('Zona urbanística pendiente')).toHaveLength(1)
-    expect(screen.getByText(/fuentes oficiales disponibles/i)).toBeTruthy()
-    expect(screen.getByText(/retranqueos, ocupación, edificabilidad/i)).toBeTruthy()
+    expect(screen.queryByText('Zona urbanística pendiente')).toBeNull()
+    expect(screen.queryByText('Contexto urbanístico incompleto')).toBeNull()
     expect(screen.getByText('Parcial')).toBeTruthy()
   })
 
@@ -267,18 +259,12 @@ describe('TerritorialContextPanel', () => {
         expedienteId="exp-a"
         initialInput={{}}
         context={contextWithPlanning}
-        urbanContextAttention={{
-          kind: 'zone_pending',
-          label: 'Zona urbanística pendiente',
-          missing: ['zona urbanística u ordenanza aplicable'],
-        }}
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Seleccionar zona urbanística' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Introducir datos manualmente' }))
 
     const ordinance = screen.getByLabelText('Ordenanza conocida')
-    expect(document.activeElement).toBe(ordinance)
     expect(ordinance.closest('fieldset')).toBeTruthy()
   })
 
@@ -288,7 +274,6 @@ describe('TerritorialContextPanel', () => {
         expedienteId="exp-a"
         initialInput={{}}
         context={{ ...contextWithPlanning, status: 'confirmed', areas: ['Zona 3'] }}
-        urbanContextAttention={null}
       />
     )
 
@@ -296,22 +281,16 @@ describe('TerritorialContextPanel', () => {
     expect(screen.queryByRole('button', { name: 'Seleccionar zona urbanística' })).toBeNull()
   })
 
-  it('prioriza el estado incompleto cuando faltan varios datos urbanísticos', () => {
+  it('mantiene el estado parcial sin repetir el aviso incompleto', () => {
     render(
       <TerritorialContextPanel
         expedienteId="exp-a"
         initialInput={{}}
         context={{ ...contextWithPlanning, instrument: undefined, classification: undefined }}
-        urbanContextAttention={{
-          kind: 'incomplete',
-          label: 'Contexto urbanístico incompleto',
-          missing: ['planeamiento', 'clasificación del suelo', 'zona urbanística u ordenanza aplicable'],
-        }}
       />
     )
 
-    expect(screen.getAllByText('Contexto urbanístico incompleto')).toHaveLength(1)
-    expect(screen.getByText(/planeamiento, clasificación del suelo/i)).toBeTruthy()
+    expect(screen.queryByText('Contexto urbanístico incompleto')).toBeNull()
     expect(screen.getByText('Parcial')).toBeTruthy()
   })
 })

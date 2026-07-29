@@ -264,4 +264,56 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.safety.decision).toBe('answer')
     expect(payload.answer).not.toMatch(/pendiente de clasificación|no puedo determinar/i)
   })
+
+  it('responde la parte disponible de una consulta mixta y se abstiene sólo del parámetro urbanístico', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        municipalityCode: '15009',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningApplicabilityStatus: 'partial',
+        planningCanAnswerConcreteParameters: false,
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [
+        {
+          chunk_id: 'chunk-1',
+          texto: 'La parcela está afectada por la zona de protección de carreteras.',
+          municipio_nombre: 'Betanzos',
+          nombre_pdf: 'Informe sectorial oficial',
+        },
+      ],
+      error: null,
+    })
+    mocks.completionCreate.mockResolvedValue({
+      choices: [{
+        message: {
+          content: 'La parcela está afectada por la zona de protección de carreteras [Fuente 1]. No puedo determinar el retranqueo urbanístico sin clasificación y ordenanza confirmadas.',
+        },
+      }],
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: 'Indica las afecciones y el retranqueo aplicable.',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.safety.decision).toBe('answer')
+    expect(payload.answer).toContain('zona de protección de carreteras')
+    expect(payload.answer).toContain('No puedo determinar el retranqueo')
+  })
 })

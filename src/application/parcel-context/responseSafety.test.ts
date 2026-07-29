@@ -81,7 +81,7 @@ describe('validateGeneratedAnswer', () => {
       'La altura máxima es de 7 m [Fuente 1].',
       [source],
       partial,
-      true
+      'regime'
     )
 
     expect(validation.valid).toBe(false)
@@ -94,7 +94,7 @@ describe('validateGeneratedAnswer', () => {
       'El artículo citado establece una altura de 7 m [Fuente 1].',
       [source],
       partial,
-      false
+      'independent'
     )
 
     expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
@@ -128,6 +128,37 @@ describe('validateGeneratedAnswer', () => {
     expect(validation.valid).toBe(true)
     expect(contract.hierarchy.estatal).toEqual(['CTE DB-SI'])
     expect(contract.hierarchy.municipal).toBeUndefined()
+  })
+
+  it('acepta una respuesta mixta que responde lo documentado y se abstiene sólo del parámetro bloqueado', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+    const mixedSource = {
+      ...source,
+      content: 'La parcela está afectada por la zona de protección de carreteras.',
+    }
+
+    const validation = validateGeneratedAnswer(
+      'La parcela está afectada por la zona de protección de carreteras [Fuente 1]. No puedo determinar el retranqueo urbanístico sin clasificación y ordenanza confirmadas.',
+      [mixedSource],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
+  })
+
+  it('rechaza en una respuesta mixta el parámetro afirmado sin régimen determinado', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'La parcela está afectada por carreteras [Fuente 1]. El retranqueo urbanístico aplicable es de 3 m.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(validation.reasons.join(' ')).toMatch(/parámetro de parcela sin régimen determinado/i)
   })
 })
 

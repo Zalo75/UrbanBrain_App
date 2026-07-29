@@ -107,6 +107,19 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
         </div>
       </div>
 
+      {urbanContextAttention && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 border-b border-red-300 bg-red-50 px-4 py-3 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100 lg:px-6"
+        >
+          <span>
+            <strong>Contexto urbanístico incompleto.</strong>{' '}
+            Faltan {urbanContextAttention.missing.join(', ')}. Las consultas que dependan de estos
+            datos requerirán revisión técnica.
+          </span>
+        </div>
+      )}
+
       <TerritorialContextPanel
         expedienteId={expediente.id}
         initialInput={{
@@ -116,7 +129,6 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
           lng: displayedCoordinates?.lng ?? null,
         }}
         context={territorialContext}
-        urbanContextAttention={urbanContextAttention}
       />
 
       {/* Workspace Layout: Split Screen */}
@@ -171,15 +183,21 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
                       </li>
                     )}
                     {!displayedZone && urbanContextAttention && (
-                      <li className="flex flex-col text-red-900 dark:text-red-200">
-                        <span className="text-xs font-medium">Ámbito/Ordenanza:</span>
-                        <span>Zona urbanística no determinada</span>
+                      <li className="flex flex-col">
+                        <span className="text-xs text-muted-foreground">Ámbito/Ordenanza:</span>
+                        <span>No determinado</span>
                       </li>
                     )}
                     {displayedLandClass && (
                       <li className="flex flex-col">
                         <span className="text-xs text-muted-foreground">Clase de suelo:</span>
                         <span>{displayedLandClass}</span>
+                      </li>
+                    )}
+                    {!displayedLandClass && urbanContextAttention && (
+                      <li className="flex flex-col">
+                        <span className="text-xs text-muted-foreground">Clasificación urbanística:</span>
+                        <span>No determinada</span>
                       </li>
                     )}
                     {expediente.actionType && (

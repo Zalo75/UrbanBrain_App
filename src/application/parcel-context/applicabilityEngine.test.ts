@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedParcelContext, NormativeCandidate } from '@/domain/parcel-context/types'
 import { buildNormalizedParcelContext } from './normalizeParcelContext'
-import { evaluateApplicability, requiresDeterminedParcelRegime } from './applicabilityEngine'
+import {
+  classifyParcelQuestionScope,
+  evaluateApplicability,
+  requiresDeterminedParcelRegime,
+} from './applicabilityEngine'
 
 function completeContext(): NormalizedParcelContext {
   return buildNormalizedParcelContext({
@@ -53,6 +57,24 @@ describe('requiresDeterminedParcelRegime', () => {
     expect(requiresDeterminedParcelRegime('Explica el artículo 12 del planeamiento')).toBe(false)
     expect(requiresDeterminedParcelRegime('¿Cuántas plantas puedo construir en esta parcela?')).toBe(true)
     expect(requiresDeterminedParcelRegime('¿Qué ocupación máxima se permite en esta finca?')).toBe(true)
+  })
+})
+
+describe('classifyParcelQuestionScope', () => {
+  it('mantiene respondibles las consultas que no dependen del régimen parcelario', () => {
+    expect(classifyParcelQuestionScope('Resume las afecciones de carreteras y aguas')).toBe('independent')
+    expect(classifyParcelQuestionScope('¿Cuál es el planeamiento vigente?')).toBe('independent')
+    expect(classifyParcelQuestionScope('Indica las coordenadas y la referencia catastral')).toBe('independent')
+  })
+
+  it('identifica las consultas que sí dependen de clasificación u ordenanza', () => {
+    expect(classifyParcelQuestionScope('¿Qué retranqueo lateral se exige?')).toBe('regime')
+    expect(classifyParcelQuestionScope('¿Qué ocupación máxima tiene la parcela?')).toBe('regime')
+  })
+
+  it('separa las consultas mixtas para responder su parte independiente', () => {
+    expect(classifyParcelQuestionScope('Indica las afecciones y el retranqueo aplicable')).toBe('mixed')
+    expect(classifyParcelQuestionScope('Resume el documento y dime cuántas plantas puedo construir')).toBe('mixed')
   })
 })
 
@@ -132,7 +154,7 @@ describe('evaluateApplicability', () => {
     const result = evaluateApplicability(
       completeContext(),
       [candidate(), candidate({ id: 'chunk-2', municipalityName: 'A Coruña' })],
-      false
+      true
     )
 
     expect(result.status).toBe('CONFLICTIVO')
@@ -187,7 +209,7 @@ describe('evaluateApplicability', () => {
           hierarchy: 'ficha',
         }),
       ],
-      false
+      true
     )
 
     expect(result.status).toBe('CONFLICTIVO')
