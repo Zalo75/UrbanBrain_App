@@ -79,6 +79,9 @@ describe('evaluateClassificationResolution', () => {
         classificationCode: 'SU',
         categoryCode: 'SUSC',
         areaNames: ['LEDOÑO'],
+        primarySource: 'siotuga',
+        confidence: 'high',
+        reason: expect.stringMatching(/evidencia espacial/i),
       })
     )
     expect(result.proposal).toBeUndefined()
@@ -98,20 +101,69 @@ describe('evaluateClassificationResolution', () => {
     expect(result.proposal).toBeUndefined()
   })
 
-  it('conserva Oleiros pero exige revision si la capa no es trazable al instrumento', () => {
+  it('no propone una clasificación única cuando la capa sólo cubre parte de la parcela', () => {
+    const partial = candidate('betanzos-rural-slice', 'SNR', 'SNRSC', {
+      parcelCoverage: {
+        parcelAreaSquareMetres: 31_000,
+        intersectionAreaSquareMetres: 13_500,
+        parcelPercentage: 43.55,
+        method: 'polygon_intersection',
+      },
+    })
+
+    const result = evaluate({
+      candidates: [partial],
+      discrepancies: [
+        {
+          reason: 'partial_parcel_coverage',
+          field: 'coverage',
+          explanation: 'La capa sólo cubre una parte de la parcela.',
+          assertions: [
+            {
+              candidateId: partial.id,
+              value: 'SNR/SNRSC: 43.55 %',
+              source: 'siotuga',
+              evidence: partial.evidence,
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(result.status).toBe('review_required')
+    expect(result.reviewReasons).toContain('partial_parcel_coverage')
+    expect(result.proposal).toBeUndefined()
+    expect(result.automaticSelection).toBeUndefined()
+  })
+
+  it('usa como probable una clasificación única con incertidumbre documental', () => {
     const oleiros = candidate('oleiros-su-suc', 'SU', 'SUC', {
       instrumentTraceability: 'pending',
     })
 
     const result = evaluate({ candidates: [oleiros] })
 
-    expect(result.status).toBe('review_required')
+    expect(result.status).toBe('probable')
+    expect(result.confidenceLevel).toBe('probable')
     expect(result.nextAction).toBe('review_official_sources')
     expect(result.candidates).toEqual([oleiros])
     expect(result.reviewReasons).toContain('instrument_traceability_pending')
-    expect(result.proposal).toEqual(
-      expect.objectContaining({ candidateId: oleiros.id, requiresProfessionalReview: true })
+    expect(result.automaticSelection).toEqual(
+      expect.objectContaining({ candidateId: oleiros.id, confidence: 'medium' })
     )
+    expect(result.proposal).toBeUndefined()
+  })
+
+  it('mantiene el bloqueo si la capa no coincide con el instrumento identificado', () => {
+    const mismatched = candidate('mismatched-layer', 'SU', 'SUC', {
+      instrumentTraceability: 'mismatch',
+    })
+
+    const result = evaluate({ candidates: [mismatched] })
+
+    expect(result.status).toBe('review_required')
+    expect(result.confidenceLevel).toBe('unknown')
+    expect(result.reviewReasons).toContain('instrument_layer_mismatch')
     expect(result.automaticSelection).toBeUndefined()
   })
 
@@ -167,7 +219,7 @@ describe('evaluateClassificationResolution', () => {
     expect(unavailable.nextAction).toBe('retry_source')
   })
 
-  it('no convierte una propuesta en seleccion automatica y desempata de forma determinista', () => {
+  it('selecciona de forma determinista una clasificación probable equivalente', () => {
     const second = candidate('z-candidate', 'SU', 'SUC', {
       instrumentTraceability: 'pending',
     })
@@ -177,9 +229,9 @@ describe('evaluateClassificationResolution', () => {
 
     const result = evaluate({ candidates: [second, first] })
 
-    expect(result.status).toBe('review_required')
-    expect(result.proposal?.candidateId).toBe('a-candidate')
-    expect(result.automaticSelection).toBeUndefined()
+    expect(result.status).toBe('probable')
+    expect(result.automaticSelection?.candidateId).toBe('a-candidate')
+    expect(result.proposal).toBeUndefined()
     expect(result.finalSelection).toBeUndefined()
   })
 })

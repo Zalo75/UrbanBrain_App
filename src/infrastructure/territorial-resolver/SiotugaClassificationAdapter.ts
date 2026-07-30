@@ -2,6 +2,10 @@ import type {
   ClassificationCandidate,
   ClassificationDiscrepancy,
   ClassificationInstrumentTraceability,
+  OfficialClassificationAttributes,
+  ClassificationParcelCoverage,
+  ClassificationSourcePort,
+  ClassificationSourceResult,
   ClassificationSourceCheck,
   ParcelGeometry,
   PlanningApplicability,
@@ -19,6 +23,7 @@ import {
 } from '@/infrastructure/territorial-resolver/officialHttp';
 import {
   getSiotugaClassificationLayer,
+  getSiotugaClassificationLayers,
   type SiotugaClassificationLayerRegistration,
 } from '@/infrastructure/territorial-resolver/SiotugaClassificationRegistry';
 
@@ -31,9 +36,17 @@ interface Polygon {
 
 interface Feature {
   id: string;
+  enclosureId?: string;
   classificationCode: string;
   categoryCode?: string;
+  legalClassificationCode?: string;
+  legalCategoryCode?: string;
+  planningCategoryCode?: string;
   denomination?: string;
+  use?: string;
+  geometryAreaSquareMetres?: number;
+  status?: string;
+  version?: string;
   polygons: Polygon[];
 }
 
@@ -73,6 +86,13 @@ function xmlValue(fragment: string, tag: string) {
     .trim();
 }
 
+function numericXmlValue(fragment: string, tag: string) {
+  const value = xmlValue(fragment, tag);
+  if (!value) return undefined;
+  const parsed = Number(value.replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function parseRing(posList: string): Point[] {
   const values = posList.trim().split(/\s+/).map(Number).filter(Number.isFinite);
   const points: Point[] = [];
@@ -108,14 +128,23 @@ export function parseSiotugaClassificationFeatures(xml: string): Feature[] {
         return { exterior, interiors };
       })
       .filter((polygon): polygon is Polygon => Boolean(polygon));
+    const enclosureId = xmlValue(fragment, 'id_recinto');
     features.push({
       id:
         /gml:id=["']([^"']+)["']/i.exec(fragment)?.[1] ??
-        xmlValue(fragment, 'id_recinto') ??
+        enclosureId ??
         'feature-without-id',
+      enclosureId,
       classificationCode,
       categoryCode: xmlValue(fragment, 'cat_homo'),
+      legalClassificationCode: xmlValue(fragment, 'cla_ley'),
+      legalCategoryCode: xmlValue(fragment, 'cat_ley'),
+      planningCategoryCode: xmlValue(fragment, 'cat_plan'),
       denomination: xmlValue(fragment, 'denom'),
+      use: xmlValue(fragment, 'uso'),
+      geometryAreaSquareMetres: numericXmlValue(fragment, 'geom_area'),
+      status: xmlValue(fragment, 'estado'),
+      version: xmlValue(fragment, 'version'),
       polygons,
     });
   }
@@ -230,12 +259,41 @@ function traceability(
   return matchesRegisteredInstrument(planning, layer) ? 'verified' : 'mismatch';
 }
 
+function officialAttributes(feature: Feature): OfficialClassificationAttributes {
+  return {
+    sourceFeatureId: feature.id,
+    enclosureId: feature.enclosureId,
+    classificationCode: feature.classificationCode,
+    categoryCode: feature.categoryCode,
+    legalClassificationCode: feature.legalClassificationCode,
+    legalCategoryCode: feature.legalCategoryCode,
+    planningCategoryCode: feature.planningCategoryCode,
+    denomination: feature.denomination,
+    use: feature.use,
+    geometryAreaSquareMetres: feature.geometryAreaSquareMetres,
+    status: feature.status,
+    version: feature.version,
+  };
+}
+
+function matchesReviewScope(
+  feature: Feature,
+  scope: NonNullable<SiotugaClassificationLayerRegistration['reviewScopes']>[number]
+) {
+  return (
+    scope.classificationCodes.includes(feature.classificationCode) &&
+    (!scope.categoryCodes ||
+      (feature.categoryCode !== undefined && scope.categoryCodes.includes(feature.categoryCode)))
+  );
+}
+
 export class SiotugaClassificationAdapter implements PlanningPort {
   constructor(
     private readonly fallback: PlanningPort,
     private readonly fetcher: FetchLike = fetch,
     private readonly timeoutMs = 8_000,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly registeredLayer?: SiotugaClassificationLayerRegistration
   ) {}
 
   async findApplicablePlanning(location: {
@@ -244,7 +302,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
     geometry?: ParcelGeometry;
   }): Promise<PlanningApplicability> {
     const planning = await this.fallback.findApplicablePlanning(location);
-    const layer = getSiotugaClassificationLayer(location.municipalityCode);
+    const layer = this.registeredLayer ?? getSiotugaClassificationLayer(location.municipalityCode);
     if (!layer) {
       return {
         ...planning,
@@ -392,10 +450,20 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       const key = `${feature.classificationCode}|${feature.categoryCode ?? ''}`;
       groups.set(key, [...(groups.get(key) ?? []), feature]);
     }
+    const applicableReviewScopes = (layer.reviewScopes ?? []).filter((scope) =>
+      features.some((feature) => matchesReviewScope(feature, scope))
+    );
     const evidence: TerritorialEvidence[] = [
       ...planning.evidence,
       { source: 'siotuga', sourceUrl: layer.instrument.inventoryUrl, retrievedAt, method: `registro de capa ${layer.layerName} vinculado al documento SIOTUGA ${layer.instrument.siotugaDocumentId}`, scope: 'planning_classification' },
       { source: 'siotuga', sourceUrl: url.toString(), retrievedAt, method: location.geometry ? 'WFS BBOX e intersección local con geometría parcelaria EPSG:4326' : 'WFS BBOX y punto en polígono EPSG:4326', scope: 'planning_classification' },
+      ...applicableReviewScopes.map((scope) => ({
+        source: 'siotuga' as const,
+        sourceUrl: scope.sourceUrl,
+        retrievedAt,
+        method: `control de vigencia del ámbito ${scope.id} frente al instrumento posterior SIOTUGA ${scope.instrumentId}`,
+        scope: 'planning_classification' as const,
+      })),
     ];
     const classificationSourceCheck: ClassificationSourceCheck = {
       source: 'siotuga',
@@ -410,6 +478,9 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       : ('representative_point' as const);
     const candidates: ClassificationCandidate[] = [...groups.entries()].map(([key, matching]) => {
       const first = matching[0];
+      const coverage = location.geometry
+        ? parcelCoverage(location.geometry, matching)
+        : undefined;
       const areas: PlanningArea[] = [
         ...new Map(
           matching
@@ -423,6 +494,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       }));
       return {
         id: `${layer.layerName}:${key}`,
+        sourceKey: layer.layerName,
         classification: {
           code: first.classificationCode,
           categoryCode: first.categoryCode,
@@ -442,6 +514,8 @@ export class SiotugaClassificationAdapter implements PlanningPort {
         evidenceBasis,
         instrumentTraceability: layerTraceability,
         normalizationStatus: normalizationStatus(first.classificationCode),
+        parcelCoverage: coverage,
+        officialAttributes: matching.map(officialAttributes),
       };
     });
     const discrepancies: ClassificationDiscrepancy[] =
@@ -465,6 +539,98 @@ export class SiotugaClassificationAdapter implements PlanningPort {
               })),
             },
           ];
+    const unexpectedLayerFeatures = features.filter(
+      (feature) =>
+        (feature.status !== undefined && comparable(feature.status) !== 'alta') ||
+        (feature.version !== undefined &&
+          feature.version !== layer.instrument.siotugaDocumentId)
+    );
+    if (unexpectedLayerFeatures.length) {
+      discrepancies.push({
+        reason: 'instrument_layer_mismatch',
+        field: 'instrument',
+        explanation:
+          'La respuesta WFS contiene recintos cuyo estado o versión no coincide con la capa registrada como activa.',
+        assertions: candidates
+          .filter((candidate) =>
+            candidate.officialAttributes?.some((attributes) =>
+              unexpectedLayerFeatures.some(
+                (feature) => feature.id === attributes.sourceFeatureId
+              )
+            )
+          )
+          .map((candidate) => ({
+            candidateId: candidate.id,
+            value: candidate.officialAttributes
+              ?.map(
+                (attributes) =>
+                  `${attributes.enclosureId ?? attributes.sourceFeatureId}: estado ${attributes.status ?? '-'}, versión ${attributes.version ?? '-'}`
+              )
+              .join('; ') ?? 'Estado o versión no coincidente',
+            source: 'siotuga',
+            evidence: candidate.evidence,
+          })),
+      });
+    }
+    for (const scope of applicableReviewScopes) {
+      const affectedCandidates = candidates.filter((candidate) =>
+        candidate.officialAttributes?.some(
+          (attributes) =>
+            scope.classificationCodes.includes(attributes.classificationCode) &&
+            (!scope.categoryCodes ||
+              (attributes.categoryCode !== undefined &&
+                scope.categoryCodes.includes(attributes.categoryCode)))
+        )
+      );
+      discrepancies.push({
+        reason: 'planning_update_scope_pending',
+        field: 'instrument',
+        explanation: scope.explanation,
+        assertions: affectedCandidates.map((candidate) => ({
+          candidateId: candidate.id,
+          value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}; revisar ${scope.name} (${scope.instrumentId})`,
+          source: 'siotuga',
+          evidence: candidate.evidence,
+        })),
+      });
+    }
+    if (location.geometry) {
+      const totalCoverage = parcelCoverage(location.geometry, features);
+      if (!totalCoverage) {
+        discrepancies.push({
+          reason: 'insufficient_geometry',
+          field: 'coverage',
+          explanation:
+            'No se pudo calcular de forma fiable la superficie intersectada por los recintos oficiales.',
+          assertions: candidates.map((candidate) => ({
+            candidateId: candidate.id,
+            value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}`,
+            source: 'siotuga',
+            evidence: candidate.evidence,
+          })),
+        });
+      } else if (totalCoverage.parcelPercentage < COMPLETE_PARCEL_PERCENTAGE) {
+        discrepancies.push({
+          reason: 'partial_parcel_coverage',
+          field: 'coverage',
+          explanation:
+            'Los recintos de clasificación devueltos por la capa oficial sólo cubren una parte de la parcela; el resto queda sin clasificación estructurada.',
+          assertions: [
+            ...candidates.map((candidate) => ({
+              candidateId: candidate.id,
+              value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}: ${candidate.parcelCoverage?.intersectionAreaSquareMetres ?? 0} m² (${candidate.parcelCoverage?.parcelPercentage ?? 0} % de la parcela)`,
+              source: 'siotuga' as const,
+              evidence: candidate.evidence,
+            })),
+            {
+              value: `${round(100 - totalCoverage.parcelPercentage, 2)} % sin clasificación estructurada`,
+              source: 'siotuga',
+              evidence: evidence.filter((item) => item.scope === 'planning_classification'),
+            },
+          ],
+        });
+      }
+    }
     if (location.geometry && location.coordinates) {
       const geometryCodes = [...groups.keys()].sort();
       const pointCodes = [
@@ -515,10 +681,21 @@ export class SiotugaClassificationAdapter implements PlanningPort {
           source: 'siotuga',
           scope: 'layer',
         },
+        ...applicableReviewScopes.map((scope) => ({
+          kind: 'planning_document' as const,
+          label: `Revisar ${scope.name}`,
+          url: scope.sourceUrl,
+          source: 'siotuga' as const,
+          scope: 'instrument' as const,
+        })),
       ],
       evidence,
     });
-    const selectedCandidate = classificationResolution.status === 'clear' ? candidates[0] : undefined;
+    const selectedCandidate = classificationResolution.automaticSelection
+      ? candidates.find(
+          (candidate) => candidate.id === classificationResolution.automaticSelection?.candidateId
+        )
+      : undefined;
     const areas = candidates.flatMap((candidate) => candidate.areas);
     return {
       ...planning,
@@ -530,6 +707,9 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       warnings: [
         ...planning.warnings,
         ...traceabilityWarnings,
+        ...applicableReviewScopes.map((scope) =>
+          warning('planning_classification_update_scope_pending', scope.explanation)
+        ),
         ...(features.length
           ? []
           : [
@@ -539,6 +719,384 @@ export class SiotugaClassificationAdapter implements PlanningPort {
               ),
             ]),
       ],
+    };
+  }
+}
+
+type MetricPoint = [x: number, y: number];
+
+interface MetricPolygon {
+  exterior: MetricPoint[];
+  interiors: MetricPoint[][];
+}
+
+interface Triangle {
+  points: [MetricPoint, MetricPoint, MetricPoint];
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+const EARTH_RADIUS_METRES = 6_371_008.8;
+const COMPLETE_PARCEL_PERCENTAGE = 99.5;
+const GEOMETRY_EPSILON = 1e-7;
+
+function cross(a: MetricPoint, b: MetricPoint, c: MetricPoint) {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function signedRingArea(ring: MetricPoint[]) {
+  return ring.reduce((area, point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    return area + point[0] * next[1] - next[0] * point[1];
+  }, 0) / 2;
+}
+
+function sameMetricPoint(left: MetricPoint, right: MetricPoint) {
+  return (
+    Math.abs(left[0] - right[0]) <= GEOMETRY_EPSILON &&
+    Math.abs(left[1] - right[1]) <= GEOMETRY_EPSILON
+  );
+}
+
+function cleanMetricRing(ring: MetricPoint[]) {
+  const withoutDuplicates = ring.filter(
+    (point, index) => index === 0 || !sameMetricPoint(point, ring[index - 1])
+  );
+  if (
+    withoutDuplicates.length > 1 &&
+    sameMetricPoint(withoutDuplicates[0], withoutDuplicates.at(-1)!)
+  ) {
+    withoutDuplicates.pop();
+  }
+
+  let cleaned = withoutDuplicates;
+  let changed = true;
+  while (changed && cleaned.length > 3) {
+    changed = false;
+    cleaned = cleaned.filter((point, index, points) => {
+      const previous = points[(index - 1 + points.length) % points.length];
+      const next = points[(index + 1) % points.length];
+      if (Math.abs(cross(previous, point, next)) > GEOMETRY_EPSILON) return true;
+      changed = true;
+      return false;
+    });
+  }
+  return signedRingArea(cleaned) < 0 ? [...cleaned].reverse() : cleaned;
+}
+
+function pointInMetricTriangle(point: MetricPoint, triangle: [MetricPoint, MetricPoint, MetricPoint]) {
+  return (
+    cross(triangle[0], triangle[1], point) >= -GEOMETRY_EPSILON &&
+    cross(triangle[1], triangle[2], point) >= -GEOMETRY_EPSILON &&
+    cross(triangle[2], triangle[0], point) >= -GEOMETRY_EPSILON
+  );
+}
+
+function triangle(points: [MetricPoint, MetricPoint, MetricPoint]): Triangle {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return {
+    points,
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  };
+}
+
+function triangulate(ring: MetricPoint[]): Triangle[] | undefined {
+  const points = cleanMetricRing(ring);
+  if (points.length < 3 || Math.abs(signedRingArea(points)) <= GEOMETRY_EPSILON) return undefined;
+  if (points.length === 3) return [triangle([points[0], points[1], points[2]])];
+
+  const remaining = points.map((_, index) => index);
+  const triangles: Triangle[] = [];
+  while (remaining.length > 3) {
+    let earFound = false;
+    for (let position = 0; position < remaining.length; position += 1) {
+      const previous = remaining[(position - 1 + remaining.length) % remaining.length];
+      const current = remaining[position];
+      const next = remaining[(position + 1) % remaining.length];
+      const ear: [MetricPoint, MetricPoint, MetricPoint] = [
+        points[previous],
+        points[current],
+        points[next],
+      ];
+      if (cross(ear[0], ear[1], ear[2]) <= GEOMETRY_EPSILON) continue;
+      const containsOtherVertex = remaining.some(
+        (index) =>
+          index !== previous &&
+          index !== current &&
+          index !== next &&
+          pointInMetricTriangle(points[index], ear)
+      );
+      if (containsOtherVertex) continue;
+      triangles.push(triangle(ear));
+      remaining.splice(position, 1);
+      earFound = true;
+      break;
+    }
+    if (!earFound) return undefined;
+  }
+  triangles.push(
+    triangle([points[remaining[0]], points[remaining[1]], points[remaining[2]]])
+  );
+  return triangles;
+}
+
+function lineIntersection(
+  firstStart: MetricPoint,
+  firstEnd: MetricPoint,
+  secondStart: MetricPoint,
+  secondEnd: MetricPoint
+): MetricPoint {
+  const firstDirection: MetricPoint = [
+    firstEnd[0] - firstStart[0],
+    firstEnd[1] - firstStart[1],
+  ];
+  const secondDirection: MetricPoint = [
+    secondEnd[0] - secondStart[0],
+    secondEnd[1] - secondStart[1],
+  ];
+  const denominator =
+    firstDirection[0] * secondDirection[1] - firstDirection[1] * secondDirection[0];
+  if (Math.abs(denominator) <= GEOMETRY_EPSILON) return firstEnd;
+  const offset: MetricPoint = [
+    secondStart[0] - firstStart[0],
+    secondStart[1] - firstStart[1],
+  ];
+  const distance =
+    (offset[0] * secondDirection[1] - offset[1] * secondDirection[0]) / denominator;
+  return [
+    firstStart[0] + distance * firstDirection[0],
+    firstStart[1] + distance * firstDirection[1],
+  ];
+}
+
+function clippedTriangleArea(subject: Triangle, clip: Triangle) {
+  let output: MetricPoint[] = [...subject.points];
+  for (let edge = 0; edge < clip.points.length; edge += 1) {
+    const clipStart = clip.points[edge];
+    const clipEnd = clip.points[(edge + 1) % clip.points.length];
+    const input = output;
+    output = [];
+    if (!input.length) break;
+    let previous = input.at(-1)!;
+    for (const current of input) {
+      const currentInside = cross(clipStart, clipEnd, current) >= -GEOMETRY_EPSILON;
+      const previousInside = cross(clipStart, clipEnd, previous) >= -GEOMETRY_EPSILON;
+      if (currentInside) {
+        if (!previousInside) {
+          output.push(lineIntersection(previous, current, clipStart, clipEnd));
+        }
+        output.push(current);
+      } else if (previousInside) {
+        output.push(lineIntersection(previous, current, clipStart, clipEnd));
+      }
+      previous = current;
+    }
+  }
+  return output.length >= 3 ? Math.abs(signedRingArea(output)) : 0;
+}
+
+function ringsIntersectionArea(first: MetricPoint[], second: MetricPoint[]) {
+  const firstTriangles = triangulate(first);
+  const secondTriangles = triangulate(second);
+  if (!firstTriangles || !secondTriangles) return undefined;
+  let area = 0;
+  for (const firstTriangle of firstTriangles) {
+    for (const secondTriangle of secondTriangles) {
+      if (
+        firstTriangle.maxX < secondTriangle.minX ||
+        secondTriangle.maxX < firstTriangle.minX ||
+        firstTriangle.maxY < secondTriangle.minY ||
+        secondTriangle.maxY < firstTriangle.minY
+      ) {
+        continue;
+      }
+      area += clippedTriangleArea(firstTriangle, secondTriangle);
+    }
+  }
+  return area;
+}
+
+function polygonsIntersectionArea(first: MetricPolygon, second: MetricPolygon) {
+  const exterior = ringsIntersectionArea(first.exterior, second.exterior);
+  if (exterior === undefined) return undefined;
+  let area = exterior;
+  for (const hole of first.interiors) {
+    const removed = ringsIntersectionArea(hole, second.exterior);
+    if (removed === undefined) return undefined;
+    area -= removed;
+  }
+  for (const hole of second.interiors) {
+    const removed = ringsIntersectionArea(first.exterior, hole);
+    if (removed === undefined) return undefined;
+    area -= removed;
+  }
+  for (const firstHole of first.interiors) {
+    for (const secondHole of second.interiors) {
+      const restored = ringsIntersectionArea(firstHole, secondHole);
+      if (restored === undefined) return undefined;
+      area += restored;
+    }
+  }
+  return Math.max(0, area);
+}
+
+function round(value: number, decimals: number) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function parcelCoverage(
+  geometry: ParcelGeometry,
+  features: Feature[]
+): ClassificationParcelCoverage | undefined {
+  const points = geometry.coordinates.flatMap((polygon) =>
+    polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
+  );
+  if (!points.length) return undefined;
+  const referenceLng = points.reduce((sum, [lng]) => sum + lng, 0) / points.length;
+  const referenceLat = points.reduce((sum, [, lat]) => sum + lat, 0) / points.length;
+  const radians = Math.PI / 180;
+  const project = ([lng, lat]: Point): MetricPoint => [
+    EARTH_RADIUS_METRES * (lng - referenceLng) * radians * Math.cos(referenceLat * radians),
+    EARTH_RADIUS_METRES * (lat - referenceLat) * radians,
+  ];
+  const parcelPolygons: MetricPolygon[] = geometry.coordinates.map((polygon) => ({
+    exterior: polygon[0].map(([lng, lat]) => project([lng, lat])),
+    interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => project([lng, lat]))),
+  }));
+  const classificationPolygons: MetricPolygon[] = features.flatMap((feature) =>
+    feature.polygons.map((polygon) => ({
+      exterior: polygon.exterior.map(project),
+      interiors: polygon.interiors.map((ring) => ring.map(project)),
+    }))
+  );
+  const parcelArea = parcelPolygons.reduce(
+    (total, polygon) =>
+      total +
+      Math.abs(signedRingArea(polygon.exterior)) -
+      polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
+    0
+  );
+  if (parcelArea <= GEOMETRY_EPSILON) return undefined;
+
+  let intersectionArea = 0;
+  for (const parcelPolygon of parcelPolygons) {
+    for (const classificationPolygon of classificationPolygons) {
+      const area = polygonsIntersectionArea(parcelPolygon, classificationPolygon);
+      if (area === undefined) return undefined;
+      intersectionArea += area;
+    }
+  }
+  intersectionArea = Math.min(parcelArea, Math.max(0, intersectionArea));
+  return {
+    parcelAreaSquareMetres: round(parcelArea, 2),
+    intersectionAreaSquareMetres: round(intersectionArea, 2),
+    parcelPercentage: round((intersectionArea / parcelArea) * 100, 2),
+    method: 'polygon_intersection',
+  };
+}
+
+/**
+ * Fuente SIOTUGA para el agregador multi-fuente. Consulta todas las capas
+ * compatibles registradas y devuelve evidencias; la decisión final se realiza
+ * exclusivamente en MultiSourceClassificationResolver.
+ */
+export class SiotugaClassificationSourceAdapter implements ClassificationSourcePort {
+  constructor(
+    private readonly fetcher: FetchLike = fetch,
+    private readonly timeoutMs = 8_000,
+    private readonly now: () => Date = () => new Date()
+  ) {}
+
+  async findClassifications(
+    planning: PlanningApplicability,
+    location: {
+      municipalityCode?: string;
+      coordinates?: TerritorialCoordinates;
+      geometry?: ParcelGeometry;
+    }
+  ): Promise<ClassificationSourceResult> {
+    const layers = getSiotugaClassificationLayers(location.municipalityCode);
+    if (layers.length === 0) {
+      return {
+        candidates: [],
+        discrepancies: [],
+        sourceChecks: [],
+        officialLinks: planning.sourceUrl
+          ? [{
+              kind: 'planning_document',
+              label: 'Ver planeamiento oficial',
+              url: planning.sourceUrl,
+              source: 'siotuga',
+              scope: 'instrument',
+            }]
+          : [],
+        evidence: [],
+        warnings: [],
+      };
+    }
+
+    const fallback: PlanningPort = {
+      findApplicablePlanning: async () => planning,
+    };
+    const results = await Promise.all(
+      layers.map((layer) =>
+        new SiotugaClassificationAdapter(
+          fallback,
+          this.fetcher,
+          this.timeoutMs,
+          this.now,
+          layer
+        ).findApplicablePlanning(location)
+      )
+    );
+
+    const candidates = results.flatMap(
+      (result) => result.classificationResolution?.candidates ?? []
+    );
+    const discrepancies = results.flatMap(
+      (result) => result.classificationResolution?.discrepancies ?? []
+    );
+    const sourceChecks = results.flatMap(
+      (result) => result.classificationResolution?.sourceChecks ?? []
+    );
+    const officialLinks = [
+      ...new Map(
+        results
+          .flatMap((result) => result.classificationResolution?.officialLinks ?? [])
+          .map((link) => [`${link.kind}|${link.url}`, link])
+      ).values(),
+    ];
+    const evidence = [
+      ...new Map(
+        results
+          .flatMap((result) => result.classificationResolution?.evidence ?? [])
+          .filter((item) => item.scope === 'planning_classification')
+          .map((item) => [`${item.source}|${item.sourceUrl}|${item.method}`, item])
+      ).values(),
+    ];
+    const warnings = [
+      ...new Map(
+        results
+          .flatMap((result) => result.warnings)
+          .filter((item) => item.code.startsWith('planning_'))
+          .map((item) => [`${item.code}|${item.message}`, item])
+      ).values(),
+    ];
+
+    return {
+      candidates,
+      discrepancies,
+      sourceChecks,
+      officialLinks,
+      evidence,
+      warnings,
     };
   }
 }

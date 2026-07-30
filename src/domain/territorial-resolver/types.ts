@@ -95,6 +95,7 @@ export interface PlanningArea {
 
 export type ClassificationResolutionStatus =
   | 'clear'
+  | 'probable'
   | 'multiple_intersections'
   | 'review_required'
   | 'not_available'
@@ -108,6 +109,8 @@ export type ClassificationNextAction =
 
 export type ClassificationReviewReason =
   | 'point_geometry_mismatch'
+  | 'partial_parcel_coverage'
+  | 'planning_update_scope_pending'
   | 'instrument_traceability_pending'
   | 'instrument_layer_mismatch'
   | 'source_disagreement'
@@ -122,8 +125,33 @@ export type ClassificationEvidenceBasis =
 
 export type ClassificationInstrumentTraceability = 'verified' | 'pending' | 'mismatch'
 
+export type ClassificationConfidenceLevel = 'confirmed' | 'probable' | 'unknown'
+
+export interface ClassificationParcelCoverage {
+  parcelAreaSquareMetres: number
+  intersectionAreaSquareMetres: number
+  parcelPercentage: number
+  method: 'polygon_intersection'
+}
+
+export interface OfficialClassificationAttributes {
+  sourceFeatureId: string
+  enclosureId?: string
+  classificationCode: string
+  categoryCode?: string
+  legalClassificationCode?: string
+  legalCategoryCode?: string
+  planningCategoryCode?: string
+  denomination?: string
+  use?: string
+  geometryAreaSquareMetres?: number
+  status?: string
+  version?: string
+}
+
 export interface ClassificationCandidate {
   id: string
+  sourceKey?: string
   classification: PlanningClassification
   areas: PlanningArea[]
   source: Exclude<TerritorialEvidence['source'], 'urbanbrain'>
@@ -132,6 +160,8 @@ export interface ClassificationCandidate {
   evidenceBasis: ClassificationEvidenceBasis
   instrumentTraceability: ClassificationInstrumentTraceability
   normalizationStatus: 'mapped' | 'unmapped'
+  parcelCoverage?: ClassificationParcelCoverage
+  officialAttributes?: OfficialClassificationAttributes[]
 }
 
 export interface ClassificationDiscrepancyAssertion {
@@ -163,10 +193,33 @@ export interface ClassificationSelection {
   operationalValue?: string
   areaNames: string[]
   reason?: string
+  primarySource?: string
+  corroboratingSources?: string[]
+  confidence?: TerritorialConfidence
   selectedAt?: string
   selectedBy?: string
   technicianValidated: boolean
   resolutionFingerprint?: string
+}
+
+export interface ClassificationSourceResult {
+  candidates: ClassificationCandidate[]
+  discrepancies: ClassificationDiscrepancy[]
+  sourceChecks: ClassificationSourceCheck[]
+  officialLinks: OfficialResourceLink[]
+  evidence: TerritorialEvidence[]
+  warnings: TerritorialWarning[]
+}
+
+export interface ClassificationSourcePort {
+  findClassifications(
+    planning: PlanningApplicability,
+    location: {
+      municipalityCode?: string
+      coordinates?: TerritorialCoordinates
+      geometry?: ParcelGeometry
+    }
+  ): Promise<ClassificationSourceResult>
 }
 
 export interface OfficialResourceLink {
@@ -188,6 +241,7 @@ export interface ClassificationSourceCheck extends OfficialSourceCheck {
 
 export interface ClassificationResolution {
   status: ClassificationResolutionStatus
+  confidenceLevel?: ClassificationConfidenceLevel
   nextAction: ClassificationNextAction
   candidates: ClassificationCandidate[]
   discrepancies: ClassificationDiscrepancy[]

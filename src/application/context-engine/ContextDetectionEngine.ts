@@ -18,7 +18,8 @@ import { CatastroOfficialAdapter } from '@/infrastructure/territorial-resolver/C
 import { CartoCiudadOfficialAdapter } from '@/infrastructure/territorial-resolver/CartoCiudadOfficialAdapter'
 import { DatabasePlanningAdapter } from '@/infrastructure/territorial-resolver/DatabasePlanningAdapter'
 import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/BetanzosPlanningAdapter'
-import { SiotugaClassificationAdapter } from '@/infrastructure/territorial-resolver/SiotugaClassificationAdapter'
+import { SiotugaClassificationSourceAdapter } from '@/infrastructure/territorial-resolver/SiotugaClassificationAdapter'
+import { MultiSourceClassificationResolver } from '@/application/territorial-resolver/multiSourceClassificationResolver'
 import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
 import {
   getMunicipalityByName,
@@ -27,6 +28,7 @@ import {
   getProvinceByName,
 } from '@/shared/territory'
 import { territorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
+import { assessClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
 
@@ -41,8 +43,14 @@ function officialResolver(): Resolver {
   const dependencies = {
     catastro: new CatastroOfficialAdapter(),
     geocoder: new CartoCiudadOfficialAdapter(),
-    planning: new SiotugaClassificationAdapter(
-      new BetanzosPlanningAdapter(new DatabasePlanningAdapter())
+    planning: new MultiSourceClassificationResolver(
+      new BetanzosPlanningAdapter(new DatabasePlanningAdapter()),
+      [{
+        id: 'SIOTUGA WFS',
+        source: 'siotuga',
+        adapter: new SiotugaClassificationSourceAdapter(),
+        requiredForAutomaticDecision: true,
+      }]
     ),
     affects: new IdegAffectAdapter(),
   }
@@ -51,6 +59,9 @@ function officialResolver(): Resolver {
 
 function detectionSummary(result: TerritorialResolution) {
   const effective = officialContextForUse(result)
+  const classificationAssessment = assessClassificationResolution(
+    effective?.planning.classificationResolution
+  )
   const manual = result.continuity?.manualContext
   const municipality = getMunicipalityByName(effective?.municipality ?? '')
   const province =
@@ -111,6 +122,10 @@ function detectionSummary(result: TerritorialResolution) {
     planningApplicabilityStatus: effective?.planning.status ?? 'not_determined',
     planningCanAnswerConcreteParameters:
       effective?.planning.canAnswerConcreteParameters ?? false,
+    classificationConfidenceLevel: classificationAssessment.level,
+    classificationReason: classificationAssessment.reason,
+    classificationSources: classificationAssessment.sources,
+    classificationWarnings: classificationAssessment.warnings,
     planningWarnings: effective?.planning.warnings ?? [],
     planningConflicts: effective?.planning.conflicts ?? [],
     planningSource: effective?.planning.evidence.some((item) => item.source === 'siotuga')
