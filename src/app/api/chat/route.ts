@@ -14,6 +14,11 @@ import {
   evaluateApplicability,
 } from '@/application/parcel-context/applicabilityEngine';
 import {
+  buildNormativeSearchScope,
+  canSearchConcreteParameters,
+  type NormativeSearchScope,
+} from '@/application/parcel-context/normativeSearchScope';
+import {
   buildAnswerContract,
   buildMunicipalSafetyPrompt,
   buildSafeAbstention,
@@ -61,7 +66,10 @@ interface V2SearchResult {
   officialIdentifier?: string | null;
 }
 
-function mapV1Candidates(chunks: V1Chunk[]): NormativeCandidate[] {
+function mapV1Candidates(
+  chunks: V1Chunk[],
+  scope?: NormativeSearchScope
+): NormativeCandidate[] {
   return chunks.map((chunk) => ({
     id: String(chunk.chunk_id),
     content: chunk.texto ?? '',
@@ -72,6 +80,9 @@ function mapV1Candidates(chunks: V1Chunk[]): NormativeCandidate[] {
     sourceUrl: chunk.original_path ?? null,
     similarity: chunk.similarity ?? null,
     hierarchy: 'municipal' as const,
+    ordinance: scope?.ordinance ?? null,
+    planningArea: scope?.planningZone ?? null,
+    parentInstrument: scope?.instrumentId ?? null,
   }));
 }
 
@@ -134,10 +145,17 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       userMessages: [...parcelInputs.userMessages, message],
     });
     // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
+    const trustedMunicipioCodigo = trustedMunicipalityCodeFilter(parcelContext);
     const municipioCodigo =
-      trustedMunicipalityCodeFilter(parcelContext) ?? '__urbanbrain_unconfirmed_municipality__';
+      trustedMunicipioCodigo ?? '__urbanbrain_unconfirmed_municipality__';
     const questionScope = classifyParcelQuestionScope(message);
     const concreteParameterRequested = questionScope !== 'independent';
+    const normativeScope = buildNormativeSearchScope({
+      context: parcelContext,
+      municipioCodigo: trustedMunicipioCodigo,
+      detected: parcelInputs.detected,
+      rawDetection: parcelInputs.latestDetectionRaw,
+    });
 
     // Guardar mensaje del usuario
     await db.insert(chatMessages).values({
@@ -146,6 +164,28 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       role: 'user',
       content: message.trim(),
     });
+
+    if (questionScope === 'regime' && !canSearchConcreteParameters(normativeScope)) {
+      const applicability = evaluateApplicability(parcelContext, [], true);
+      applicability.missingData.push(`alcance normativo previo: ${normativeScope.reason}`);
+      const answer = buildSafeAbstention(applicability, parcelContext);
+      const contract = buildAnswerContract(
+        answer,
+        parcelContext,
+        applicability,
+        [],
+        [],
+        'abstain'
+      );
+      await db.insert(chatMessages).values({
+        expedienteId,
+        userId,
+        role: 'assistant',
+        content: answer,
+        sources: [],
+      });
+      return NextResponse.json({ answer, sources: [], safety: contract });
+    }
 
     // --- SPRINT 3: Integración del Knowledge Orchestrator ---
     let plan;
@@ -199,13 +239,28 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     const query_embedding = rawEmbedding.slice(0, 768);
 
-    // Llamar a Supabase RPC match_normativa_chunks (V1)
+    // La RPC recibe primero el alcance aplicable y busca después dentro de él.
     const t0_v1 = performance.now();
-    const { data: chunks, error: rpcError } = await supabase.rpc('match_normativa_chunks', {
-      query_embedding,
-      match_count: 8,
-      filter_municipio_codigo: municipioCodigo,
-    }).abortSignal(signal);
+    const scopedRetrieval = questionScope === 'regime';
+    const rpcName = scopedRetrieval
+      ? 'match_normativa_chunks_scoped'
+      : 'match_normativa_chunks';
+    const rpcArguments = scopedRetrieval
+      ? {
+          query_embedding,
+          match_count: 8,
+          filter_municipio_codigo: municipioCodigo,
+          filter_document_names: normativeScope.documentNames ?? null,
+          filter_ordinance: normativeScope.ordinance ?? null,
+        }
+      : {
+          query_embedding,
+          match_count: 8,
+          filter_municipio_codigo: municipioCodigo,
+        };
+    const { data: chunks, error: rpcError } = await supabase
+      .rpc(rpcName, rpcArguments)
+      .abortSignal(signal);
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);
 
@@ -215,7 +270,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     }
 
     const safeChunks = (Array.isArray(chunks) ? chunks : []) as V1Chunk[];
-    const v1Candidates = mapV1Candidates(safeChunks);
+    const v1Candidates = mapV1Candidates(
+      safeChunks,
+      scopedRetrieval ? normativeScope : undefined
+    );
 
     // --- SPRINT 3.12: Laboratorio CTE V2 ---
     let v2FinalContext = '';

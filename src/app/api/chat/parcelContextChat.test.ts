@@ -316,4 +316,125 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).toContain('zona de protección de carreteras')
     expect(payload.answer).toContain('No puedo determinar el retranqueo')
   })
+
+  it('no ejecuta búsqueda vectorial paramétrica sin un alcance normativo previo trazable', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '7709702NH4970N0001SZ',
+        municipalityName: 'Culleredo',
+        municipalityCode: '15031',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        landClass: 'urbano',
+        planningArea: 'LEDOÑO',
+        planningCanAnswerConcreteParameters: true,
+      },
+      latestDetectionRaw: {
+        status: 'confirmed',
+        municipality: 'Culleredo',
+        municipalityCode: '15031',
+        planning: { status: 'determined', evidence: [], warnings: [] },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es el retranqueo aplicable?',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.safety.decision).toBe('abstain')
+    expect(payload.answer).toContain('alcance normativo previo')
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('filtra por ordenanza antes de la búsqueda vectorial cuando la selección fue validada', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityCode: '15009',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        landClass: 'urbano',
+        planningArea: 'CASCAS',
+        planningInstrument: 'Normas subsidiarias',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: true,
+        manualContext: {
+          classification: 'urbano',
+          area: 'CASCAS',
+          ordinance: 'Ordenanza R4',
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: '2026-07-29T10:00:00.000Z',
+        },
+      },
+      latestDetectionRaw: {
+        status: 'confirmed',
+        municipality: 'Betanzos',
+        municipalityCode: '15009',
+        planning: {
+          status: 'determined',
+          applicableInstruments: [{
+            id: '22221',
+            name: 'Normas subsidiarias',
+            kind: 'NNSS',
+            status: 'current',
+            sourceUrl: 'https://example.invalid/22221',
+          }],
+          documents: [{
+            id: '0060no011.pdf',
+            instrumentId: '22221',
+            title: 'Normas urbanísticas',
+            sourceUrl: 'https://example.invalid/0060no011.pdf',
+            binding: 'general',
+          }],
+          evidence: [],
+          warnings: [],
+        },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [{
+        chunk_id: 'chunk-r4',
+        texto: 'Ordenanza R4. El retranqueo lateral será de tres metros.',
+        municipio_nombre: 'Betanzos',
+        nombre_pdf: '0060no011.pdf',
+      }],
+      error: null,
+    })
+
+    await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es el retranqueo aplicable?',
+      }),
+    }))
+
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'match_normativa_chunks_scoped',
+      expect.objectContaining({
+        filter_municipio_codigo: '15009',
+        filter_document_names: ['0060no011.pdf'],
+        filter_ordinance: 'Ordenanza R4',
+      })
+    )
+  })
 })
