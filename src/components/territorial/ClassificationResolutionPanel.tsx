@@ -58,6 +58,10 @@ const nextActionCopy = {
 const reviewReasonCopy: Record<ClassificationReviewReason, string> = {
   point_geometry_mismatch:
     'El punto representativo y la geometría completa de la parcela no producen el mismo resultado.',
+  partial_parcel_coverage:
+    'La cartografía estructurada consultada sólo clasifica una parte de la superficie parcelaria.',
+  planning_update_scope_pending:
+    'La parcela puede estar afectada por una ordenación posterior que la capa vectorial consultada todavía no incorpora.',
   instrument_traceability_pending:
     'La vinculación entre la capa cartográfica y el instrumento vigente todavía debe verificarse.',
   instrument_layer_mismatch:
