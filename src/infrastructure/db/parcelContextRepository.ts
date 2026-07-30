@@ -5,10 +5,14 @@ import type {
   KnownConstraintInput,
   ParcelExpedienteInput,
 } from '@/application/parcel-context/normalizeParcelContext'
-import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
-import type { PlanningApplicability, UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import { db } from '@/infrastructure/db/client'
 import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
+import { assessClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
+import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
+import type {
+  TerritorialResolution,
+  UrbanisticRegimeFacts,
+} from '@/domain/territorial-resolver/types'
 import {
   afeccionTypes,
   chatMessages,
@@ -25,14 +29,47 @@ export interface AuthorizedParcelInputs {
   latestDetectionRaw?: unknown
 }
 
+function landClassFromOfficialCode(code?: string, categoryCode?: string) {
+  return code === 'SU'
+    ? categoryCode === 'SUSC'
+      ? 'urbano_no_consolidado'
+      : categoryCode === 'SUC'
+        ? 'urbano_consolidado'
+        : 'urbano'
+    : code === 'SNR'
+      ? 'nucleo_rural'
+      : code === 'SR'
+        ? 'rustico'
+        : undefined
+}
+
+export function classificationSummaryFromRaw(raw: unknown): Partial<DetectedParcelInput> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const result = raw as Partial<TerritorialResolution>
+  const effective = result.continuity?.effectiveOfficialContext ?? result
+  const assessment = assessClassificationResolution(
+    effective.planning?.classificationResolution
+  )
+  const automaticLandClass = landClassFromOfficialCode(
+    assessment.candidate?.classification.code,
+    assessment.candidate?.classification.categoryCode
+  )
+  if (!automaticLandClass || assessment.level === 'unknown') return undefined
+  return {
+    automaticLandClass,
+    landClass: automaticLandClass,
+    planningCanAnswerConcreteParameters: true,
+    classificationConfidenceLevel: assessment.level,
+    classificationReason: assessment.reason,
+    classificationSources: assessment.sources,
+    classificationWarnings: assessment.warnings,
+  }
+}
+
 export function urbanisticFactsFromRaw(raw: unknown): UrbanisticRegimeFacts | undefined {
   if (!raw || typeof raw !== 'object') return undefined
-  const result = raw as {
-    planning?: PlanningApplicability
-    continuity?: { effectiveOfficialContext?: { planning?: PlanningApplicability } }
-    resolvedAt?: string
-  }
-  const planning = result.continuity?.effectiveOfficialContext?.planning ?? result.planning
+  const result = raw as Partial<TerritorialResolution>
+  const planning = (result.continuity?.effectiveOfficialContext ?? result).planning
   if (!planning) return undefined
   if (planning.urbanisticFacts) return planning.urbanisticFacts
   return planning.classificationResolution
@@ -95,14 +132,30 @@ export async function loadAuthorizedParcelInputs(
   ])
 
   const storedSummary = latestDetection[0]?.summary as DetectedParcelInput | undefined
-  const reconstructedUrbanisticFacts = urbanisticFactsFromRaw(latestDetection[0]?.rawResponse)
+  const derivedClassification = classificationSummaryFromRaw(latestDetection[0]?.rawResponse)
+  const derivedUrbanisticFacts = urbanisticFactsFromRaw(latestDetection[0]?.rawResponse)
   const detected: DetectedParcelInput | null = storedSummary
     ? {
         ...storedSummary,
-        urbanisticFacts: storedSummary.urbanisticFacts ?? reconstructedUrbanisticFacts,
+        automaticLandClass:
+          storedSummary.automaticLandClass ?? derivedClassification?.automaticLandClass,
+        landClass: storedSummary.landClass ?? derivedClassification?.landClass,
+        planningCanAnswerConcreteParameters:
+          derivedClassification?.planningCanAnswerConcreteParameters ??
+          storedSummary.planningCanAnswerConcreteParameters,
+        classificationConfidenceLevel:
+          storedSummary.classificationConfidenceLevel ??
+          derivedClassification?.classificationConfidenceLevel,
+        classificationReason:
+          storedSummary.classificationReason ?? derivedClassification?.classificationReason,
+        classificationSources:
+          storedSummary.classificationSources ?? derivedClassification?.classificationSources,
+        classificationWarnings:
+          storedSummary.classificationWarnings ?? derivedClassification?.classificationWarnings,
+        urbanisticFacts: storedSummary.urbanisticFacts ?? derivedUrbanisticFacts,
       }
-    : reconstructedUrbanisticFacts
-      ? { urbanisticFacts: reconstructedUrbanisticFacts }
+    : derivedUrbanisticFacts
+      ? { urbanisticFacts: derivedUrbanisticFacts }
       : null
   const detectedAffects: KnownConstraintInput[] =
     detected?.affects?.detected?.map((affect) => ({

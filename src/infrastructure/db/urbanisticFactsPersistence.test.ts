@@ -4,7 +4,7 @@ vi.mock('@/infrastructure/db/client', () => ({ db: {} }))
 
 import { buildNormalizedParcelContext } from '@/application/parcel-context/normalizeParcelContext'
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
-import { urbanisticFactsFromRaw } from './parcelContextRepository'
+import { classificationSummaryFromRaw, urbanisticFactsFromRaw } from './parcelContextRepository'
 import type {
   ClassificationResolution,
   TerritorialResolution,
@@ -222,5 +222,27 @@ describe('urbanisticFacts persistence compatibility', () => {
         },
       }).urbanisticFacts
     ).toBe(automatic)
+  })
+
+  it('mantiene la categoria SUSC al reconstruir el resumen legacy', () => {
+    const resolution = classificationResolution({
+      candidates: [{
+        ...classificationResolution().candidates[0]!,
+        classification: {
+          ...classificationResolution().candidates[0]!.classification,
+          categoryCode: 'SUSC',
+          categoryLabel: 'Suelo urbano sin consolidar',
+        },
+      }],
+      automaticSelection: {
+        ...classificationResolution().automaticSelection!,
+        categoryCode: 'SUSC',
+      },
+    })
+
+    expect(classificationSummaryFromRaw(result(resolution))).toMatchObject({
+      automaticLandClass: 'urbano_no_consolidado',
+      landClass: 'urbano_no_consolidado',
+    })
   })
 })

@@ -437,4 +437,70 @@ describe('POST /api/chat parcel context boundary', () => {
       })
     )
   })
+
+  it('reconoce hechos estructurados válidos cuando RAG no recupera normativa', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '7709702NH4970N0001SZ',
+        municipalityName: 'Culleredo',
+        municipalityCode: '15031',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningInstrument: 'PXOM de Culleredo',
+        planningArea: 'LEDOÑO',
+        urbanisticFacts: {
+          classification: { value: { code: 'SU', label: 'Suelo urbano' }, status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+          category: { value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' }, status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+          consolidation: { status: 'manual_review_required', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'review_official_sources' },
+        },
+      },
+      userMessages: [],
+      constraints: [{ name: 'Carreteras: zona de protección', source: 'ideg', confidence: 0.95, confirmed: true }],
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'expediente-org-a', message: '¿Qué implica que la parcela esté clasificada como suelo urbano sin consolidar?' }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    // The pre-existing intent analyzer may invoke the model once; the safe fallback must not invoke the final responder.
+    expect(mocks.completionCreate).toHaveBeenCalledTimes(1)
+    expect(payload.answer).toContain('Suelo urbano sin consolidar (SUSC)')
+    expect(payload.answer).not.toContain('Estado no determinado')
+    expect(payload.answer).not.toContain('AFECCIONES CONFIRMADAS')
+  })
+
+  it('preserva hechos estructurados si el LLM falla la validación de citas', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        municipalityName: 'Culleredo', municipalityCode: '15031', locationSource: 'catastro', locationStatus: 'confirmed', locationConfidence: 'high', planningInstrument: 'PXOM de Culleredo',
+        urbanisticFacts: {
+          classification: { value: { code: 'SU', label: 'Suelo urbano' }, status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+          category: { value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' }, status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+          consolidation: { status: 'manual_review_required', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'review_official_sources' },
+        },
+      },
+      userMessages: [], constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({ data: [{ chunk_id: 'chunk-1', texto: 'Norma municipal vigente.', municipio_nombre: 'Culleredo', nombre_pdf: 'PXOM Culleredo' }], error: null })
+    mocks.completionCreate.mockResolvedValue({ choices: [{ message: { content: 'La norma permite licencia directa.' } }] })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'expediente-org-a', message: '¿Es posible solicitar licencia de obra mayor directamente?' }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.safety.decision).toBe('abstain')
+    expect(payload.answer).toContain('Culleredo')
+    expect(payload.answer).toContain('PXOM de Culleredo')
+    expect(payload.answer).toContain('Suelo urbano sin consolidar (SUSC)')
+    expect(payload.answer).not.toContain('Estado no determinado')
+  })
 })

@@ -7,6 +7,7 @@ import type {
 import { buildNormalizedParcelContext } from './normalizeParcelContext'
 import {
   buildAnswerContract,
+  buildMunicipalSafetyPrompt,
   buildSafeAbstention,
   validateGeneratedAnswer,
 } from './responseSafety'
@@ -232,5 +233,124 @@ describe('buildSafeAbstention', () => {
     expect(answer).toContain('Comprobar otras afecciones sectoriales no cubiertas')
     expect(answer).toMatch(/abstengo únicamente.*clasificación.*planeamiento.*parámetros/i)
     expect(answer).not.toMatch(/edificabilidad\s*[:=]|altura\s*[:=]|ocupación\s*[:=]/i)
+  })
+})
+
+describe('structured facts in prompts', () => {
+  it('prefiere hechos V2 y conserva SUSC sin reducirlo a suelo urbano generico', () => {
+    const contextWithFacts = buildNormalizedParcelContext({
+      expediente: { planeamiento: 'PXOM de Culleredo' },
+      detected: {
+        municipalityName: 'Culleredo',
+        municipalityCode: '15031',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningInstrument: 'PXOM de Culleredo',
+        planningArea: 'LEDOÃ‘O',
+        urbanisticFacts: {
+          classification: {
+            value: { code: 'SU', label: 'Suelo urbano' },
+            status: 'automatic_confirmed',
+            confidence: 'high',
+            evidence: [],
+            warnings: [],
+            discrepancies: [],
+            nextAction: 'none',
+            origin: 'spatial_intersection',
+          },
+          category: {
+            value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' },
+            status: 'automatic_confirmed',
+            confidence: 'high',
+            evidence: [],
+            warnings: [],
+            discrepancies: [],
+            nextAction: 'none',
+            origin: 'spatial_intersection',
+          },
+          consolidation: {
+            status: 'manual_review_required',
+            confidence: 'unknown',
+            evidence: [],
+            warnings: [],
+            discrepancies: [],
+            nextAction: 'review_official_sources',
+          },
+        },
+      },
+    })
+
+    const prompt = buildMunicipalSafetyPrompt(contextWithFacts, determined, [], 'independent')
+
+    expect(prompt).toContain('HECHOS ESTRUCTURADOS DEL EXPEDIENTE')
+    expect(prompt).toContain('Suelo urbano sin consolidar (SUSC)')
+    expect(prompt).toContain('PXOM de Culleredo')
+    expect(prompt).toContain('LEDOÃ‘O')
+  })
+})
+
+describe('structured facts without normative evidence', () => {
+  const contextWithFacts = buildNormalizedParcelContext({
+    expediente: { planeamiento: 'PXOM de Culleredo' },
+    detected: {
+      municipalityName: 'Culleredo',
+      municipalityCode: '15031',
+      locationSource: 'catastro',
+      locationStatus: 'confirmed',
+      locationConfidence: 'high',
+      planningInstrument: 'PXOM de Culleredo',
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SU', label: 'Suelo urbano' },
+          status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+        },
+        category: {
+          value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' },
+          status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+        },
+        consolidation: {
+          status: 'manual_review_required', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'review_official_sources',
+        },
+      },
+    },
+  })
+  const partial = { ...determined, status: 'PARCIAL' as const, applicable: [], canAnswerConcreteParameters: false }
+
+  it('preserves valid facts in the limited abstention and omits irrelevant affects', () => {
+    const answer = buildSafeAbstention(partial, contextWithFacts, 'Â¿Que implica la clasificacion urbanistica?')
+
+    expect(answer).toContain('Suelo urbano sin consolidar (SUSC)')
+    expect(answer).toContain('hechos territoriales estructurados vÃ¡lidos')
+    expect(answer).not.toContain('Estado no determinado')
+    expect(answer).not.toContain('AFECCIONES CONFIRMADAS')
+  })
+
+  it('accepts structured facts without a RAG citation but keeps normative assertions protected', () => {
+    const structural = validateGeneratedAnswer(
+      'El expediente identifica suelo urbano sin consolidar. No se ha recuperado evidencia documental suficiente para concretar sus consecuencias.',
+      [source], partial, 'independent', contextWithFacts
+    )
+    const normative = validateGeneratedAnswer(
+      'El expediente identifica suelo urbano sin consolidar. La norma permite licencia directa.',
+      [source], partial, 'independent', contextWithFacts
+    )
+    const disguisedNormative = validateGeneratedAnswer(
+      'La parcela clasificada como suelo urbano sin consolidar permite licencia directa.',
+      [source], partial, 'independent', contextWithFacts
+    )
+
+    expect(structural.valid).toBe(true)
+    expect(normative.valid).toBe(false)
+    expect(normative.reasons).toContain('La respuesta no contiene citas.')
+    expect(disguisedNormative.valid).toBe(false)
+  })
+
+  it('includes confirmed affects only when the question is about them', () => {
+    const withAffect = { ...contextWithFacts, knownConstraints: [{ value: 'Carreteras: zona de proteccion', source: 'ideg' as const, confidence: 0.95, verification: 'confirmed' as const }] }
+    const answer = buildSafeAbstention(partial, withAffect, 'Â¿Que afecciones tiene la parcela?')
+
+    expect(answer).toContain('AFECCIONES CONFIRMADAS')
+    expect(answer).toContain('Carreteras: zona de proteccion')
   })
 })

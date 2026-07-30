@@ -27,10 +27,45 @@ function confidenceLabel(confidence: number) {
   return 'baja'
 }
 
+function isUsableUrbanisticFactStatus(status?: string) {
+  return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated'
+}
+
+function structuredFactLines(context: NormalizedParcelContext): string[] {
+  const facts = context.urbanisticFacts
+  if (!facts || !isUsableUrbanisticFactStatus(facts.classification.status)) return []
+
+  const classification = facts.classification
+  const category = facts.category
+  const lines = [
+    'HECHOS ESTRUCTURADOS DEL EXPEDIENTE',
+    context.municipality
+      ? `- Municipio: ${context.municipality.value.name}${context.municipality.value.ineCode ? ` (INE ${context.municipality.value.ineCode})` : ''}.`
+      : null,
+    context.planningInstrument ? `- Instrumento: ${context.planningInstrument.value}.` : null,
+    classification.value
+      ? `- Clasificacion general: ${classification.value.label} (${classification.value.code}). Estado: ${classification.status}. Confianza: ${classification.confidence}. Procedencia: ${classification.origin ?? 'no indicada'}.`
+      : null,
+    isUsableUrbanisticFactStatus(category.status) && category.value
+      ? `- Categoria: ${category.value.label ?? category.value.code} (${category.value.code}). Estado: ${category.status}. Confianza: ${category.confidence}. Procedencia: ${category.origin ?? 'no indicada'}.`
+      : null,
+    context.planningArea ? `- Ambito/zona: ${context.planningArea.value}.` : null,
+  ].filter((line): line is string => Boolean(line))
+
+  return lines.length > 1 ? lines : []
+}
+
+function isAffectQuestion(question?: string) {
+  if (!question) return true
+  return /\b(?:afecciones?|carreteras?|aguas?|costas?|patrimonio|red\s+natura|servidumbre|protecci[oó]n\s+sectorial)\b/i.test(question)
+}
+
 function buildSectionedTerritorialAnswer(
   applicability: ApplicabilityResult,
-  context: NormalizedParcelContext
+  context: NormalizedParcelContext,
+  question?: string
 ) {
+  if (!isAffectQuestion(question)) return null
   const confirmedAffects = context.knownConstraints.filter(
     (constraint) => constraint.verification === 'confirmed'
   )
@@ -76,10 +111,11 @@ function buildSectionedTerritorialAnswer(
 
 export function buildSafeAbstention(
   applicability: ApplicabilityResult,
-  context?: NormalizedParcelContext
+  context?: NormalizedParcelContext,
+  question?: string
 ): string {
   if (context) {
-    const sectionedAnswer = buildSectionedTerritorialAnswer(applicability, context)
+    const sectionedAnswer = buildSectionedTerritorialAnswer(applicability, context, question)
     if (sectionedAnswer) return sectionedAnswer
   }
 
@@ -94,20 +130,27 @@ export function buildSafeAbstention(
     details.push('Los fragmentos recuperados no pueden vincularse de forma segura con esta parcela.')
   }
 
+  const facts = context ? structuredFactLines(context) : []
   return [
     'CONCLUSIÓN',
-    'No puedo determinar con seguridad el régimen urbanístico aplicable ni dar cifras concretas.',
+    facts.length > 0
+      ? 'El expediente contiene hechos territoriales estructurados válidos. No se ha recuperado evidencia documental suficiente para confirmar las consecuencias jurídicas, deberes, artículos, parámetros o cifras solicitados.'
+      : 'No puedo determinar con seguridad el régimen urbanístico aplicable ni dar cifras concretas.',
+    ...(facts.length > 0 ? ['', ...facts] : []),
     '',
     'DATOS PENDIENTES',
     details.join('\n') ||
       'Necesito referencia catastral, dirección o coordenadas y la clasificación, calificación, ordenanza, ámbito o ficha aplicable.',
     '',
     'DECISIÓN',
-    'Me abstengo de ofrecer valores hasta que el contexto de la parcela quede identificado y las fuentes sean compatibles.',
+    facts.length > 0
+      ? 'Reconozco los hechos estructurados del expediente y me abstengo unicamente de afirmar consecuencias normativas no acreditadas documentalmente.'
+      : 'Me abstengo de ofrecer valores hasta que el contexto de la parcela quede identificado y las fuentes sean compatibles.',
   ].join('\n')
 }
 
 function describeContext(context: NormalizedParcelContext) {
+  const facts = structuredFactLines(context)
   const lines = [
     context.cadastralReference
       ? `Referencia catastral: ${context.cadastralReference.value} (${context.cadastralReference.verification}, fuente ${context.cadastralReference.source})`
@@ -122,7 +165,9 @@ function describeContext(context: NormalizedParcelContext) {
       ? `Municipio: ${context.municipality.value.name} (${context.municipality.verification}, fuente ${context.municipality.source})`
       : null,
     context.province ? `Provincia: ${context.province.value.name}` : null,
-    context.landClass ? `Clasificación: ${context.landClass.value}` : null,
+    ...(facts.length > 0
+      ? facts
+      : [`Clasificación utilizada (compatibilidad legacy): ${context.landClass?.value ?? 'No determinada'}`]),
     context.qualification ? `Calificación/ordenanza: ${context.qualification.value}` : null,
     context.planningArea ? `Ámbito/sector/ficha: ${context.planningArea.value}` : null,
     context.planningInstrument ? `Instrumento: ${context.planningInstrument.value}` : null,
@@ -228,17 +273,65 @@ function numericTokens(claim: string) {
   )
 }
 
+function isStructuredFactClaim(claim: string, context?: NormalizedParcelContext) {
+  if (!context) return false
+  if (!/\b(?:expediente|contexto|parcela|clasificaci[oó]n|categor[ií]a|municipio|planeamiento|[aá]mbito)\b/i.test(claim)) {
+    return false
+  }
+  if (/\b(?:debe|deber[aá]|exige|permite|proh[ií]be|m[aá]xim[oa]|m[ií]nim[oa]|obligatori[oa]|edificabilidad|ocupaci[oó]n|altura|retranque)\b/i.test(claim)) {
+    return false
+  }
+  const values = [
+    context.municipality?.value.name,
+    context.municipality?.value.ineCode,
+    context.planningInstrument?.value,
+    context.planningArea?.value,
+    context.urbanisticFacts?.classification.value?.label,
+    context.urbanisticFacts?.classification.value?.code,
+    context.urbanisticFacts?.category.value?.label,
+    context.urbanisticFacts?.category.value?.code,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => value.toLocaleLowerCase('es'))
+  const normalizedClaim = claim.toLocaleLowerCase('es')
+  return values.some((value) =>
+    value.length <= 3
+      ? new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(normalizedClaim)
+      : normalizedClaim.includes(value)
+  )
+}
+
+function isEvidenceLimitation(claim: string) {
+  return /\b(?:no\s+se\s+ha\s+recuperado|no\s+puedo\s+confirmar|falta\s+evidencia|sin\s+evidencia|me\s+abstengo)\b/i.test(
+    claim
+  )
+}
+
+function isFormattingHeading(claim: string) {
+  return /^(?:conclusi[oó]n|hechos estructurados del expediente|clasificaci[oó]n utilizada|contexto de parcela utilizado|advertencias y datos pendientes|decisi[oó]n)$/i.test(
+    claim.trim()
+  )
+}
+
 export function validateGeneratedAnswer(
   answer: string,
   sources: NormativeCandidate[],
   applicability: ApplicabilityResult,
-  questionScope: ParcelQuestionScope = 'regime'
+  questionScope: ParcelQuestionScope = 'regime',
+  context?: NormalizedParcelContext
 ): AnswerValidationResult {
   const reasons: string[] = []
   const citations = citedNumbers(answer)
+  const claims = splitClaims(answer)
+  const structuredOnly =
+    claims.length > 0 &&
+    claims.every(
+      (claim) =>
+        isFormattingHeading(claim) || isStructuredFactClaim(claim, context) || isEvidenceLimitation(claim)
+    )
 
   if (!answer.trim()) reasons.push('La respuesta está vacía.')
-  if (sources.length > 0 && citations.length === 0) reasons.push('La respuesta no contiene citas.')
+  if (sources.length > 0 && citations.length === 0 && !structuredOnly) reasons.push('La respuesta no contiene citas.')
   if (citations.some((citation) => citation < 1 || citation > sources.length)) {
     reasons.push('La respuesta cita una fuente inexistente.')
   }
@@ -250,7 +343,7 @@ export function validateGeneratedAnswer(
     }
   }
 
-  for (const claim of splitClaims(answer)) {
+  for (const claim of claims) {
     if (/\b(?:p[aá]gina|fuente\s+oficial|url|identificador)\b/i.test(claim)) continue
     const normativeClaim = /\b(?:debe|deber[aá]|exige|permite|proh[ií]be|m[aá]xim[oa]|m[ií]nim[oa]|obligatori[oa]|edificabilidad|ocupaci[oó]n|altura|retranque)\b/i.test(
       claim
@@ -269,7 +362,7 @@ export function validateGeneratedAnswer(
       reasons.push('La respuesta mixta afirma un parámetro de parcela sin régimen determinado.')
     }
 
-    if (regimeAbstention) continue
+    if (regimeAbstention || isStructuredFactClaim(claim, context)) continue
     if (!normativeClaim && numbers.length === 0) continue
 
     const claimCitations = claimCitationNumbers(claim)

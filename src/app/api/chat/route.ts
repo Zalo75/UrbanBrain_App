@@ -168,7 +168,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     if (questionScope === 'regime' && !canSearchConcreteParameters(normativeScope)) {
       const applicability = evaluateApplicability(parcelContext, [], true);
       applicability.missingData.push(`alcance normativo previo: ${normativeScope.reason}`);
-      const answer = buildSafeAbstention(applicability, parcelContext);
+      const answer = buildSafeAbstention(applicability, parcelContext, message);
       const contract = buildAnswerContract(
         answer,
         parcelContext,
@@ -440,7 +440,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       (questionScope === 'regime' && regimeUnavailable);
 
     if (mustAbstain) {
-      const answer = buildSafeAbstention(applicability, parcelContext);
+      const answer = buildSafeAbstention(applicability, parcelContext, message);
       const contract = buildAnswerContract(
         answer,
         parcelContext,
@@ -537,7 +537,8 @@ ${usedV2 ? v2Citas : 'N/A'}
       answer,
       answerCandidates,
       applicability,
-      questionScope
+      questionScope,
+      parcelContext
     );
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';
@@ -553,7 +554,7 @@ ${usedV2 ? v2Citas : 'N/A'}
         ],
         canAnswerConcreteParameters: false,
       };
-      answer = buildSafeAbstention(failedApplicability);
+      answer = buildSafeAbstention(failedApplicability, parcelContext, message);
       applicability = failedApplicability;
       sources = [];
     }
