@@ -1,4 +1,5 @@
 import { evaluateClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
+import { withUrbanisticFacts } from '@/domain/territorial-resolver/urbanisticFacts'
 import type {
   ClassificationSourcePort,
   OfficialSource,
@@ -108,7 +109,7 @@ export class MultiSourceClassificationResolver implements PlanningPort {
       ).values(),
     ]
 
-    return {
+    return withUrbanisticFacts({
       ...planning,
       classification: selectedCandidate?.classification,
       classificationResolution,
@@ -116,6 +117,6 @@ export class MultiSourceClassificationResolver implements PlanningPort {
       evidence,
       sourceChecks: [...(planning.sourceChecks ?? []), ...sourceChecks],
       warnings: mergedWarnings,
-    }
+    }, this.now().toISOString())
   }
 }

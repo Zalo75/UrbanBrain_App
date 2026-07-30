@@ -160,6 +160,32 @@ describe('MultiSourceClassificationResolver', () => {
     expect(result.classificationResolution?.status).toBe('source_unavailable')
   })
 
+  it('conserva el instrumento y expone hechos independientes cuando no hay capas registradas', async () => {
+    const noLayers: ClassificationSourcePort = {
+      findClassifications: vi.fn(async () => ({
+        candidates: [],
+        discrepancies: [],
+        sourceChecks: [],
+        officialLinks: [],
+        evidence: [],
+        warnings: [],
+      })),
+    }
+    const resolver = new MultiSourceClassificationResolver(planning, [
+      { id: 'SIOTUGA WFS', source: 'siotuga', adapter: noLayers, requiredForAutomaticDecision: true },
+    ], () => new Date(NOW))
+
+    const result = await resolver.findApplicablePlanning({ municipalityCode: '15059' })
+
+    expect(result.instrument).toBe('PXOM vigente')
+    expect(result.classificationResolution?.status).toBe('not_available')
+    expect(result.urbanisticFacts).toMatchObject({
+      classification: { status: 'not_available' },
+      category: { status: 'not_available' },
+      consolidation: { status: 'not_available' },
+    })
+  })
+
   it('does not enable parametric answers when the PKB has no regime-to-document binding', async () => {
     const classificationOnlyPlanning: PlanningPort = {
       findApplicablePlanning: vi.fn(async () => ({

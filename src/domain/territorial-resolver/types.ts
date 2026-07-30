@@ -254,6 +254,54 @@ export interface ClassificationResolution {
   evidence: TerritorialEvidence[]
 }
 
+export type UrbanisticFactStatus =
+  | 'automatic_confirmed'
+  | 'automatic_probable'
+  | 'manual_review_required'
+  | 'technician_validated'
+  | 'not_available'
+  | 'source_unavailable'
+  | 'conflict'
+  | 'not_applicable'
+
+export type UrbanisticFactOrigin =
+  | 'automatic_source'
+  | 'official_document'
+  | 'spatial_intersection'
+  | 'structured_catalog'
+  | 'technician_selection'
+  | 'technician_confirmation'
+  | 'conditional_scenario'
+
+export type UrbanisticFactNextAction =
+  | 'none'
+  | 'review_official_sources'
+  | 'manual_selection'
+  | 'retry_source'
+
+export interface UrbanisticFact<T> {
+  value?: T
+  label?: string
+  status: UrbanisticFactStatus
+  origin?: UrbanisticFactOrigin
+  confidence: TerritorialConfidence | 'unknown'
+  evidence: TerritorialEvidence[]
+  warnings: string[]
+  discrepancies: ClassificationDiscrepancy[]
+  nextAction: UrbanisticFactNextAction
+  resolvedAt?: string
+  instrumentId?: string
+}
+
+export interface UrbanisticRegimeFacts {
+  classification: UrbanisticFact<Pick<PlanningClassification, 'code' | 'label'>>
+  category: UrbanisticFact<{
+    code: string
+    label?: string
+  }>
+  consolidation: UrbanisticFact<never>
+}
+
 export interface PlanningInstrumentReference {
   id: string
   name: string
@@ -280,6 +328,7 @@ export interface PlanningApplicability {
   sourceUrl?: string
   classification?: PlanningClassification
   classificationResolution?: ClassificationResolution
+  urbanisticFacts?: UrbanisticRegimeFacts
   areas?: PlanningArea[]
   applicableInstruments?: PlanningInstrumentReference[]
   cataloguedInstruments?: PlanningInstrumentReference[]
