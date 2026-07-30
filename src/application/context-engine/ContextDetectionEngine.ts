@@ -126,6 +126,7 @@ function detectionSummary(result: TerritorialResolution) {
     classificationReason: classificationAssessment.reason,
     classificationSources: classificationAssessment.sources,
     classificationWarnings: classificationAssessment.warnings,
+    urbanisticFacts: effective?.planning.urbanisticFacts,
     planningWarnings: effective?.planning.warnings ?? [],
     planningConflicts: effective?.planning.conflicts ?? [],
     planningSource: effective?.planning.evidence.some((item) => item.source === 'siotuga')

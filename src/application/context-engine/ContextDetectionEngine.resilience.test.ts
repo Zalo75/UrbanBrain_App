@@ -160,6 +160,46 @@ describe('ContextDetectionEngine source resilience', () => {
     expect(persisted.sourceApis).toEqual([])
   })
 
+  it('conserva los hechos urbanisticos V2 en el resumen y la respuesta cruda', async () => {
+    const urbanisticFacts = {
+      classification: {
+        value: { code: 'SU', label: 'Suelo urbano' },
+        status: 'automatic_confirmed' as const,
+        confidence: 'high' as const,
+        evidence: [],
+        warnings: [],
+        discrepancies: [],
+        nextAction: 'none' as const,
+      },
+      category: {
+        status: 'manual_review_required' as const,
+        confidence: 'high' as const,
+        evidence: [],
+        warnings: [],
+        discrepancies: [],
+        nextAction: 'review_official_sources' as const,
+      },
+      consolidation: {
+        status: 'manual_review_required' as const,
+        confidence: 'high' as const,
+        evidence: [],
+        warnings: [],
+        discrepancies: [],
+        nextAction: 'review_official_sources' as const,
+      },
+    }
+    const current = {
+      ...official,
+      planning: { ...official.planning, urbanisticFacts },
+    }
+
+    await new ContextDetectionEngine().persistAuthorizedDetection('exp-a', 'user-a', current)
+
+    const persisted = mocks.values.mock.calls[0][0]
+    expect(persisted.rawResponse.planning.urbanisticFacts).toBe(urbanisticFacts)
+    expect(persisted.summary.urbanisticFacts).toBe(urbanisticFacts)
+  })
+
   it('identifica el intento mas reciente aunque una respuesta anterior termine despues', async () => {
     let finishOlder!: (value: TerritorialResolution) => void
     let finishNewer!: (value: TerritorialResolution) => void

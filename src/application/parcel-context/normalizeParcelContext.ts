@@ -4,6 +4,7 @@ import {
   getProvinceNameById,
   resolveMunicipalityIdentity,
 } from '@/shared/territory'
+import type { UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import type {
   NormalizedParcelContext,
   ParcelContextField,
@@ -45,6 +46,7 @@ export interface DetectedParcelInput {
   planningSource?: 'siotuga' | 'urbanbrain' | null
   planningApplicabilityStatus?: 'determined' | 'partial' | 'conflict' | 'not_determined' | null
   planningCanAnswerConcreteParameters?: boolean | null
+  urbanisticFacts?: UrbanisticRegimeFacts | null
   locationStatus?: 'confirmed' | 'probable' | 'ambiguous' | 'unresolved' | null
   locationConfidence?: 'high' | 'medium' | 'low' | null
   planningWarnings?: Array<{ code: string; message: string }> | null
@@ -269,6 +271,7 @@ export function buildNormalizedParcelContext(
 
   const context: NormalizedParcelContext = {
     canAnswerConcreteParameters: detected?.planningCanAnswerConcreteParameters === true,
+    urbanisticFacts: detected?.urbanisticFacts ?? undefined,
     knownConstraints: [],
     conflicts: [],
     pendingValidation: [],

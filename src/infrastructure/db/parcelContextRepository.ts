@@ -5,6 +5,8 @@ import type {
   KnownConstraintInput,
   ParcelExpedienteInput,
 } from '@/application/parcel-context/normalizeParcelContext'
+import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
+import type { PlanningApplicability, UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import { db } from '@/infrastructure/db/client'
 import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
 import {
@@ -21,6 +23,21 @@ export interface AuthorizedParcelInputs {
   userMessages: string[]
   constraints: KnownConstraintInput[]
   latestDetectionRaw?: unknown
+}
+
+export function urbanisticFactsFromRaw(raw: unknown): UrbanisticRegimeFacts | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const result = raw as {
+    planning?: PlanningApplicability
+    continuity?: { effectiveOfficialContext?: { planning?: PlanningApplicability } }
+    resolvedAt?: string
+  }
+  const planning = result.continuity?.effectiveOfficialContext?.planning ?? result.planning
+  if (!planning) return undefined
+  if (planning.urbanisticFacts) return planning.urbanisticFacts
+  return planning.classificationResolution
+    ? urbanisticFactsFromClassificationResolution(planning, result.resolvedAt)
+    : undefined
 }
 
 export function buildAuthorizedExpedienteQuery(
@@ -77,7 +94,16 @@ export async function loadAuthorizedParcelInputs(
       ),
   ])
 
-  const detected = (latestDetection[0]?.summary as DetectedParcelInput | undefined) ?? null
+  const storedSummary = latestDetection[0]?.summary as DetectedParcelInput | undefined
+  const reconstructedUrbanisticFacts = urbanisticFactsFromRaw(latestDetection[0]?.rawResponse)
+  const detected: DetectedParcelInput | null = storedSummary
+    ? {
+        ...storedSummary,
+        urbanisticFacts: storedSummary.urbanisticFacts ?? reconstructedUrbanisticFacts,
+      }
+    : reconstructedUrbanisticFacts
+      ? { urbanisticFacts: reconstructedUrbanisticFacts }
+      : null
   const detectedAffects: KnownConstraintInput[] =
     detected?.affects?.detected?.map((affect) => ({
       name: `${affect.category}: ${affect.name}`,

@@ -5,7 +5,9 @@ import type {
   ManualTerritorialContext,
   OfficialSourceCheck,
   TerritorialResolution,
+  UrbanisticRegimeFacts,
 } from '@/domain/territorial-resolver/types';
+import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts';
 import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks';
 import {
   allSourceChecks,
@@ -27,6 +29,7 @@ export interface TerritorialContextView {
   province?: string;
   classification?: TerritorialResolution['planning']['classification'];
   classificationResolution?: ClassificationResolution;
+  urbanisticFacts?: UrbanisticRegimeFacts;
   officialLinks?: OfficialResourceLink[];
   areas: string[];
   instrument?: string;
@@ -84,6 +87,10 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
         officialLinks: officialResourceLinks(effective),
       }
     : undefined;
+  const urbanisticFacts = effective?.planning.urbanisticFacts ??
+    (effective?.planning.classificationResolution
+      ? urbanisticFactsFromClassificationResolution(effective.planning, result.resolvedAt)
+      : undefined);
   const territorialContextComplete = Boolean(
     effective?.status === 'confirmed' &&
       effective.municipality?.trim() &&
@@ -152,6 +159,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
         : undefined),
     classificationResolution,
     officialLinks: effective ? officialResourceLinks(effective) : [],
+    urbanisticFacts,
     areas:
       effective?.planning.areas?.map((area) => area.name) ?? (manual?.area ? [manual.area] : []),
     instrument: effective?.planning.instrument,
