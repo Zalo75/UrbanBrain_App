@@ -13,6 +13,11 @@ import {
   allSourceChecks,
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity';
+import {
+  applyManualAffectDecisions,
+  applyManualFactDecisions,
+  territorialAffectKey,
+} from '@/application/territorial-resolver/manualTerritorialContext';
 
 export interface TerritorialContextView {
   status: 'confirmed' | 'approximate' | 'provisional' | 'conflict' | 'undetermined';
@@ -28,12 +33,27 @@ export interface TerritorialContextView {
   municipalityCode?: string;
   province?: string;
   classification?: TerritorialResolution['planning']['classification'];
+  classificationOrigin?: 'automatic' | 'manual';
+  automaticClassification?: TerritorialResolution['planning']['classification'];
   classificationResolution?: ClassificationResolution;
   urbanisticFacts?: UrbanisticRegimeFacts;
   officialLinks?: OfficialResourceLink[];
   areas: string[];
   instrument?: string;
-  affects: Array<{ category: string; name: string; confidence: string }>;
+  affects: Array<{
+    key?: string;
+    category: string;
+    name: string;
+    confidence: string;
+    origin?: 'automatic' | 'manual';
+  }>;
+  automaticAffects?: Array<{
+    key: string;
+    category: string;
+    name: string;
+    confidence: string;
+    source: string;
+  }>;
   conflicts: string[];
   warnings: string[];
   sources: TerritorialEvidence[];
@@ -84,13 +104,36 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
   const classificationResolution = effective?.planning.classificationResolution
     ? {
         ...effective.planning.classificationResolution,
+        finalSelection: manual?.classification
+          ? {
+              origin: 'manual' as const,
+              classificationCode: manual.classification,
+              categoryCode: manual.category,
+              operationalValue: manual.classification,
+              areaNames: manual.area ? [manual.area] : [],
+              reason: manual.observations || 'Selección manual registrada en el expediente.',
+              primarySource: 'manual',
+              confidence:
+                manual.verification === 'technician_validated' ? ('high' as const) : ('low' as const),
+              selectedAt: manual.recordedAt,
+              technicianValidated: manual.verification === 'technician_validated',
+            }
+          : effective.planning.classificationResolution.finalSelection,
         officialLinks: officialResourceLinks(effective),
       }
     : undefined;
-  const urbanisticFacts = effective?.planning.urbanisticFacts ??
+  const rawUrbanisticFacts = effective?.planning.urbanisticFacts ??
     (effective?.planning.classificationResolution
       ? urbanisticFactsFromClassificationResolution(effective.planning, result.resolvedAt)
       : undefined);
+  const urbanisticFacts = rawUrbanisticFacts
+    ? applyManualFactDecisions(rawUrbanisticFacts, manual).effective
+    : undefined;
+  const automaticAffects = (effective?.affects ?? result.affects).detected;
+  const affectResolution = applyManualAffectDecisions(
+    automaticAffects,
+    manual?.affectDecisions
+  );
   const territorialContextComplete = Boolean(
     effective?.status === 'confirmed' &&
       effective.municipality?.trim() &&
@@ -147,8 +190,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     municipalityCode: effective?.municipalityCode,
     province: effective?.province,
     classification:
-      effective?.planning.classification ??
-      (manual?.classification
+      manual?.classification
         ? {
             code: manual.classification,
             categoryCode: manual.category,
@@ -156,17 +198,33 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
             categoryLabel: manual.category,
             sourceFeatureIds: [],
           }
-        : undefined),
+        : effective?.planning.classification,
+    classificationOrigin: manual?.classification
+      ? 'manual'
+      : effective?.planning.classification
+        ? 'automatic'
+        : undefined,
+    automaticClassification: effective?.planning.classification,
     classificationResolution,
-    officialLinks: effective ? officialResourceLinks(effective) : [],
     urbanisticFacts,
-    areas:
-      effective?.planning.areas?.map((area) => area.name) ?? (manual?.area ? [manual.area] : []),
+    officialLinks: effective ? officialResourceLinks(effective) : [],
+    areas: manual?.area
+      ? [manual.area]
+      : (effective?.planning.areas?.map((area) => area.name) ?? []),
     instrument: effective?.planning.instrument,
-    affects: (effective?.affects ?? result.affects).detected.map((affect) => ({
+    affects: affectResolution.effective.map((affect) => ({
+      key: territorialAffectKey(affect),
       category: affect.category,
       name: affect.name,
       confidence: affect.confidence,
+      origin: affect.evidence.source === 'urbanbrain' ? 'manual' : 'automatic',
+    })),
+    automaticAffects: automaticAffects.map((affect) => ({
+      key: territorialAffectKey(affect),
+      category: affect.category,
+      name: affect.name,
+      confidence: affect.confidence,
+      source: affect.evidence.source,
     })),
     conflicts,
     warnings: [
@@ -199,6 +257,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
           area: manual.area,
           ordinance: manual.ordinance,
           observations: manual.observations,
+          affectDecisions: manual.affectDecisions,
           provenance: manual.provenance,
           verification: manual.verification,
           recordedAt: manual.recordedAt,

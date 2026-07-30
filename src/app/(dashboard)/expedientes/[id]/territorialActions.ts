@@ -9,12 +9,19 @@ import { ContextDetectionEngine } from '@/application/context-engine/ContextDete
 import { normalizeCadastralReference } from '@/application/territorial-resolver/resolveParcelLocation';
 import {
   allSourceChecks,
+  effectiveOfficialContext,
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity';
+import { territorialAffectKey } from '@/application/territorial-resolver/manualTerritorialContext';
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView';
-import type { ManualTerritorialContext } from '@/domain/territorial-resolver/types';
+import type {
+  ManualAffectDecision,
+  ManualTerritorialContext,
+  TerritorialResolution,
+} from '@/domain/territorial-resolver/types';
 import { db } from '@/infrastructure/db/client';
 import { expedientes } from '@/infrastructure/db/schema';
+import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
 
 export interface TerritorialResolutionActionState {
   status: 'idle' | 'success' | 'error';
@@ -119,6 +126,92 @@ export async function resolveTerritorialContextAction(
           message: 'Tu rol permite guardar datos provisionales, pero no validarlos como t\u00e9cnico.',
         };
       }
+      const authorizedInputs = await loadAuthorizedParcelInputs(expedienteId, access.userId);
+      const previousRaw = authorizedInputs?.latestDetectionRaw as TerritorialResolution | undefined;
+      const previousManual = previousRaw?.continuity?.manualContext;
+      let affectDecisions: ManualAffectDecision[] = previousManual?.affectDecisions ?? [];
+      if (formData.get('manualAffectsEdited') === '1') {
+        const automaticAffects = effectiveOfficialContext(previousRaw)?.affects.detected ?? [];
+        const previousByTarget = new Map(
+          affectDecisions.map((decision) => [decision.targetKey ?? decision.id, decision])
+        );
+        const reviewed: ManualAffectDecision[] = [];
+        for (const [index, affect] of automaticAffects.entries()) {
+          const targetKey = territorialAffectKey(affect);
+          const requestedAction = textValue(formData, `manualAffectAction.${index}`);
+          const reason = limitedText(formData, `manualAffectReason.${index}`, 500);
+          const previous = previousByTarget.get(targetKey);
+          if (!requestedAction) {
+            if (previous) reviewed.push(previous);
+            continue;
+          }
+          if (requestedAction !== 'confirm' && requestedAction !== 'exclude') {
+            return {
+              status: 'error',
+              message: 'La decisión manual sobre una afección no es válida.',
+            };
+          }
+          if (requestedAction === 'exclude' && !reason) {
+            return {
+              status: 'error',
+              message: `Indique el motivo para excluir operativamente la afección “${affect.name}”.`,
+            };
+          }
+          reviewed.push({
+            id: previous?.id ?? crypto.randomUUID(),
+            targetKey,
+            category: affect.category,
+            name: affect.name,
+            action: requestedAction,
+            reason: reason || 'Confirmada manualmente en el diagnóstico territorial.',
+            provenance: 'manual',
+            verification: technicianValidated ? 'technician_validated' : 'unverified',
+            recordedAt,
+            recordedBy: access.userId,
+            validatedAt: technicianValidated ? recordedAt : undefined,
+            validatedBy: technicianValidated ? access.userId : undefined,
+          });
+        }
+        const previousAdditions = affectDecisions.filter((decision) => decision.action === 'add');
+        for (const [index, previous] of previousAdditions.entries()) {
+          if (formData.get(`manualAddedAffectIncluded.${index}`) !== 'on') continue;
+          reviewed.push({
+            ...previous,
+            reason:
+              limitedText(formData, `manualAddedAffectReason.${index}`, 500) || previous.reason,
+            verification: technicianValidated ? 'technician_validated' : 'unverified',
+            recordedAt,
+            recordedBy: access.userId,
+            validatedAt: technicianValidated ? recordedAt : undefined,
+            validatedBy: technicianValidated ? access.userId : undefined,
+          });
+        }
+        const addedCategory = limitedText(formData, 'manualAffectCategory', 100);
+        const addedName = limitedText(formData, 'manualAffectName', 160);
+        const addedReason = limitedText(formData, 'manualAffectAddReason', 500);
+        if (addedCategory || addedName || addedReason) {
+          if (!addedCategory || !addedName || !addedReason) {
+            return {
+              status: 'error',
+              message: 'Para añadir una afección manual indique categoría, nombre y motivo.',
+            };
+          }
+          reviewed.push({
+            id: crypto.randomUUID(),
+            category: addedCategory,
+            name: addedName,
+            action: 'add',
+            reason: addedReason,
+            provenance: 'manual',
+            verification: technicianValidated ? 'technician_validated' : 'unverified',
+            recordedAt,
+            recordedBy: access.userId,
+            validatedAt: technicianValidated ? recordedAt : undefined,
+            validatedBy: technicianValidated ? access.userId : undefined,
+          });
+        }
+        affectDecisions = reviewed;
+      }
       const manualContext: ManualTerritorialContext = {
         cadastralReference: cadastralReference ?? undefined,
         municipality: manualMunicipality || undefined,
@@ -129,6 +222,8 @@ export async function resolveTerritorialContextAction(
         area: manualArea || undefined,
         ordinance: manualOrdinance || undefined,
         observations: manualObservations || undefined,
+        affectDecisions,
+        urbanisticFacts: previousManual?.urbanisticFacts,
         provenance: 'manual',
         verification: technicianValidated ? 'technician_validated' : 'unverified',
         recordedAt,

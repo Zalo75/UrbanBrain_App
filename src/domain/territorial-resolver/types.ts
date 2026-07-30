@@ -29,6 +29,42 @@ export interface OfficialSourceCheck {
   message: string
 }
 
+export type UrbanisticFactId =
+  | 'classification'
+  | 'category'
+  | 'consolidation'
+
+export type ManualFactOrigin =
+  | 'technician_selection'
+  | 'technician_confirmation'
+
+export type ConsolidationCode =
+  | 'consolidated'
+  | 'unconsolidated'
+  | 'not_applicable'
+
+export interface UrbanisticFactValue {
+  code: string
+  label?: string
+}
+
+export interface ConsolidationFactValue extends UrbanisticFactValue {
+  code: ConsolidationCode
+}
+
+export interface ManualUrbanisticFactState<
+  T extends UrbanisticFactValue = UrbanisticFactValue
+> {
+  origin: ManualFactOrigin
+  value: T
+  reason: string
+  recordedAt: string
+  recordedBy: string
+  verification: 'unverified' | 'technician_validated'
+  validatedAt?: string
+  validatedBy?: string
+}
+
 export interface ManualTerritorialContext {
   cadastralReference?: string
   municipality?: string
@@ -39,9 +75,32 @@ export interface ManualTerritorialContext {
   area?: string
   ordinance?: string
   observations?: string
+  affectDecisions?: ManualAffectDecision[]
+  urbanisticFacts?: {
+    classification?: ManualUrbanisticFactState
+    category?: ManualUrbanisticFactState
+    consolidation?: ManualUrbanisticFactState<ConsolidationFactValue>
+  }
   provenance: 'manual'
   verification: 'unverified' | 'technician_validated'
   recordedAt: string
+  validatedAt?: string
+  validatedBy?: string
+}
+
+export type ManualAffectDecisionAction = 'add' | 'confirm' | 'exclude'
+
+export interface ManualAffectDecision {
+  id: string
+  targetKey?: string
+  category: string
+  name: string
+  action: ManualAffectDecisionAction
+  reason: string
+  provenance: 'manual'
+  verification: 'unverified' | 'technician_validated'
+  recordedAt: string
+  recordedBy: string
   validatedAt?: string
   validatedBy?: string
 }
@@ -299,7 +358,7 @@ export interface UrbanisticRegimeFacts {
     code: string
     label?: string
   }>
-  consolidation: UrbanisticFact<never>
+  consolidation: UrbanisticFact<ConsolidationFactValue>
 }
 
 export interface PlanningInstrumentReference {

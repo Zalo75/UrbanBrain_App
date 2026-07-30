@@ -1,6 +1,7 @@
 import type {
   ClassificationCandidate,
   ClassificationResolution,
+  ConsolidationFactValue,
   PlanningApplicability,
   TerritorialConfidence,
   UrbanisticFact,
@@ -183,7 +184,7 @@ export function urbanisticFactsFromClassificationResolution(
       : candidate?.classification.code
         ? 'not_applicable'
         : 'not_available'
-  const consolidation = fact<never>({
+  const consolidation = fact<ConsolidationFactValue>({
     status: consolidationStatus,
     candidate,
     planning,
