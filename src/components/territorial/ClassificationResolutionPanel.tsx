@@ -15,6 +15,13 @@ const statusCopy = {
     icon: CheckCircle2,
     className: 'border-emerald-200 bg-emerald-50 text-emerald-950',
   },
+  probable: {
+    title: 'Clasificación probable con evidencia oficial',
+    detail:
+      'Existe una única clasificación utilizable. Puede emplearse indicando la comprobación documental pendiente.',
+    icon: AlertTriangle,
+    className: 'border-amber-200 bg-amber-50 text-amber-950',
+  },
   multiple_intersections: {
     title: 'La parcela intersecta varios ámbitos urbanísticos',
     detail: 'Se conservan todas las clasificaciones detectadas. Seleccione el valor operativo después de revisar los ámbitos.',
