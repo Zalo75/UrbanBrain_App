@@ -65,6 +65,27 @@ export interface ManualUrbanisticFactState<
   validatedBy?: string
 }
 
+export type DeterminationOrigin = 'automatic' | 'technician_selection'
+export type DeterminationVerification = 'unverified' | 'technician_validated'
+
+export interface ContextDetermination<T> {
+  value: T
+  origin: DeterminationOrigin
+  verification: DeterminationVerification
+  determinedAt?: string
+  recordedAt?: string
+  recordedBy?: string
+  validatedAt?: string
+  validatedBy?: string
+  previousAutomaticValue?: T
+  source?: string
+}
+
+export interface ContextDeterminationState<T> {
+  automatic?: ContextDetermination<T>
+  technician?: ContextDetermination<T>
+}
+
 export interface ManualTerritorialContext {
   cadastralReference?: string
   municipality?: string
@@ -81,6 +102,9 @@ export interface ManualTerritorialContext {
     category?: ManualUrbanisticFactState
     consolidation?: ManualUrbanisticFactState<ConsolidationFactValue>
   }
+  classificationDetermination?: ContextDeterminationState<string>
+  categoryDetermination?: ContextDeterminationState<string>
+  ordinanceDetermination?: ContextDeterminationState<string>
   provenance: 'manual'
   verification: 'unverified' | 'technician_validated'
   recordedAt: string
@@ -191,6 +215,7 @@ export interface ClassificationParcelCoverage {
   intersectionAreaSquareMetres: number
   parcelPercentage: number
   method: 'polygon_intersection'
+  intersectionGeometry?: ParcelGeometry
 }
 
 export interface OfficialClassificationAttributes {
