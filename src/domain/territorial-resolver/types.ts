@@ -3,6 +3,8 @@ export interface TerritorialCoordinates {
   lng: number
 }
 
+import type { ParcelContextSource } from '@/domain/parcel-context/types'
+
 export interface ParcelGeometry {
   type: 'MultiPolygon'
   coordinates: number[][][][]
@@ -71,6 +73,7 @@ export type DeterminationVerification = 'unverified' | 'technician_validated'
 export interface ContextDetermination<T> {
   value: T
   origin: DeterminationOrigin
+  source: ParcelContextSource
   verification: DeterminationVerification
   determinedAt?: string
   recordedAt?: string
@@ -78,7 +81,6 @@ export interface ContextDetermination<T> {
   validatedAt?: string
   validatedBy?: string
   previousAutomaticValue?: T
-  source?: string
 }
 
 export interface ContextDeterminationState<T> {
@@ -102,9 +104,9 @@ export interface ManualTerritorialContext {
     category?: ManualUrbanisticFactState
     consolidation?: ManualUrbanisticFactState<ConsolidationFactValue>
   }
-  classificationDetermination?: ContextDeterminationState<string>
-  categoryDetermination?: ContextDeterminationState<string>
-  ordinanceDetermination?: ContextDeterminationState<string>
+  classificationDetermination?: { technician?: ContextDetermination<string> }
+  categoryDetermination?: { technician?: ContextDetermination<string> }
+  ordinanceDetermination?: { technician?: ContextDetermination<string> }
   provenance: 'manual'
   verification: 'unverified' | 'technician_validated'
   recordedAt: string

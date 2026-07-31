@@ -215,4 +215,49 @@ describe('buildNormalizedParcelContext', () => {
     expect(context.municipality?.verification).toBe('unverified')
     expect(trustedMunicipalityFilter(context)).toBeNull()
   })
+
+  it('resuelve landClass utilizando la determinación validada por el técnico', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { landClass: 'rustico' },
+      detected: {
+        landClass: 'urbano',
+        planningSource: 'siotuga',
+        classificationDetermination: {
+          automatic: { value: 'urbano', origin: 'automatic', verification: 'unverified' },
+          technician: { value: 'nucleo_rural', origin: 'technician_selection', verification: 'technician_validated' }
+        },
+        manualContext: {
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: new Date().toISOString(),
+        }
+      }
+    })
+
+    expect(context.landClass).toMatchObject({
+      value: 'nucleo_rural',
+      source: 'manual',
+      verification: 'confirmed'
+    })
+  })
+
+  it('resuelve qualification utilizando la determinación automática si no hay técnico', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { urbanPlanningZone: 'Z-4' },
+      detected: {
+        ordinanceDetermination: {
+          automatic: { value: 'Z-5', origin: 'automatic', verification: 'unverified' }
+        },
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: new Date().toISOString(),
+        }
+      }
+    })
+
+    expect(context.qualification).toMatchObject({
+      value: 'Z-5'
+    })
+  })
 })

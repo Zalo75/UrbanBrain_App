@@ -106,9 +106,10 @@ export function attachContinuity(
   current: TerritorialResolution,
   input: ResolveParcelLocationInput,
   previousRaw: unknown,
-  manualContext?: ManualTerritorialContext
+  manualContextArg?: ManualTerritorialContext
 ) {
   const previous = effectiveOfficialContext(previousRaw)
+  const previousRawResult = previousRaw as TerritorialResolution | undefined
   const sameParcel = Boolean(previous && targetsSameParcel(input, previous))
   const useCurrent = isUsableOfficialContext(current)
   const usePrevious = Boolean(
@@ -146,6 +147,8 @@ export function attachContinuity(
     }
   }
 
+  let manualContext = manualContextArg ?? (sameParcel ? previousRawResult?.continuity?.manualContext : undefined)
+
   current.continuity = {
     lastOfficialContext: previous,
     effectiveOfficialContext: effective,
@@ -153,6 +156,7 @@ export function attachContinuity(
     sameParcelAsPrevious: sameParcel,
     manualContext,
   }
+
   return current
 }
 

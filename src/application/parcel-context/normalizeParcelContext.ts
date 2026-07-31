@@ -12,6 +12,8 @@ import type {
   ParcelContextVerification,
   ParcelCoordinates,
 } from '@/domain/parcel-context/types'
+import { getEffectiveDetermination } from '@/domain/territorial-resolver/determinations'
+import type { ContextDetermination, ContextDeterminationState } from '@/domain/territorial-resolver/types'
 
 export interface ParcelExpedienteInput {
   refCatastral?: string | null
@@ -51,6 +53,9 @@ export interface DetectedParcelInput {
   locationConfidence?: 'high' | 'medium' | 'low' | null
   planningWarnings?: Array<{ code: string; message: string }> | null
   planningConflicts?: string[] | null
+  classificationDetermination?: ContextDeterminationState<string>
+  categoryDetermination?: ContextDeterminationState<string>
+  ordinanceDetermination?: ContextDeterminationState<string>
   affects?: {
     detected?: Array<{
       category: string
@@ -68,6 +73,9 @@ export interface DetectedParcelInput {
     area?: string | null
     ordinance?: string | null
     observations?: string | null
+    classificationDetermination?: { technician?: ContextDetermination<string> }
+    categoryDetermination?: { technician?: ContextDetermination<string> }
+    ordinanceDetermination?: { technician?: ContextDetermination<string> }
     provenance: 'manual'
     verification: 'unverified' | 'technician_validated'
     recordedAt: string
@@ -495,17 +503,25 @@ export function buildNormalizedParcelContext(
       detected.planningSource === 'siotuga' &&
       detected.planningApplicabilityStatus !== 'conflict'
   )
-  const landClass = hasOfficialPlanningClass
+  const legacyLandClass = hasOfficialPlanningClass
     ? detected?.landClass
     : expediente.landClass || detected?.landClass || conversation.landClass
+
+  const classDet = detected?.classificationDetermination
+  const effectiveLandClassDet = getEffectiveDetermination(classDet)
+  const resolvedLandClass = effectiveLandClassDet?.value ?? legacyLandClass
+  const landClass = resolvedLandClass ?? undefined
+
   if (landClass && landClass !== 'desconocido') {
-    const source = hasOfficialPlanningClass
+    const isManual = effectiveLandClassDet?.origin === 'technician_selection'
+    const source = (isManual ? 'manual' :
+      (effectiveLandClassDet?.source ?? (hasOfficialPlanningClass
       ? 'siotuga'
       : expediente.landClass
         ? 'expediente'
         : detected?.landClass
           ? (detected.planningSource ?? 'urbanbrain')
-          : 'conversation'
+          : 'conversation'))) as ParcelContextSource
     context.landClass = field(
       landClass,
       source,
@@ -514,7 +530,7 @@ export function buildNormalizedParcelContext(
         ? 'confirmed'
         : source === 'expediente'
           ? expedienteVerification
-          : 'unverified'
+          : effectiveLandClassDet?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
     )
   }
   if (expediente.landClass && detected?.landClass) {
@@ -536,16 +552,23 @@ export function buildNormalizedParcelContext(
     )
   }
 
-  const qualification =
+  const legacyQualification =
     expediente.urbanPlanningZone?.trim() ||
     detected?.qualification?.trim() ||
     conversation.qualification
+  const ordDet = detected?.ordinanceDetermination
+  const effectiveOrdDet = getEffectiveDetermination(ordDet)
+  const resolvedQualification = effectiveOrdDet?.value ?? legacyQualification
+  const qualification = resolvedQualification ?? undefined
+
   if (qualification) {
-    const source = expediente.urbanPlanningZone
+    const isManual = effectiveOrdDet?.origin === 'technician_selection'
+    const source = (isManual ? 'manual' :
+      (effectiveOrdDet?.source ?? (expediente.urbanPlanningZone
       ? 'expediente'
       : detected?.qualification
         ? (detected.planningSource ?? 'urbanbrain')
-        : 'conversation'
+        : 'conversation'))) as ParcelContextSource
     context.qualification = field(
       qualification,
       source,
@@ -554,7 +577,7 @@ export function buildNormalizedParcelContext(
         ? 'confirmed'
         : source === 'expediente'
           ? expedienteVerification
-          : 'unverified'
+          : effectiveOrdDet?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
     )
   }
   if (expediente.urbanPlanningZone?.trim() && detected?.qualification?.trim()) {

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   detectContextFromInput: vi.fn(),
   recordManualContext: vi.fn(),
   revalidatePath: vi.fn(),
+  loadAuthorizedParcelInputs: vi.fn(),
 }))
 
 vi.mock('@/application/authorization/expedienteAccess', () => ({
@@ -23,6 +24,9 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   },
 }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
+vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
+  loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
+}))
 
 import { resolveTerritorialContextAction } from './territorialActions'
 
@@ -58,6 +62,10 @@ const resolution: TerritorialResolution = {
 describe('resolveTerritorialContextAction', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      latestDetectionRaw: resolution,
+      detected: {}
+    })
     mocks.update.mockReturnValue({ set: mocks.set })
     mocks.set.mockReturnValue({ where: mocks.where })
     mocks.where.mockResolvedValue(undefined)

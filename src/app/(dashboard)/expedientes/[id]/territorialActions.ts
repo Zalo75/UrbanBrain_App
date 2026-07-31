@@ -22,6 +22,24 @@ import type {
 import { db } from '@/infrastructure/db/client';
 import { expedientes } from '@/infrastructure/db/schema';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
+import { createTechnicianDetermination } from '@/domain/territorial-resolver/determinations';
+import type { ContextDetermination, ContextDeterminationState } from '@/domain/territorial-resolver/types';
+
+function updateDetermination<T>(
+  newValue: T | undefined,
+  userId: string,
+  existingAutomaticValue: T | undefined,
+  isValidated: boolean,
+  recordedAt: string
+): ContextDetermination<T> | undefined {
+  if (!newValue) return undefined;
+  return createTechnicianDetermination(
+    newValue,
+    userId,
+    existingAutomaticValue,
+    { verification: isValidated ? 'technician_validated' : 'unverified', now: () => new Date(recordedAt) }
+  );
+}
 
 export interface TerritorialResolutionActionState {
   status: 'idle' | 'success' | 'error';
@@ -212,6 +230,10 @@ export async function resolveTerritorialContextAction(
         }
         affectDecisions = reviewed;
       }
+      const classTech = updateDetermination(manualClassification || undefined, access.userId, authorizedInputs?.detected?.classificationDetermination?.automatic?.value, technicianValidated, recordedAt);
+      const catTech = updateDetermination(manualCategory || undefined, access.userId, authorizedInputs?.detected?.categoryDetermination?.automatic?.value, technicianValidated, recordedAt);
+      const ordTech = updateDetermination(manualOrdinance || undefined, access.userId, authorizedInputs?.detected?.ordinanceDetermination?.automatic?.value, technicianValidated, recordedAt);
+
       const manualContext: ManualTerritorialContext = {
         cadastralReference: cadastralReference ?? undefined,
         municipality: manualMunicipality || undefined,
@@ -222,6 +244,9 @@ export async function resolveTerritorialContextAction(
         area: manualArea || undefined,
         ordinance: manualOrdinance || undefined,
         observations: manualObservations || undefined,
+        classificationDetermination: classTech ? { technician: classTech } : undefined,
+        categoryDetermination: catTech ? { technician: catTech } : undefined,
+        ordinanceDetermination: ordTech ? { technician: ordTech } : undefined,
         affectDecisions,
         urbanisticFacts: previousManual?.urbanisticFacts,
         provenance: 'manual',

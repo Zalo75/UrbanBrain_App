@@ -3,26 +3,33 @@ import type {
   ContextDeterminationState,
   DeterminationVerification,
 } from './types'
+import type { ParcelContextSource } from '@/domain/parcel-context/types'
 
 export function getEffectiveValue<T>(
   state: ContextDeterminationState<T> | undefined,
   legacyValue: T | undefined
 ): T | undefined {
+  return getEffectiveDetermination(state)?.value ?? legacyValue
+}
+
+export function getEffectiveDetermination<T>(
+  state: ContextDeterminationState<T> | undefined
+): ContextDetermination<T> | undefined {
   if (state?.technician?.verification === 'technician_validated') {
-    return state.technician.value
+    return state.technician
   }
   if (state?.technician) {
-    return state.technician.value
+    return state.technician
   }
   if (state?.automatic) {
-    return state.automatic.value
+    return state.automatic
   }
-  return legacyValue
+  return undefined
 }
 
 export function createAutomaticDetermination<T>(
   value: T,
-  source?: string,
+  source: ParcelContextSource,
   now = () => new Date()
 ): ContextDetermination<T> {
   return {
@@ -53,6 +60,7 @@ export function createTechnicianDetermination<T>(
   return {
     value,
     origin: 'technician_selection',
+    source: 'manual',
     verification,
     recordedAt: isoNow,
     recordedBy,
@@ -65,7 +73,7 @@ export function createTechnicianDetermination<T>(
 export function mergeAutomaticDetermination<T>(
   existingState: ContextDeterminationState<T> | undefined,
   newValue: T,
-  source?: string,
+  source: ParcelContextSource,
   now = () => new Date()
 ): ContextDeterminationState<T> {
   const newAutomatic = createAutomaticDetermination(newValue, source, now)

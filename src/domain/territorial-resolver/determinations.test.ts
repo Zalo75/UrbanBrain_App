@@ -3,6 +3,7 @@ import {
   createAutomaticDetermination,
   createTechnicianDetermination,
   getEffectiveValue,
+  getEffectiveDetermination,
   mergeAutomaticDetermination,
 } from './determinations'
 
@@ -115,6 +116,7 @@ describe('Territorial Determinations (ContextDeterminationState)', () => {
       technician: {
         value: '3B',
         origin: 'technician_selection',
+        source: 'manual',
         verification: 'technician_validated',
         recordedAt: '2026-07-31T12:00:00.000Z',
         recordedBy: 'user_123',
@@ -127,5 +129,17 @@ describe('Territorial Determinations (ContextDeterminationState)', () => {
 
   it('Caso 10 — Ausencia total: Devuelve undefined', () => {
     expect(getEffectiveValue(undefined, undefined)).toBeUndefined()
+    expect(getEffectiveDetermination(undefined)).toBeUndefined()
+    expect(getEffectiveDetermination({})).toBeUndefined()
+  })
+
+  it('Caso 11 — getEffectiveDetermination: Conserva origen y validaciones correctamente', () => {
+    const auto = createAutomaticDetermination('3A', 'urbanbrain', nowFn)
+    expect(getEffectiveDetermination({ automatic: auto })).toMatchObject({
+      value: '3A',
+      origin: 'automatic',
+      source: 'urbanbrain',
+      verification: 'unverified'
+    })
   })
 })

@@ -56,13 +56,16 @@ export function classificationSummaryFromRaw(raw: unknown): Partial<DetectedParc
   )
   if (!automaticLandClass || assessment.level === 'unknown') return undefined
   return {
-    automaticLandClass,
     landClass: automaticLandClass,
     planningCanAnswerConcreteParameters: true,
-    classificationConfidenceLevel: assessment.level,
-    classificationReason: assessment.reason,
-    classificationSources: assessment.sources,
-    classificationWarnings: assessment.warnings,
+    classificationDetermination: {
+      automatic: {
+        value: automaticLandClass,
+        origin: 'automatic',
+        source: 'siotuga',
+        verification: 'unverified'
+      }
+    }
   }
 }
 
@@ -137,21 +140,12 @@ export async function loadAuthorizedParcelInputs(
   const detected: DetectedParcelInput | null = storedSummary
     ? {
         ...storedSummary,
-        automaticLandClass:
-          storedSummary.automaticLandClass ?? derivedClassification?.automaticLandClass,
         landClass: storedSummary.landClass ?? derivedClassification?.landClass,
         planningCanAnswerConcreteParameters:
           derivedClassification?.planningCanAnswerConcreteParameters ??
           storedSummary.planningCanAnswerConcreteParameters,
-        classificationConfidenceLevel:
-          storedSummary.classificationConfidenceLevel ??
-          derivedClassification?.classificationConfidenceLevel,
-        classificationReason:
-          storedSummary.classificationReason ?? derivedClassification?.classificationReason,
-        classificationSources:
-          storedSummary.classificationSources ?? derivedClassification?.classificationSources,
-        classificationWarnings:
-          storedSummary.classificationWarnings ?? derivedClassification?.classificationWarnings,
+        classificationDetermination:
+          storedSummary.classificationDetermination ?? derivedClassification?.classificationDetermination,
         urbanisticFacts: storedSummary.urbanisticFacts ?? derivedUrbanisticFacts,
       }
     : derivedUrbanisticFacts

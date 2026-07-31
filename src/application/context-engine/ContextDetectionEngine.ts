@@ -10,6 +10,8 @@ import {
   createManualAttempt,
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity'
+import { getEffectiveValue, createAutomaticDetermination } from '@/domain/territorial-resolver/determinations'
+import type { ContextDeterminationState } from '@/domain/territorial-resolver/types'
 import { db } from '@/infrastructure/db/client'
 import { contextDetections, expedientes } from '@/infrastructure/db/schema'
 import { and, eq } from 'drizzle-orm'
@@ -81,7 +83,15 @@ function detectionSummary(result: TerritorialResolution) {
         : effective?.planning.classification?.code === 'SR'
           ? 'rustico'
           : undefined
-  const landClass = manual?.classification ?? automaticLandClass
+
+  const automaticSource = effective?.planning.evidence.some(e => e.source === 'siotuga') ? 'siotuga' : 'urbanbrain'
+  const automaticLandClassDet = automaticLandClass ? createAutomaticDetermination(automaticLandClass, automaticSource) : undefined
+  const classDet: ContextDeterminationState<string> = {
+    automatic: automaticLandClassDet,
+    technician: manual?.classificationDetermination?.technician
+  }
+
+  const landClass = getEffectiveValue(classDet, manual?.classification ?? automaticLandClass)
   const automaticAffects = effective?.affects ?? result.affects
   const affectResolution = applyManualAffectDecisions(
     automaticAffects.detected,
@@ -161,7 +171,12 @@ function detectionSummary(result: TerritorialResolution) {
       (effective?.planning.status !== 'conflict' && effective?.planning.areas?.length === 1
         ? effective.planning.areas[0].name
         : undefined),
-    qualification: manual?.ordinance,
+    qualification: manual?.ordinanceDetermination
+      ? getEffectiveValue(manual.ordinanceDetermination, manual.ordinance)
+      : manual?.ordinance,
+    classificationDetermination: classDet,
+    categoryDetermination: manual?.categoryDetermination,
+    ordinanceDetermination: manual?.ordinanceDetermination,
     manualContext: manual,
     reliability: {
       mode: reliabilityMode,
