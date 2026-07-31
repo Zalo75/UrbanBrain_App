@@ -321,7 +321,7 @@ describe('structured facts without normative evidence', () => {
     const answer = buildSafeAbstention(partial, contextWithFacts, 'Â¿Que implica la clasificacion urbanistica?')
 
     expect(answer).toContain('Suelo urbano sin consolidar (SUSC)')
-    expect(answer).toContain('hechos territoriales estructurados vÃ¡lidos')
+    expect(answer).toContain('hechos territoriales estructurados válidos')
     expect(answer).not.toContain('Estado no determinado')
     expect(answer).not.toContain('AFECCIONES CONFIRMADAS')
   })

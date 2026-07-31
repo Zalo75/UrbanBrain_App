@@ -241,7 +241,14 @@ describe('urbanisticFacts persistence compatibility', () => {
     })
 
     expect(classificationSummaryFromRaw(result(resolution))).toMatchObject({
-      automaticLandClass: 'urbano_no_consolidado',
+      classificationDetermination: {
+        automatic: {
+          value: 'urbano_no_consolidado',
+          origin: 'automatic',
+          source: 'siotuga',
+          verification: 'unverified'
+        }
+      },
       landClass: 'urbano_no_consolidado',
     })
   })
