@@ -437,4 +437,93 @@ describe('ExpedienteForm', () => {
     expect(screen.getByRole('link', { name: /Ver en Catastro/i })).toBeTruthy()
     expect(screen.queryByText(/^Confirmado$/i)).toBeNull()
   })
+
+  it('uses the precise automatic SUSC selection in the controlled field and submits its canonical value', async () => {
+    vi.mocked(createExpediente).mockResolvedValue({ status: 'idle' })
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000101',
+      detection: {
+        detected: {
+          cadastralReference: '7709702NH4970N0001SZ',
+          municipalityId: 'culleredo',
+          landClass: 'urbano_no_consolidado',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '7709702NH4970N0001SZ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    const landClass = await screen.findByLabelText(/Clasificación del suelo/i) as HTMLSelectElement
+    expect(landClass.value).toBe('urbano_no_consolidado')
+    expect(landClass.selectedOptions[0]?.text).toBe('Urbano no consolidado')
+
+    fireEvent.change(screen.getByLabelText(/Nombre del proyecto/i), { target: { value: 'Expediente Ledoño' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /Crear expediente/i }))
+    await waitFor(() => expect(createExpediente).toHaveBeenCalledTimes(1))
+    const submittedData = vi.mocked(createExpediente).mock.calls[0]?.[1] as FormData
+    expect(submittedData.get('landClass')).toBe('urbano_no_consolidado')
+  })
+
+  it('allows the user to replace an automatic land-class selection manually', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000102',
+      detection: {
+        detected: {
+          cadastralReference: '7709702NH4970N0001SZ',
+          municipalityId: 'culleredo',
+          landClass: 'urbano_no_consolidado',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '7709702NH4970N0001SZ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    const landClass = await screen.findByLabelText(/Clasificación del suelo/i) as HTMLSelectElement
+    expect(landClass.value).toBe('urbano_no_consolidado')
+    fireEvent.change(landClass, { target: { value: 'urbanizable' } })
+    expect(landClass.value).toBe('urbanizable')
+    expect(landClass.selectedOptions[0]?.text).toBe('Urbanizable')
+  })
+
+  it('keeps the classification selector empty when the automatic value is not recognized', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000103',
+      detection: {
+        detected: {
+          cadastralReference: '7709702NH4970N0001SZ',
+          municipalityId: 'culleredo',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+      },
+    })
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '7709702NH4970N0001SZ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe(
+        '00000000-0000-4000-8000-000000000103'
+      )
+    })
+    const landClass = screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement
+    expect(landClass.value).toBe('')
+    expect(landClass.selectedOptions[0]?.text).toMatch(/Seleccionar si no se ha determinado/i)
+  })
 })

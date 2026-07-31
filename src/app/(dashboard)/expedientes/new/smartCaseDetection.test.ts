@@ -4,6 +4,7 @@ import type { TerritorialResolution } from '@/domain/territorial-resolver/types'
 import { allMunicipalities } from '@/shared/territory'
 
 import {
+  landClassFromClassification,
   municipalitiesForProvince,
   summarizeSmartCaseDetection,
   validateSmartCaseSubmission,
@@ -179,7 +180,7 @@ describe('smart case detection', () => {
 
     expect(detected.progress.find((item) => item.id === 'planning')).toMatchObject({ status: 'success' })
     expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'success' })
-    expect(detected.detected.landClass).toBe('urbano_consolidado')
+    expect(detected.detected.landClass).toBe('urbano_no_consolidado')
     expect(detected.result.planning.classification?.categoryCode).toBe('SUSC')
   })
 
@@ -200,5 +201,26 @@ describe('smart case detection', () => {
     expect(detected.progress.find((item) => item.id === 'planning')).toMatchObject({ status: 'success' })
     expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'not_determined' })
     expect(detected.detected.landClass).toBeUndefined()
+  })
+
+  it.each([
+    ['SUSC', 'urbano_no_consolidado'],
+    ['SUNC', 'urbano_no_consolidado'],
+    ['SUC', 'urbano_consolidado'],
+  ] as const)('normalizes official urban category %s without degrading it', (categoryCode, expected) => {
+    expect(landClassFromClassification({
+      code: 'SU',
+      categoryCode,
+      label: 'Suelo urbano',
+      sourceFeatureIds: ['feature-1'],
+    })).toBe(expected)
+  })
+
+  it('leaves an unrecognized official classification empty instead of selecting a false option', () => {
+    expect(landClassFromClassification({
+      code: 'DESCONOCIDO',
+      label: 'Clasificación no normalizada',
+      sourceFeatureIds: ['feature-1'],
+    })).toBeUndefined()
   })
 })

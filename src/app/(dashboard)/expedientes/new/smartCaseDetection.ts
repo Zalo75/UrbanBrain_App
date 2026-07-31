@@ -118,9 +118,12 @@ function progress(
 
 export function landClassFromClassification(classification?: PlanningClassification): LandClassValue | undefined {
   if (!classification) return undefined
-  if (classification.code === 'SU' && classification.categoryCode === 'SUNC') {
+  const categoryCode = classification.categoryCode?.trim().toUpperCase()
+  if (classification.code === 'SU' && (categoryCode === 'SUSC' || categoryCode === 'SUNC')) {
     return 'urbano_no_consolidado'
   }
+  if (classification.code === 'SU' && categoryCode === 'SUC') return 'urbano_consolidado'
+  // Compatibility fallback for legacy resolutions that only identified generic urban land.
   if (classification.code === 'SU') return 'urbano_consolidado'
   if (classification.code === 'SNR') return 'nucleo_rural'
   if (classification.code === 'SR') return 'rustico_no_urbanizable'
