@@ -1,6 +1,6 @@
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
-import { createEvaluatedSituation, createUrbanisticFact, createEvidence } from '@/domain/legal-engine/factory'
-import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind, Evidence } from '@/domain/legal-engine/types'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity } from '@/domain/legal-engine/factory'
+import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind, Evidence, Validity, ValidityStatus } from '@/domain/legal-engine/types'
 import type { UrbanisticFact as LegacyUrbanisticFact, TerritorialEvidence } from '@/domain/territorial-resolver/types'
 
 export function adaptLegacyParcelContextToSituation(
@@ -76,4 +76,25 @@ export function adaptLegacyEvidenceToV2(
     description: `Fuente: ${legacyEvidence.source}. Método: ${legacyEvidence.method}`,
     createdAt
   })
+}
+
+export function adaptLegacyValidityToV2(legacyValidityString?: string): Validity | null {
+  if (!legacyValidityString) return null
+
+  const normalized = legacyValidityString.trim().toLowerCase()
+  let status: ValidityStatus
+
+  if (normalized === 'active' || normalized === 'activo' || normalized === 'vigente') {
+    status = 'ACTIVE'
+  } else if (normalized === 'future' || normalized === 'futuro') {
+    status = 'FUTURE'
+  } else if (normalized === 'expired' || normalized === 'expirado' || normalized === 'derogado') {
+    status = 'EXPIRED'
+  } else if (normalized === 'suspended' || normalized === 'suspendido') {
+    status = 'SUSPENDED'
+  } else {
+    return null
+  }
+
+  return createValidity({ status })
 }

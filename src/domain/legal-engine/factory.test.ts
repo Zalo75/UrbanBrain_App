@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createEvaluatedSituation, createUrbanisticFact, createEvidence } from './factory'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity } from './factory'
 
 describe('EvaluatedUrbanisticSituation Factory', () => {
   it('creates a valid situation with required parameters', () => {
@@ -91,5 +91,27 @@ describe('Evidence Factory', () => {
         createdAt: '2026-08-03T12:00:00Z'
       })
     }).toThrow('id is required')
+  })
+})
+
+describe('Validity Factory', () => {
+  it('creates a valid Validity value object', () => {
+    const validity = createValidity({
+      status: 'ACTIVE',
+      validFrom: '2026-01-01T00:00:00Z',
+      validUntil: '2030-01-01T00:00:00Z'
+    })
+    expect(validity.status).toBe('ACTIVE')
+    expect(validity.validFrom).toBe('2026-01-01T00:00:00Z')
+    expect(validity.validUntil).toBe('2030-01-01T00:00:00Z')
+  })
+
+  it('throws if required fields are missing', () => {
+    expect(() => {
+      createValidity({
+        // @ts-expect-error testing missing status
+        status: undefined
+      })
+    }).toThrow('status is required')
   })
 })

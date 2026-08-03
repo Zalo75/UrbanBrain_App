@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { adaptLegacyParcelContextToSituation, adaptLegacyFactToV2, adaptLegacyEvidenceToV2 } from './legacyAdapter'
+import { adaptLegacyParcelContextToSituation, adaptLegacyFactToV2, adaptLegacyEvidenceToV2, adaptLegacyValidityToV2 } from './legacyAdapter'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { UrbanisticFact as LegacyUrbanisticFact, TerritorialEvidence } from '@/domain/territorial-resolver/types'
 
@@ -77,5 +77,40 @@ describe('adaptLegacyEvidenceToV2', () => {
     expect(v2.kind).toBe('official_registry')
     expect(v2.sourceReference).toBe('https://sedecatastro.gob.es/...')
     expect(v2.sourceLocation).toBe('location')
+  })
+})
+
+describe('adaptLegacyValidityToV2 fail-closed validation', () => {
+  it('Estado legacy explícitamente activo -> ACTIVE', () => {
+    expect(adaptLegacyValidityToV2('vigente')?.status).toBe('ACTIVE')
+    expect(adaptLegacyValidityToV2('activo')?.status).toBe('ACTIVE')
+  })
+
+  it('Estado explícitamente futuro -> FUTURE', () => {
+    expect(adaptLegacyValidityToV2('futuro')?.status).toBe('FUTURE')
+    expect(adaptLegacyValidityToV2('future')?.status).toBe('FUTURE')
+  })
+
+  it('Estado explícitamente expirado -> EXPIRED', () => {
+    expect(adaptLegacyValidityToV2('derogado')?.status).toBe('EXPIRED')
+    expect(adaptLegacyValidityToV2('expirado')?.status).toBe('EXPIRED')
+  })
+
+  it('Estado explícitamente suspendido -> SUSPENDED', () => {
+    expect(adaptLegacyValidityToV2('suspendido')?.status).toBe('SUSPENDED')
+  })
+
+  it('Texto libre sin estado estructurado -> null/undefined', () => {
+    expect(adaptLegacyValidityToV2('aprobado definitivamente en 2005, pero con modificaciones en 2012')).toBeNull()
+    expect(adaptLegacyValidityToV2('Aprobación inicial')).toBeNull()
+  })
+
+  it('Ausencia de datos -> null/undefined', () => {
+    expect(adaptLegacyValidityToV2(undefined)).toBeNull()
+    expect(adaptLegacyValidityToV2('')).toBeNull()
+  })
+
+  it('No se infiere ACTIVE por el mero hecho de existir texto', () => {
+    expect(adaptLegacyValidityToV2('cualquier texto')).toBeNull()
   })
 })

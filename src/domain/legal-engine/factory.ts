@@ -7,7 +7,9 @@ import type {
   UrbanisticFactKind,
   UrbanisticFactValue,
   Evidence,
-  EvidenceKind
+  EvidenceKind,
+  Validity,
+  ValidityStatus
 } from './types'
 
 export interface CreateEvaluatedSituationParams {
@@ -93,5 +95,21 @@ export function createEvidence(params: CreateEvidenceParams): Evidence {
     ...(params.sourceLocation ? { sourceLocation: params.sourceLocation } : {}),
     ...(params.description ? { description: params.description } : {}),
     createdAt: params.createdAt
+  }
+}
+
+export interface CreateValidityParams {
+  status: ValidityStatus
+  validFrom?: string
+  validUntil?: string
+}
+
+export function createValidity(params: CreateValidityParams): Validity {
+  if (!params.status) throw new Error('status is required')
+
+  return {
+    status: params.status,
+    ...(params.validFrom ? { validFrom: params.validFrom } : {}),
+    ...(params.validUntil ? { validUntil: params.validUntil } : {})
   }
 }

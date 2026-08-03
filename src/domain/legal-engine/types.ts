@@ -47,3 +47,11 @@ export interface Evidence {
   description?: string
   createdAt: string
 }
+
+export type ValidityStatus = 'ACTIVE' | 'FUTURE' | 'EXPIRED' | 'SUSPENDED'
+
+export interface Validity {
+  status: ValidityStatus
+  validFrom?: string
+  validUntil?: string
+}
