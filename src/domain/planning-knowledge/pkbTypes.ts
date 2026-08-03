@@ -107,7 +107,7 @@ export type PlanningKnowledgeOptionsResult =
   | { status: 'ambiguous'; candidates: PlanningKnowledgeBase[] }
   | { status: 'invalid_query'; errors: PlanningKnowledgeValidationError[] }
 
-import type { Validity, Assessment } from '@/domain/legal-engine/types'
+import type { Validity, Assessment, Evidence } from '@/domain/legal-engine/types'
 
 export type LegalNodeKind = 'instrument' | 'disposition'
 
@@ -158,10 +158,22 @@ export interface PlanningInstrument {
   evidenceIds?: string[]
 }
 
+export type EvidenceSubjectKind = 'instrument' | 'disposition' | 'relationship'
+
+export interface PlanningEvidenceLink {
+  evidenceId: string
+  subject: {
+    kind: EvidenceSubjectKind
+    id: string
+  }
+}
+
 export interface PlanningKnowledgeGraph {
   municipalityCode: string
   municipalityName: string
   instruments: PlanningInstrument[]
   dispositions: NormativeDisposition[]
   relationships: LegalRelationship[]
+  evidences?: Evidence[]
+  evidenceLinks?: PlanningEvidenceLink[]
 }

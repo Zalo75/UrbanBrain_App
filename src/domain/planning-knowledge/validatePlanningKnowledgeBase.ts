@@ -139,14 +139,27 @@ export function validatePlanningKnowledgeGraph(
 
   const instrumentIds = new Set<string>()
   const dispositionIds = new Set<string>()
+  const relationshipIds = new Set<string>()
   const dispositionInstrumentMap = new Map<string, string>()
   const parentMap = new Map<string, string | undefined>()
+  const evidenceIds = new Set<string>()
+  const evidenceById = new Map<string, any>()
+
+  const nodeEvidenceIds = new Map<string, Set<string>>()
+  const addNodeEvidence = (kind: string, id: string, evIds?: string[]) => {
+    if (!evIds) return
+    const key = `${kind}:${id}`
+    const set = nodeEvidenceIds.get(key) || new Set<string>()
+    evIds.forEach(eid => set.add(eid))
+    nodeEvidenceIds.set(key, set)
+  }
 
   for (const inst of graph.instruments) {
     if (instrumentIds.has(inst.id)) {
       errors.push({ code: 'DUPLICATE_INSTRUMENT_ID', path: `instruments[id=${inst.id}]`, message: `Duplicate instrument ID: ${inst.id}` })
     }
     instrumentIds.add(inst.id)
+    addNodeEvidence('instrument', inst.id, inst.evidenceIds)
   }
 
   for (const disp of graph.dispositions) {
@@ -156,6 +169,7 @@ export function validatePlanningKnowledgeGraph(
     dispositionIds.add(disp.id)
     dispositionInstrumentMap.set(disp.id, disp.instrumentId)
     parentMap.set(disp.id, disp.parentDispositionId)
+    addNodeEvidence('disposition', disp.id, disp.evidenceIds)
   }
 
   for (const disp of graph.dispositions) {
@@ -212,6 +226,78 @@ export function validatePlanningKnowledgeGraph(
       }
     } else {
        errors.push({ code: 'INVALID_RELATION_TARGET_KIND', path: `relationships[id=${rel.id}].target`, message: `Invalid target kind '${rel.target.kind}'` })
+    }
+
+    relationshipIds.add(rel.id)
+    addNodeEvidence('relationship', rel.id, rel.evidenceIds)
+  }
+
+  // 1. ID de Evidence duplicado.
+  if (graph.evidences) {
+    for (const ev of graph.evidences) {
+      if (evidenceIds.has(ev.id)) {
+        errors.push({ code: 'DUPLICATE_EVIDENCE_ID', path: `evidences[id=${ev.id}]`, message: `Duplicate evidence ID: ${ev.id}` })
+      }
+      evidenceIds.add(ev.id)
+      evidenceById.set(ev.id, ev)
+    }
+  }
+
+  const linkEvidenceIds = new Map<string, Set<string>>()
+
+  if (graph.evidenceLinks) {
+    for (let i = 0; i < graph.evidenceLinks.length; i++) {
+      const link = graph.evidenceLinks[i]
+      const path = `evidenceLinks[${i}]`
+
+      // 2. evidenceId del link inexistente.
+      if (!evidenceIds.has(link.evidenceId)) {
+        errors.push({ code: 'INVALID_LINK_EVIDENCE_ID', path: `${path}.evidenceId`, message: `Linked evidence '${link.evidenceId}' does not exist` })
+      }
+
+      const { kind, id } = link.subject
+      // 3. sujeto instrumento inexistente, 4. sujeto disposición inexistente, 5. sujeto relación inexistente, 6. kind incorrecto
+      if (kind === 'instrument' && !instrumentIds.has(id)) {
+        errors.push({ code: 'INVALID_LINK_SUBJECT_ID', path: `${path}.subject`, message: `Linked instrument subject '${id}' does not exist` })
+      } else if (kind === 'disposition' && !dispositionIds.has(id)) {
+        errors.push({ code: 'INVALID_LINK_SUBJECT_ID', path: `${path}.subject`, message: `Linked disposition subject '${id}' does not exist` })
+      } else if (kind === 'relationship' && !relationshipIds.has(id)) {
+        errors.push({ code: 'INVALID_LINK_SUBJECT_ID', path: `${path}.subject`, message: `Linked relationship subject '${id}' does not exist` })
+      }
+
+      // 14. Si Evidence.subjectId está informado, debe coincidir con subject.id del link
+      const ev = evidenceById.get(link.evidenceId)
+      if (ev && ev.subjectId !== undefined && ev.subjectId !== null && ev.subjectId !== '') {
+        if (ev.subjectId !== id) {
+          errors.push({ code: 'EVIDENCE_SUBJECT_MISMATCH', path: path, message: `Evidence '${link.evidenceId}' subjectId '${ev.subjectId}' does not match link subject.id '${id}'` })
+        }
+      }
+
+      const key = `${kind}:${id}`
+      const set = linkEvidenceIds.get(key) || new Set<string>()
+      set.add(link.evidenceId)
+      linkEvidenceIds.set(key, set)
+    }
+  }
+
+  // Check 7 & 8: evidenceIds en nodos/relaciones coinciden con los links correspondientes
+  for (const [key, declaredEvIds] of nodeEvidenceIds.entries()) {
+    const linkedEvIds = linkEvidenceIds.get(key) || new Set<string>()
+    for (const declaredId of declaredEvIds) {
+      // 7. evidenceIds de un nodo sin link correspondiente.
+      if (!linkedEvIds.has(declaredId)) {
+        errors.push({ code: 'MISSING_EVIDENCE_LINK', path: `[${key}]`, message: `Evidence '${declaredId}' declared in node/relationship but missing corresponding EvidenceLink` })
+      }
+    }
+  }
+
+  for (const [key, linkedEvIds] of linkEvidenceIds.entries()) {
+    const declaredEvIds = nodeEvidenceIds.get(key) || new Set<string>()
+    for (const linkedId of linkedEvIds) {
+      // 8. link cuyo evidenceId no aparece en evidenceIds del sujeto.
+      if (!declaredEvIds.has(linkedId)) {
+        errors.push({ code: 'UNDECLARED_EVIDENCE_LINK', path: `[${key}]`, message: `EvidenceLink points to '${linkedId}' but subject does not declare it in evidenceIds` })
+      }
     }
   }
 

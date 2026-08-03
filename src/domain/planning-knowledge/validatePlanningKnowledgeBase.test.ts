@@ -193,4 +193,95 @@ describe('validatePlanningKnowledgeGraph', () => {
     expect(graph.instruments[0].assessment).toBeUndefined()
     expect(graph.instruments[0].evidenceIds).toBeUndefined()
   })
+
+  // Evidence validation tests
+  it('14. ID de Evidence duplicado', () => {
+    const graph = createBaseGraph()
+    graph.evidences = [
+      { id: 'ev-1', subjectId: 'inst-1', kind: 'document', createdAt: '2023-01-01' },
+      { id: 'ev-1', subjectId: 'inst-2', kind: 'document', createdAt: '2023-01-02' }
+    ]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'DUPLICATE_EVIDENCE_ID')).toBe(true)
+  })
+
+  it('15. evidenceId del link inexistente', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }]
+    graph.evidenceLinks = [
+      { evidenceId: 'ev-1', subject: { kind: 'instrument', id: 'inst-1' } }
+    ]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_LINK_EVIDENCE_ID')).toBe(true)
+  })
+
+  it('16. sujeto inexistente o kind incorrecto', () => {
+    const graph = createBaseGraph()
+    graph.evidences = [{ id: 'ev-1', subjectId: 'unknown', kind: 'document', createdAt: '2023-01-01' }]
+    graph.evidenceLinks = [
+      { evidenceId: 'ev-1', subject: { kind: 'instrument', id: 'unknown-inst' } }
+    ]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_LINK_SUBJECT_ID')).toBe(true)
+  })
+
+  it('17. evidenceIds de un nodo sin link correspondiente', () => {
+    const graph = createBaseGraph()
+    graph.evidences = [{ id: 'ev-1', subjectId: 'inst-1', kind: 'document', createdAt: '2023-01-01' }]
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general', evidenceIds: ['ev-1'] }]
+    // No evidenceLinks provided
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'MISSING_EVIDENCE_LINK')).toBe(true)
+  })
+
+  it('18. link cuyo evidenceId no aparece en evidenceIds del sujeto', () => {
+    const graph = createBaseGraph()
+    graph.evidences = [{ id: 'ev-1', subjectId: 'inst-1', kind: 'document', createdAt: '2023-01-01' }]
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }] // evidenceIds missing
+    graph.evidenceLinks = [
+      { evidenceId: 'ev-1', subject: { kind: 'instrument', id: 'inst-1' } }
+    ]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'UNDECLARED_EVIDENCE_LINK')).toBe(true)
+  })
+
+  it('19. links válidos a instrumento, disposición y relación', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general', evidenceIds: ['ev-inst'] }]
+    graph.dispositions = [{ id: 'disp-1', instrumentId: 'inst-1', type: 'art', code: '1', name: 'A', evidenceIds: ['ev-disp'] }]
+    graph.relationships = [{ id: 'rel-1', source: { kind: 'instrument', id: 'inst-1' }, target: { kind: 'disposition', id: 'disp-1'}, type: 'MODIFIES', evidenceIds: ['ev-rel'] }]
+
+    graph.evidences = [
+      { id: 'ev-inst', subjectId: 'inst-1', kind: 'document', createdAt: '2023-01-01' },
+      { id: 'ev-disp', subjectId: 'disp-1', kind: 'document', createdAt: '2023-01-01' },
+      { id: 'ev-rel', subjectId: 'rel-1', kind: 'document', createdAt: '2023-01-01' }
+    ]
+
+    graph.evidenceLinks = [
+      { evidenceId: 'ev-inst', subject: { kind: 'instrument', id: 'inst-1' } },
+      { evidenceId: 'ev-disp', subject: { kind: 'disposition', id: 'disp-1' } },
+      { evidenceId: 'ev-rel', subject: { kind: 'relationship', id: 'rel-1' } }
+    ]
+
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.length).toBe(0)
+  })
+
+  it('20. Evidence sin link puede existir', () => {
+    const graph = createBaseGraph()
+    graph.evidences = [{ id: 'ev-orphaned', subjectId: 'unknown', kind: 'document', createdAt: '2023-01-01' }]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.length).toBe(0) // Should not error for orphaned evidence
+  })
+
+  it('21. Mismatch de subjectId explícito', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general', evidenceIds: ['ev-1'] }]
+    graph.evidences = [{ id: 'ev-1', subjectId: 'wrong-id', kind: 'document', createdAt: '2023-01-01' }]
+    graph.evidenceLinks = [
+      { evidenceId: 'ev-1', subject: { kind: 'instrument', id: 'inst-1' } }
+    ]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'EVIDENCE_SUBJECT_MISMATCH')).toBe(true)
+  })
 })
