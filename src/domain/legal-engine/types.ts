@@ -35,3 +35,15 @@ export interface UrbanisticFact {
   value: UrbanisticFactValue
   createdAt: string
 }
+
+export type EvidenceKind = 'document' | 'geometry' | 'official_registry' | 'manual_inspection'
+
+export interface Evidence {
+  id: string
+  subjectId: string
+  kind: EvidenceKind
+  sourceReference?: string
+  sourceLocation?: string
+  description?: string
+  createdAt: string
+}

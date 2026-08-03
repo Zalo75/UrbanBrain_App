@@ -1,7 +1,7 @@
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
-import { createEvaluatedSituation, createUrbanisticFact } from '@/domain/legal-engine/factory'
-import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind } from '@/domain/legal-engine/types'
-import type { UrbanisticFact as LegacyUrbanisticFact } from '@/domain/territorial-resolver/types'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence } from '@/domain/legal-engine/factory'
+import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind, Evidence } from '@/domain/legal-engine/types'
+import type { UrbanisticFact as LegacyUrbanisticFact, TerritorialEvidence } from '@/domain/territorial-resolver/types'
 
 export function adaptLegacyParcelContextToSituation(
   legacyContext: NormalizedParcelContext,
@@ -52,6 +52,28 @@ export function adaptLegacyFactToV2(
     situationId,
     property,
     value: stringValue,
+    createdAt
+  })
+}
+
+export function adaptLegacyEvidenceToV2(
+  legacyEvidence: TerritorialEvidence,
+  evidenceId: string,
+  subjectId: string,
+  createdAt: string
+): Evidence {
+  let kind: Evidence['kind'] = 'official_registry'
+  if (legacyEvidence.source === 'urbanbrain') {
+    kind = 'document'
+  }
+
+  return createEvidence({
+    id: evidenceId,
+    subjectId,
+    kind,
+    sourceReference: legacyEvidence.sourceUrl,
+    sourceLocation: legacyEvidence.scope,
+    description: `Fuente: ${legacyEvidence.source}. Método: ${legacyEvidence.method}`,
     createdAt
   })
 }

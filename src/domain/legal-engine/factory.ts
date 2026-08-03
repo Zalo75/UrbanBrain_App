@@ -5,7 +5,9 @@ import type {
   TerritorialScope,
   UrbanisticFact,
   UrbanisticFactKind,
-  UrbanisticFactValue
+  UrbanisticFactValue,
+  Evidence,
+  EvidenceKind
 } from './types'
 
 export interface CreateEvaluatedSituationParams {
@@ -63,6 +65,33 @@ export function createUrbanisticFact(params: CreateUrbanisticFactParams): Urbani
     situationId: params.situationId,
     property: params.property,
     value: params.value,
+    createdAt: params.createdAt
+  }
+}
+
+export interface CreateEvidenceParams {
+  id: string
+  subjectId: string
+  kind: EvidenceKind
+  sourceReference?: string
+  sourceLocation?: string
+  description?: string
+  createdAt: string
+}
+
+export function createEvidence(params: CreateEvidenceParams): Evidence {
+  if (!params.id) throw new Error('id is required')
+  if (!params.subjectId) throw new Error('subjectId is required')
+  if (!params.kind) throw new Error('kind is required')
+  if (!params.createdAt) throw new Error('createdAt is required')
+
+  return {
+    id: params.id,
+    subjectId: params.subjectId,
+    kind: params.kind,
+    ...(params.sourceReference ? { sourceReference: params.sourceReference } : {}),
+    ...(params.sourceLocation ? { sourceLocation: params.sourceLocation } : {}),
+    ...(params.description ? { description: params.description } : {}),
     createdAt: params.createdAt
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createEvaluatedSituation, createUrbanisticFact } from './factory'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence } from './factory'
 
 describe('EvaluatedUrbanisticSituation Factory', () => {
   it('creates a valid situation with required parameters', () => {
@@ -62,6 +62,33 @@ describe('UrbanisticFact Factory', () => {
         property: 'classification',
         value: 'urbano',
         createdAt: '2026-08-03T00:00:00Z'
+      })
+    }).toThrow('id is required')
+  })
+})
+
+describe('Evidence Factory', () => {
+  it('creates a valid evidence', () => {
+    const evidence = createEvidence({
+      id: 'ev-1',
+      subjectId: 'fact-1',
+      kind: 'document',
+      sourceReference: 'PGOM-2023',
+      sourceLocation: 'Art. 42',
+      description: 'Zonificación residencial',
+      createdAt: '2026-08-03T12:00:00Z'
+    })
+    expect(evidence.id).toBe('ev-1')
+    expect(evidence.sourceReference).toBe('PGOM-2023')
+  })
+
+  it('throws if required fields are missing', () => {
+    expect(() => {
+      createEvidence({
+        id: '',
+        subjectId: 'fact-1',
+        kind: 'document',
+        createdAt: '2026-08-03T12:00:00Z'
       })
     }).toThrow('id is required')
   })
