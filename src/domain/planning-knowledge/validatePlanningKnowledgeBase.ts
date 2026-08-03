@@ -137,6 +137,14 @@ export function validatePlanningKnowledgeGraph(
 ): PlanningKnowledgeValidationError[] {
   const errors: PlanningKnowledgeValidationError[] = []
 
+  if (!graph.municipalityCode || graph.municipalityCode.trim() === '') {
+    errors.push({ code: 'EMPTY_MUNICIPALITY_CODE', path: 'municipalityCode', message: 'Municipality code cannot be empty' })
+  }
+
+  if (!graph.version || graph.version.trim() === '') {
+    errors.push({ code: 'EMPTY_GRAPH_VERSION', path: 'version', message: 'Graph version cannot be empty' })
+  }
+
   const instrumentIds = new Set<string>()
   const dispositionIds = new Set<string>()
   const relationshipIds = new Set<string>()

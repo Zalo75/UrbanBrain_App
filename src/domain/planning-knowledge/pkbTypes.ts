@@ -171,6 +171,7 @@ export interface PlanningEvidenceLink {
 export interface PlanningKnowledgeGraph {
   municipalityCode: string
   municipalityName: string
+  version: string
   instruments: PlanningInstrument[]
   dispositions: NormativeDisposition[]
   relationships: LegalRelationship[]

@@ -6,9 +6,24 @@ describe('validatePlanningKnowledgeGraph', () => {
   const createBaseGraph = (): PlanningKnowledgeGraph => ({
     municipalityCode: '15009',
     municipalityName: 'Betanzos',
+    version: 'v1',
     instruments: [],
     dispositions: [],
     relationships: []
+  })
+
+  it('22. Version vacía produce invalid', () => {
+    const graph = createBaseGraph()
+    graph.version = ''
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'EMPTY_GRAPH_VERSION')).toBe(true)
+  })
+
+  it('23. MunicipalityCode vacío produce invalid', () => {
+    const graph = createBaseGraph()
+    graph.municipalityCode = ''
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'EMPTY_MUNICIPALITY_CODE')).toBe(true)
   })
 
   it('1. ID de instrumento duplicado', () => {
