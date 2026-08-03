@@ -1,6 +1,6 @@
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
-import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity } from '@/domain/legal-engine/factory'
-import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind, Evidence, Validity, ValidityStatus } from '@/domain/legal-engine/types'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity, createAssessment } from '@/domain/legal-engine/factory'
+import type { EvaluatedUrbanisticSituation, UrbanisticFact, UrbanisticFactKind, Evidence, Validity, ValidityStatus, Assessment, ConfidenceLevel, VerificationStatus } from '@/domain/legal-engine/types'
 import type { UrbanisticFact as LegacyUrbanisticFact, TerritorialEvidence } from '@/domain/territorial-resolver/types'
 
 export function adaptLegacyParcelContextToSituation(
@@ -97,4 +97,66 @@ export function adaptLegacyValidityToV2(legacyValidityString?: string): Validity
   }
 
   return createValidity({ status })
+}
+
+export interface LegacyAssessmentInputs {
+  confidence?: string | number | null
+  verification?: string | null
+  warnings?: any[]
+  discrepancies?: any[]
+}
+
+export function adaptLegacyAssessmentToV2(inputs?: LegacyAssessmentInputs): Assessment {
+  if (!inputs) {
+    return createAssessment({
+      confidence: 'UNKNOWN',
+      verification: 'UNVERIFIED',
+      warnings: [],
+      discrepancies: []
+    })
+  }
+
+  let mappedConfidence: ConfidenceLevel = 'UNKNOWN'
+  if (typeof inputs.confidence === 'string') {
+    const normalized = inputs.confidence.trim().toLowerCase()
+    if (normalized === 'high' || normalized === 'alta') {
+      mappedConfidence = 'HIGH'
+    } else if (normalized === 'medium' || normalized === 'media') {
+      mappedConfidence = 'MEDIUM'
+    } else if (normalized === 'low' || normalized === 'baja') {
+      mappedConfidence = 'LOW'
+    }
+  }
+
+  let mappedVerification: VerificationStatus = 'UNVERIFIED'
+  if (typeof inputs.verification === 'string') {
+    const normalized = inputs.verification.trim().toLowerCase()
+    if (normalized === 'confirmed' || normalized === 'technician_validated' || normalized === 'verified') {
+      mappedVerification = 'VERIFIED'
+    } else if (normalized === 'inferred' || normalized === 'probable') {
+      mappedVerification = 'INFERRED'
+    } else if (normalized === 'conflict' || normalized === 'contested') {
+      mappedVerification = 'CONTESTED'
+    } else if (normalized === 'unverified' || normalized === 'unresolved' || normalized === 'ambiguous') {
+      mappedVerification = 'UNVERIFIED'
+    }
+  }
+
+  const extractString = (val: any) => {
+    if (typeof val === 'string') return val
+    if (val && typeof val === 'object') {
+      return val.message || val.explanation || val.reason || val.code || JSON.stringify(val)
+    }
+    return String(val)
+  }
+
+  const warnings = Array.isArray(inputs.warnings) ? inputs.warnings.map(extractString) : []
+  const discrepancies = Array.isArray(inputs.discrepancies) ? inputs.discrepancies.map(extractString) : []
+
+  return createAssessment({
+    confidence: mappedConfidence,
+    verification: mappedVerification,
+    warnings,
+    discrepancies
+  })
 }

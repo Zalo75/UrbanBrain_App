@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { adaptLegacyParcelContextToSituation, adaptLegacyFactToV2, adaptLegacyEvidenceToV2, adaptLegacyValidityToV2 } from './legacyAdapter'
+import { adaptLegacyParcelContextToSituation, adaptLegacyFactToV2, adaptLegacyEvidenceToV2, adaptLegacyValidityToV2, adaptLegacyAssessmentToV2 } from './legacyAdapter'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { UrbanisticFact as LegacyUrbanisticFact, TerritorialEvidence } from '@/domain/territorial-resolver/types'
 
@@ -112,5 +112,56 @@ describe('adaptLegacyValidityToV2 fail-closed validation', () => {
 
   it('No se infiere ACTIVE por el mero hecho de existir texto', () => {
     expect(adaptLegacyValidityToV2('cualquier texto')).toBeNull()
+  })
+})
+
+describe('adaptLegacyAssessmentToV2', () => {
+  it('4. Mapeo explícito de HIGH, MEDIUM y LOW', () => {
+    expect(adaptLegacyAssessmentToV2({ confidence: 'high' }).confidence).toBe('HIGH')
+    expect(adaptLegacyAssessmentToV2({ confidence: 'medium' }).confidence).toBe('MEDIUM')
+    expect(adaptLegacyAssessmentToV2({ confidence: 'low' }).confidence).toBe('LOW')
+    expect(adaptLegacyAssessmentToV2({ confidence: 'alta' }).confidence).toBe('HIGH')
+  })
+
+  it('5. Valor no reconocido -> UNKNOWN', () => {
+    expect(adaptLegacyAssessmentToV2({ confidence: 'confirmed' }).confidence).toBe('UNKNOWN')
+    expect(adaptLegacyAssessmentToV2({ confidence: 'probable' }).confidence).toBe('UNKNOWN')
+  })
+
+  it('6. Confidence numérico sin umbral existente -> UNKNOWN', () => {
+    expect(adaptLegacyAssessmentToV2({ confidence: 0.8 }).confidence).toBe('UNKNOWN')
+    expect(adaptLegacyAssessmentToV2({ confidence: 1 }).confidence).toBe('UNKNOWN')
+  })
+
+  it('7. Mapeo explícito de cada VerificationStatus', () => {
+    expect(adaptLegacyAssessmentToV2({ verification: 'confirmed' }).verification).toBe('VERIFIED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'technician_validated' }).verification).toBe('VERIFIED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'inferred' }).verification).toBe('INFERRED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'probable' }).verification).toBe('INFERRED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'conflict' }).verification).toBe('CONTESTED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'contested' }).verification).toBe('CONTESTED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'unverified' }).verification).toBe('UNVERIFIED')
+    expect(adaptLegacyAssessmentToV2({ verification: 'unresolved' }).verification).toBe('UNVERIFIED')
+  })
+
+  it('8. Verification desconocido -> UNVERIFIED', () => {
+    expect(adaptLegacyAssessmentToV2({ verification: 'random_string' }).verification).toBe('UNVERIFIED')
+  })
+
+  it('9. Conservación de warnings y discrepancies legacy', () => {
+    const assessment = adaptLegacyAssessmentToV2({
+      warnings: ['warn1', { code: 'W2', message: 'warn2' }],
+      discrepancies: [{ reason: 'conflict', explanation: 'disc1' }]
+    })
+    expect(assessment.warnings).toEqual(['warn1', 'warn2'])
+    expect(assessment.discrepancies).toEqual(['disc1'])
+  })
+
+  it('10. Ausencia total de datos -> resultado fail-closed coherente', () => {
+    const assessment = adaptLegacyAssessmentToV2()
+    expect(assessment.confidence).toBe('UNKNOWN')
+    expect(assessment.verification).toBe('UNVERIFIED')
+    expect(assessment.warnings).toEqual([])
+    expect(assessment.discrepancies).toEqual([])
   })
 })

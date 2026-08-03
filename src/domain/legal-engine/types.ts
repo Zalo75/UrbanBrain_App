@@ -55,3 +55,14 @@ export interface Validity {
   validFrom?: string
   validUntil?: string
 }
+
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+
+export type VerificationStatus = 'VERIFIED' | 'UNVERIFIED' | 'CONTESTED' | 'INFERRED'
+
+export interface Assessment {
+  confidence: ConfidenceLevel
+  verification: VerificationStatus
+  warnings: string[]
+  discrepancies: string[]
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity } from './factory'
+import { createEvaluatedSituation, createUrbanisticFact, createEvidence, createValidity, createAssessment } from './factory'
 
 describe('EvaluatedUrbanisticSituation Factory', () => {
   it('creates a valid situation with required parameters', () => {
@@ -113,5 +113,48 @@ describe('Validity Factory', () => {
         status: undefined
       })
     }).toThrow('status is required')
+  })
+})
+
+describe('Assessment Factory', () => {
+  it('1. Creación completa de Assessment', () => {
+    const assessment = createAssessment({
+      confidence: 'HIGH',
+      verification: 'VERIFIED',
+      warnings: ['warning 1'],
+      discrepancies: ['discrepancy 1']
+    })
+    expect(assessment.confidence).toBe('HIGH')
+    expect(assessment.verification).toBe('VERIFIED')
+    expect(assessment.warnings).toEqual(['warning 1'])
+    expect(assessment.discrepancies).toEqual(['discrepancy 1'])
+  })
+
+  it('2. Valores predeterminados seguros para warnings y discrepancies', () => {
+    const assessment = createAssessment({
+      confidence: 'LOW',
+      verification: 'UNVERIFIED'
+    })
+    expect(assessment.warnings).toEqual([])
+    expect(assessment.discrepancies).toEqual([])
+  })
+
+  it('3. Copias defensivas de ambos arrays', () => {
+    const warnings = ['a']
+    const discrepancies = ['b']
+    const assessment = createAssessment({
+      confidence: 'HIGH',
+      verification: 'VERIFIED',
+      warnings,
+      discrepancies
+    })
+
+    // Mutate the original arrays
+    warnings.push('c')
+    discrepancies.push('d')
+
+    // Assessment arrays should remain unchanged
+    expect(assessment.warnings).toEqual(['a'])
+    expect(assessment.discrepancies).toEqual(['b'])
   })
 })

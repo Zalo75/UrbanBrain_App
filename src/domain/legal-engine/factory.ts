@@ -9,7 +9,10 @@ import type {
   Evidence,
   EvidenceKind,
   Validity,
-  ValidityStatus
+  ValidityStatus,
+  Assessment,
+  ConfidenceLevel,
+  VerificationStatus
 } from './types'
 
 export interface CreateEvaluatedSituationParams {
@@ -111,5 +114,24 @@ export function createValidity(params: CreateValidityParams): Validity {
     status: params.status,
     ...(params.validFrom ? { validFrom: params.validFrom } : {}),
     ...(params.validUntil ? { validUntil: params.validUntil } : {})
+  }
+}
+
+export interface CreateAssessmentParams {
+  confidence: ConfidenceLevel
+  verification: VerificationStatus
+  warnings?: string[]
+  discrepancies?: string[]
+}
+
+export function createAssessment(params: CreateAssessmentParams): Assessment {
+  if (!params.confidence) throw new Error('confidence is required')
+  if (!params.verification) throw new Error('verification is required')
+
+  return {
+    confidence: params.confidence,
+    verification: params.verification,
+    warnings: Array.isArray(params.warnings) ? [...params.warnings] : [],
+    discrepancies: Array.isArray(params.discrepancies) ? [...params.discrepancies] : []
   }
 }
