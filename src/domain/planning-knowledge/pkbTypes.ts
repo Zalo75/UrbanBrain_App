@@ -107,7 +107,7 @@ export type PlanningKnowledgeOptionsResult =
   | { status: 'ambiguous'; candidates: PlanningKnowledgeBase[] }
   | { status: 'invalid_query'; errors: PlanningKnowledgeValidationError[] }
 
-import type { Validity, Assessment, Evidence } from '@/domain/legal-engine/types'
+import type { Validity, Assessment, Evidence, UrbanisticFactKind, UrbanisticFactValue } from '@/domain/legal-engine/types'
 
 export type LegalNodeKind = 'instrument' | 'disposition'
 
@@ -137,6 +137,22 @@ export interface LegalRelationship {
   evidenceIds?: string[]
 }
 
+export type FactComparisonOperator =
+  | 'EQUALS'
+  | 'NOT_EQUALS'
+  | 'IN'
+  | 'NOT_IN'
+  | 'EXISTS'
+  | 'NOT_EXISTS'
+
+export interface FactCondition {
+  id: string
+  factKind: UrbanisticFactKind
+  operator: FactComparisonOperator
+  expectedValue?: UrbanisticFactValue
+  expectedValues?: UrbanisticFactValue[]
+}
+
 export interface NormativeDisposition {
   id: string
   instrumentId: string
@@ -144,6 +160,7 @@ export interface NormativeDisposition {
   code: string
   name: string
   parentDispositionId?: string
+  applicabilityConditions?: FactCondition[]
   validity?: Validity
   assessment?: Assessment
   evidenceIds?: string[]

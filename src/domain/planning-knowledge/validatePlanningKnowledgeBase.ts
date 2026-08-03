@@ -209,6 +209,57 @@ export function validatePlanningKnowledgeGraph(
         errors.push({ code: 'CIRCULAR_STRUCTURAL_DEPENDENCY', path: `dispositions[id=${disp.id}]`, message: `Circular structural dependency detected for disposition '${disp.id}'` })
       }
     }
+
+    if (disp.applicabilityConditions) {
+      const conditionIds = new Set<string>()
+      disp.applicabilityConditions.forEach((cond, j) => {
+        const path = `dispositions[id=${disp.id}].applicabilityConditions[${j}]`
+        if (!cond.id || cond.id.trim() === '') {
+          errors.push({ code: 'EMPTY_CONDITION_ID', path: `${path}.id`, message: 'Condition ID cannot be empty' })
+        } else if (conditionIds.has(cond.id)) {
+          errors.push({ code: 'DUPLICATE_CONDITION_ID', path: `${path}.id`, message: `Duplicate condition ID within disposition: ${cond.id}` })
+        }
+        if (cond.id) conditionIds.add(cond.id)
+
+        if (!cond.factKind) {
+          errors.push({ code: 'MISSING_FACT_KIND', path: `${path}.factKind`, message: 'Condition factKind is required' })
+        }
+
+        switch (cond.operator) {
+          case 'EQUALS':
+          case 'NOT_EQUALS':
+            if (cond.expectedValue === undefined) {
+              errors.push({ code: 'MISSING_EXPECTED_VALUE', path: `${path}.expectedValue`, message: `Operator ${cond.operator} requires expectedValue` })
+            }
+            if (cond.expectedValues !== undefined) {
+              errors.push({ code: 'INVALID_EXPECTED_VALUES', path: `${path}.expectedValues`, message: `Operator ${cond.operator} must not have expectedValues` })
+            }
+            break
+          case 'IN':
+          case 'NOT_IN':
+            if (cond.expectedValues === undefined || !Array.isArray(cond.expectedValues)) {
+              errors.push({ code: 'MISSING_EXPECTED_VALUES', path: `${path}.expectedValues`, message: `Operator ${cond.operator} requires expectedValues array` })
+            } else if (cond.expectedValues.length === 0) {
+              errors.push({ code: 'EMPTY_EXPECTED_VALUES', path: `${path}.expectedValues`, message: `Operator ${cond.operator} requires non-empty expectedValues array` })
+            }
+            if (cond.expectedValue !== undefined) {
+              errors.push({ code: 'INVALID_EXPECTED_VALUE', path: `${path}.expectedValue`, message: `Operator ${cond.operator} must not have expectedValue` })
+            }
+            break
+          case 'EXISTS':
+          case 'NOT_EXISTS':
+            if (cond.expectedValue !== undefined) {
+              errors.push({ code: 'INVALID_EXPECTED_VALUE', path: `${path}.expectedValue`, message: `Operator ${cond.operator} must not have expectedValue` })
+            }
+            if (cond.expectedValues !== undefined) {
+              errors.push({ code: 'INVALID_EXPECTED_VALUES', path: `${path}.expectedValues`, message: `Operator ${cond.operator} must not have expectedValues` })
+            }
+            break
+          default:
+            errors.push({ code: 'INVALID_OPERATOR', path: `${path}.operator`, message: `Unknown operator ${cond.operator}` })
+        }
+      })
+    }
   }
 
   for (const rel of graph.relationships) {

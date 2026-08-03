@@ -12,6 +12,103 @@ describe('validatePlanningKnowledgeGraph', () => {
     relationships: []
   })
 
+  it('27. Duplicate condition ID and empty expectedValues array fail validation', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }]
+    graph.dispositions = [{
+      id: 'disp-1',
+      instrumentId: 'inst-1',
+      type: 'ordinance',
+      code: 'U1',
+      name: 'U1',
+      applicabilityConditions: [
+        { id: 'cond-1', factKind: 'classification', operator: 'IN', expectedValues: [] },
+        { id: 'cond-1', factKind: 'category', operator: 'EQUALS', expectedValue: 'urb' }
+      ]
+    }]
+    const errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'DUPLICATE_CONDITION_ID')).toBe(true)
+    expect(errors.some(e => e.code === 'EMPTY_EXPECTED_VALUES')).toBe(true)
+  })
+
+  it('24. applicabilityConditions EQUALS exige expectedValue y rechaza expectedValues', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }]
+    graph.dispositions = [{
+      id: 'disp-1',
+      instrumentId: 'inst-1',
+      type: 'ordinance',
+      code: 'U1',
+      name: 'U1',
+      applicabilityConditions: [
+        { id: 'cond-1', factKind: 'classification', operator: 'EQUALS' }
+      ]
+    }]
+    let errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'MISSING_EXPECTED_VALUE')).toBe(true)
+
+    graph.dispositions[0].applicabilityConditions![0].expectedValue = 'urbano'
+    graph.dispositions[0].applicabilityConditions![0].expectedValues = ['urbano']
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_EXPECTED_VALUES')).toBe(true)
+
+    delete graph.dispositions[0].applicabilityConditions![0].expectedValues
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'MISSING_EXPECTED_VALUE' || e.code === 'INVALID_EXPECTED_VALUES')).toBe(false)
+  })
+
+  it('25. applicabilityConditions IN exige expectedValues y rechaza expectedValue', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }]
+    graph.dispositions = [{
+      id: 'disp-1',
+      instrumentId: 'inst-1',
+      type: 'ordinance',
+      code: 'U1',
+      name: 'U1',
+      applicabilityConditions: [
+        { id: 'cond-1', factKind: 'classification', operator: 'IN' }
+      ]
+    }]
+    let errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'MISSING_EXPECTED_VALUES')).toBe(true)
+
+    graph.dispositions[0].applicabilityConditions![0].expectedValues = ['urbano']
+    graph.dispositions[0].applicabilityConditions![0].expectedValue = 'urbano'
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_EXPECTED_VALUE')).toBe(true)
+
+    delete graph.dispositions[0].applicabilityConditions![0].expectedValue
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'MISSING_EXPECTED_VALUES' || e.code === 'INVALID_EXPECTED_VALUE')).toBe(false)
+  })
+
+  it('26. applicabilityConditions EXISTS rechaza expectedValue y expectedValues', () => {
+    const graph = createBaseGraph()
+    graph.instruments = [{ id: 'inst-1', name: 'Inst', kind: 'general' }]
+    graph.dispositions = [{
+      id: 'disp-1',
+      instrumentId: 'inst-1',
+      type: 'ordinance',
+      code: 'U1',
+      name: 'U1',
+      applicabilityConditions: [
+        { id: 'cond-1', factKind: 'classification', operator: 'EXISTS', expectedValue: 'urbano' }
+      ]
+    }]
+    let errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_EXPECTED_VALUE')).toBe(true)
+
+    delete graph.dispositions[0].applicabilityConditions![0].expectedValue
+    graph.dispositions[0].applicabilityConditions![0].expectedValues = ['urbano']
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.some(e => e.code === 'INVALID_EXPECTED_VALUES')).toBe(true)
+
+    delete graph.dispositions[0].applicabilityConditions![0].expectedValues
+    errors = validatePlanningKnowledgeGraph(graph)
+    expect(errors.length).toBe(0)
+  })
+
   it('22. Version vacía produce invalid', () => {
     const graph = createBaseGraph()
     graph.version = ''
