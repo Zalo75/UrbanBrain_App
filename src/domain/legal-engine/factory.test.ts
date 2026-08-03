@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createEvaluatedSituation } from './factory'
+import { createEvaluatedSituation, createUrbanisticFact } from './factory'
 
 describe('EvaluatedUrbanisticSituation Factory', () => {
   it('creates a valid situation with required parameters', () => {
@@ -36,6 +36,32 @@ describe('EvaluatedUrbanisticSituation Factory', () => {
         referenceDate: '2026-08-03T00:00:00Z',
         jurisdiction: { municipalityCode: '15031' },
         territorialScope: { id: 'scope-2', type: 'geometry' }
+      })
+    }).toThrow('id is required')
+  })
+})
+
+describe('UrbanisticFact Factory', () => {
+  it('creates a valid urbanistic fact', () => {
+    const fact = createUrbanisticFact({
+      id: 'fact-1',
+      situationId: 'sit-1',
+      property: 'classification',
+      value: 'urbano',
+      createdAt: '2026-08-03T00:00:00Z'
+    })
+    expect(fact.id).toBe('fact-1')
+    expect(fact.value).toBe('urbano')
+  })
+
+  it('throws if required fields are missing', () => {
+    expect(() => {
+      createUrbanisticFact({
+        id: '',
+        situationId: 'sit-1',
+        property: 'classification',
+        value: 'urbano',
+        createdAt: '2026-08-03T00:00:00Z'
       })
     }).toThrow('id is required')
   })

@@ -23,3 +23,15 @@ export interface EvaluatedUrbanisticSituation {
   action?: ProposedAction
   territorialScope: TerritorialScope
 }
+
+export type UrbanisticFactKind = 'classification' | 'category' | 'consolidation' | 'affect' | 'parameter'
+
+export type UrbanisticFactValue = string | number | boolean
+
+export interface UrbanisticFact {
+  id: string
+  situationId: string
+  property: UrbanisticFactKind
+  value: UrbanisticFactValue
+  createdAt: string
+}
