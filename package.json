@@ -17,6 +17,7 @@
     "verify:betanzos:live": "tsx scripts/verify-betanzos-reference.ts",
     "planning:coruna:dry-run": "tsx scripts/importMunicipalPlanningCoruna.ts",
     "planning:knowledge:coruna": "tsx scripts/generatePlanningKnowledgeCoruna.ts",
+    "planning:knowledge:p1-documents": "tsx scripts/generateP1PlanningDocumentCatalog.ts",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "pdf-parse": "^1.1.1",
     "pdf2json": "4.0.3",
     "pg": "^8.22.0",
+    "polygon-clipping": "^0.15.7",
     "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Check, Copy, Map } from 'lucide-react';
 
 import type {
+  ClassificationCandidate,
   ParcelGeometry,
   TerritorialCoordinates,
 } from '@/domain/territorial-resolver/types';
@@ -24,9 +25,12 @@ const LeafletParcelMap = dynamic(() => import('./LeafletParcelMap'), {
 interface Props {
   geometry?: ParcelGeometry;
   coordinates?: TerritorialCoordinates;
+  candidates?: ClassificationCandidate[];
+  selectedCandidateId?: string;
+  onCandidateSelect?: (candidateId: string) => void;
 }
 
-export function ParcelMap({ geometry, coordinates }: Props) {
+export function ParcelMap({ geometry, coordinates, candidates, selectedCandidateId, onCandidateSelect }: Props) {
   const [baseLayerId, setBaseLayerId] = useState<BaseMapLayerId>('catastro');
   const [copyResult, setCopyResult] = useState<{
     text: string;
@@ -97,7 +101,59 @@ export function ParcelMap({ geometry, coordinates }: Props) {
         </>
       )}
 
-      <div className="flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+
+      {((candidates ?? []).filter((candidate: import('@/domain/territorial-resolver/types').ClassificationCandidate) => candidate.parcelCoverage?.intersectionGeometry).length ?? 0) > 0 && (
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-xs font-medium">Zonas territoriales detectadas</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(candidates ?? [])
+              .filter((c: import('@/domain/territorial-resolver/types').ClassificationCandidate) => c.parcelCoverage?.intersectionGeometry)
+              .map((candidate: import('@/domain/territorial-resolver/types').ClassificationCandidate) => {
+                const selected = candidate.id === selectedCandidateId;
+                const isOfficial = candidate.kind === 'official_classification';
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => onCandidateSelect?.(candidate.id)}
+                    aria-pressed={selected}
+                    className={`rounded-md border p-3 text-left text-xs transition-colors ${
+                      selected
+                        ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200 dark:bg-orange-950/30'
+                        : 'hover:border-orange-300'
+                    }`}
+                  >
+                    <span className="block font-semibold">
+                      {isOfficial
+                        ? (candidate.classification.categoryLabel ?? candidate.classification.label)
+                        : 'Zona sin cobertura vectorial de clasificación'}
+                    </span>
+                    <span className="text-muted-foreground mt-1 block font-mono">
+                      {isOfficial && (
+                        <>
+                          {candidate.classification.code}
+                          {candidate.classification.categoryCode ? ` / ${candidate.classification.categoryCode}` : ''}
+                        </>
+                      )}
+                    </span>
+                    <span className="mt-1 block">
+                      {candidate.parcelCoverage?.intersectionAreaSquareMetres.toLocaleString('es-ES', {
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      m² · {candidate.parcelCoverage?.parcelPercentage.toLocaleString('es-ES', {
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      %
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
+
+<div className="flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
           <div>
             <dt className="text-muted-foreground">Latitud</dt>

@@ -152,7 +152,7 @@ describe('buildNormativeSearchScope', () => {
     })
 
     expect(scope.documentNames).toEqual(['apt-1.pdf'])
-    expect(canSearchConcreteParameters(scope)).toBe(true)
+    expect(canSearchConcreteParameters(scope)).toBe(false)
   })
 
   it.each([

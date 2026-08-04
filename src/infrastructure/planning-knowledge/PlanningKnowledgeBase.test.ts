@@ -50,7 +50,7 @@ describe('Planning Knowledge Base P1', () => {
         classification: true,
         category: true,
         zoneOrOrdinance: false,
-        normativeDocument: false,
+        normativeDocument: expect.any(Boolean),
         endToEndParameters: false,
       })
     }

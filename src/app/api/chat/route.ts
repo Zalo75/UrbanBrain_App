@@ -18,15 +18,18 @@ import {
   canSearchConcreteParameters,
   type NormativeSearchScope,
 } from '@/application/parcel-context/normativeSearchScope';
+import { resolveSupplementaryNormativeScope } from '@/application/parcel-context/supplementaryNormativeScope';
 import {
   buildAnswerContract,
   buildMunicipalSafetyPrompt,
   buildSafeAbstention,
+  buildStructuredParcelFactAnswer,
   validateGeneratedAnswer,
 } from '@/application/parcel-context/responseSafety';
 import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
+import type { KnowledgePlan } from '@/application/knowledge-orchestrator/KnowledgeOrchestrator';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -64,11 +67,27 @@ interface V2SearchResult {
   chapter?: string | null;
   sourceUrl?: string | null;
   officialIdentifier?: string | null;
+  scope?: string | null;
+  category?: string | null;
+}
+
+function hierarchyForSupplementaryCandidate(result: V2SearchResult): NormativeCandidate['hierarchy'] {
+  if (
+    result.scope === 'especial' ||
+    ['patrimonio', 'costas', 'carreteras', 'augas'].includes(result.category ?? '')
+  ) {
+    return 'sectorial';
+  }
+  if (result.scope === 'autonomico' || ['NHG', 'habitabilidad'].includes(result.category ?? '')) {
+    return 'autonomico';
+  }
+  return 'estatal';
 }
 
 function mapV1Candidates(
   chunks: V1Chunk[],
-  scope?: NormativeSearchScope
+  scope?: NormativeSearchScope,
+  hierarchy: NormativeCandidate['hierarchy'] = 'municipal'
 ): NormativeCandidate[] {
   return chunks.map((chunk) => ({
     id: String(chunk.chunk_id),
@@ -79,7 +98,7 @@ function mapV1Candidates(
     page: chunk.pagina_detectada ?? null,
     sourceUrl: chunk.original_path ?? null,
     similarity: chunk.similarity ?? null,
-    hierarchy: 'municipal' as const,
+    hierarchy,
     ordinance: scope?.ordinance ?? null,
     planningArea: scope?.planningZone ?? null,
     parentInstrument: scope?.instrumentId ?? null,
@@ -92,7 +111,11 @@ function mapVisibleSources(candidates: NormativeCandidate[]) {
     municipio_nombre:
       candidate.hierarchy === 'estatal'
         ? 'Ámbito estatal'
-        : candidate.municipalityName ?? 'No identificado',
+        : candidate.hierarchy === 'autonomico'
+          ? 'Ámbito autonómico de Galicia'
+          : candidate.hierarchy === 'sectorial'
+            ? 'Normativa sectorial aplicable'
+            : candidate.municipalityName ?? 'No identificado',
     nombre_pdf: candidate.documentName ?? 'Documento',
     titulo_detectado: candidate.title ?? '',
     similarity: candidate.similarity ?? 0,
@@ -165,6 +188,29 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       content: message.trim(),
     });
 
+    const structuredFactAnswer = buildStructuredParcelFactAnswer(message, parcelContext);
+    if (structuredFactAnswer) {
+      const applicability: ApplicabilityResult = {
+        status: structuredFactAnswer.hasConflict ? 'CONFLICTIVO' : 'DETERMINADO',
+        applicable: [],
+        rejected: [],
+        warnings: [],
+        missingData: [],
+        conflicts: [],
+        canAnswerConcreteParameters: false,
+      };
+      const answer = structuredFactAnswer.answer;
+      const contract = buildAnswerContract(answer, parcelContext, applicability, [], [], 'answer');
+      await db.insert(chatMessages).values({
+        expedienteId,
+        userId,
+        role: 'assistant',
+        content: answer,
+        sources: [],
+      });
+      return NextResponse.json({ answer, sources: [], safety: contract });
+    }
+
     if (questionScope === 'regime' && !canSearchConcreteParameters(normativeScope)) {
       const applicability = evaluateApplicability(parcelContext, [], true);
       applicability.missingData.push(`alcance normativo previo: ${normativeScope.reason}`);
@@ -188,7 +234,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     }
 
     // --- SPRINT 3: Integración del Knowledge Orchestrator ---
-    let plan;
+    let plan: KnowledgePlan | undefined;
     try {
       const { QuestionAnalyzer } = await import('@/application/intent-engine/QuestionAnalyzer');
       const { KnowledgeOrchestrator } =
@@ -215,7 +261,14 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     } catch (orchestratorError) {
       console.error('[KnowledgeOrchestrator] Error en la orquestación:', orchestratorError);
       // Fallback a V1 if error
-      plan = { corpus: 'v1' };
+      plan = {
+        corpus: 'v1',
+        scopes: [],
+        categories: [],
+        specialNormatives: [],
+        documentCodes: [],
+        confidence: 0,
+      };
     }
     // --------------------------------------------------------
     // Generar embedding con Gemini
@@ -238,6 +291,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     }
 
     const query_embedding = rawEmbedding.slice(0, 768);
+    const supplementaryScope = resolveSupplementaryNormativeScope(message, parcelContext);
 
     // La RPC recibe primero el alcance aplicable y busca después dentro de él.
     const t0_v1 = performance.now();
@@ -258,22 +312,43 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
           match_count: 8,
           filter_municipio_codigo: municipioCodigo,
         };
-    const { data: chunks, error: rpcError } = await supabase
-      .rpc(rpcName, rpcArguments)
-      .abortSignal(signal);
+    const municipalRetrieval = supplementaryScope.retrieveMunicipal
+      ? await supabase.rpc(rpcName, rpcArguments).abortSignal(signal)
+      : { data: [], error: null };
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);
 
-    if (rpcError) {
-      console.error('Supabase RPC error:', rpcError);
+    if (municipalRetrieval.error) {
+      console.error('Supabase RPC error:', municipalRetrieval.error);
       return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
     }
 
-    const safeChunks = (Array.isArray(chunks) ? chunks : []) as V1Chunk[];
+    const safeChunks = (Array.isArray(municipalRetrieval.data) ? municipalRetrieval.data : []) as V1Chunk[];
     const v1Candidates = mapV1Candidates(
       safeChunks,
       scopedRetrieval ? normativeScope : undefined
     );
+
+    const supplementaryV1Candidates: NormativeCandidate[] = [];
+    for (const layer of supplementaryScope.layers) {
+      if (layer.source !== 'v1_global_catalog' || !layer.documentNames?.length) continue;
+      const { data, error } = await supabase
+        .rpc('match_normativa_chunks_scoped', {
+          query_embedding,
+          match_count: 8,
+          filter_municipio_codigo: '',
+          filter_document_names: [...layer.documentNames],
+          filter_ordinance: null,
+        })
+        .abortSignal(signal);
+      if (error) {
+        console.error('Supabase supplementary normative RPC error:', error);
+        return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
+      }
+      supplementaryV1Candidates.push(
+        ...mapV1Candidates((Array.isArray(data) ? data : []) as V1Chunk[], undefined, layer.hierarchy)
+      );
+    }
 
     // --- SPRINT 3.12: Laboratorio CTE V2 ---
     let v2FinalContext = '';
@@ -285,15 +360,16 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let v2Results: V2SearchResult[] = [];
     let v2Candidates: NormativeCandidate[] = [];
 
-    if (process.env.KNOWLEDGE_ENGINE === 'v2') {
+    const cteLayer = supplementaryScope.layers.find((layer) => layer.source === 'v2');
+    if (cteLayer) {
       try {
         const { searchNormativeV2 } = await import('@/application/knowledge-engine/searchNormativeV2');
 
         const t0_v2 = performance.now();
         const v2Promise = searchNormativeV2({
           query_embedding,
-          scopes: plan?.scopes || [],
-          categories: plan?.categories || [],
+          scopes: [...(cteLayer.scopes ?? [])],
+          categories: [...(cteLayer.categories ?? [])],
           documentCodes: plan?.documentCodes || [],
           limit: 8,
         });
@@ -304,19 +380,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
         // Validation for V2 usage
         const CTE_V2_MIN_SIMILARITY = process.env.CTE_V2_MIN_SIMILARITY ? parseFloat(process.env.CTE_V2_MIN_SIMILARITY) : 0.65;
-        const validDBs = ['DB-SE', 'DB-SI', 'DB-SUA', 'DB-HS', 'DB-HE', 'DB-HR'];
-
-        const hasCTECategory = plan?.categories?.includes('CTE');
-        const hasValidDBCode = plan?.documentCodes?.some(code => validDBs.includes(code));
-        const isDBAmbiguous = !plan?.documentCodes || plan.documentCodes.length === 0;
-
-        if (process.env.ENABLE_CTE_V2_RESPONSES !== 'true') {
-          fallbackReason = 'Feature flag desactivado';
-        } else if (!hasCTECategory) {
-          fallbackReason = 'Consulta no categorizada como CTE';
-        } else if (isDBAmbiguous || !hasValidDBCode) {
-          fallbackReason = 'DocumentCodes ambiguo o inválido';
-        } else if (v2Results.length === 0) {
+        if (v2Results.length === 0) {
           fallbackReason = 'Cero resultados V2';
         } else if (v2Results[0].similarity < CTE_V2_MIN_SIMILARITY) {
           fallbackReason = `Similitud insuficiente (${v2Results[0].similarity.toFixed(4)} < ${CTE_V2_MIN_SIMILARITY})`;
@@ -352,7 +416,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               page: result.page ?? null,
               sourceUrl: result.sourceUrl,
               similarity: result.similarity,
-              hierarchy: 'estatal' as const,
+              hierarchy: hierarchyForSupplementaryCandidate(result),
               status: 'vigente',
             }));
 
@@ -430,6 +494,27 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       }
     }
 
+    // El alcance de la ordenanza se aplica sólo a la recuperación municipal.
+    // Las fuentes supramunicipales se añaden como candidatos de su propio nivel,
+    // nunca se someten al filtro de ordenanza ni sustituyen los municipales.
+    const layeredCandidates = [...v1Candidates, ...supplementaryV1Candidates, ...v2Candidates];
+    const layeredRetrievalApplicability = evaluateApplicability(parcelContext, layeredCandidates, false);
+    const layeredRegimeApplicability = concreteParameterRequested
+      ? evaluateApplicability(parcelContext, layeredCandidates, true)
+      : layeredRetrievalApplicability;
+    if (questionScope === 'mixed') {
+      applicability = {
+        ...layeredRegimeApplicability,
+        applicable: layeredRetrievalApplicability.applicable,
+        rejected: layeredRetrievalApplicability.rejected,
+      };
+      answerCandidates = layeredRetrievalApplicability.applicable;
+    } else {
+      applicability = layeredRegimeApplicability;
+      answerCandidates = applicability.applicable;
+    }
+    retrievalApplicability = layeredRetrievalApplicability;
+
     const regimeUnavailable =
       applicability.status === 'CONFLICTIVO' ||
       applicability.status === 'NO_DETERMINADO' ||
@@ -463,7 +548,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let contextText = '';
     let systemPrompt = '';
 
-    if (usedV2) {
+    if (usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0) {
       contextText = v2FinalContext;
       systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente a partir de los fragmentos suministrados.
 No inventes requisitos, cifras ni apartados.
@@ -517,14 +602,26 @@ ${usedV2 ? v2Citas : 'N/A'}
     }
 
     const t0_llm = performance.now();
-    const completion = await openai.chat.completions.create({
-      model: 'deepseek-chat',
+    const completionRequest = {
+      model: 'deepseek-v4-flash',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: usedV2 ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}` : message },
+        {
+          role: 'user',
+          content:
+            usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
+              ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
+              : message,
+        },
       ],
       temperature: 0.1,
-    }, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
+      thinking: {
+        type: 'disabled' as const,
+      },
+    } satisfies Parameters<typeof openai.chat.completions.create>[0] & {
+      thinking: { type: 'disabled' };
+    };
+    const completion = await openai.chat.completions.create(completionRequest, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
     const t1_llm = performance.now();
     v2LLMTime = Math.round(t1_llm - t0_llm);
 
@@ -547,10 +644,9 @@ ${usedV2 ? v2Citas : 'N/A'}
       decision = 'abstain';
       const failedApplicability: ApplicabilityResult = {
         ...applicability,
-        status: 'CONFLICTIVO',
-        conflicts: [
-          ...applicability.conflicts,
-          `La respuesta generada no superó la validación de evidencia: ${validation.reasons.join(' ')}`,
+        missingData: [
+          ...applicability.missingData,
+          'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
         ],
         canAnswerConcreteParameters: false,
       };

@@ -41,6 +41,7 @@ function candidate(overrides: Partial<NormativeCandidate> = {}): NormativeCandid
     municipalityName: 'Arteixo',
     documentName: 'PXOM de Arteixo vigente',
     title: 'Ordenanza Z-4',
+    ordinance: 'Ordenanza Z-4',
     content: 'Ordenanza Z-4. Suelo urbano consolidado. La altura máxima será de 7 m.',
     hierarchy: 'ordenanza',
     status: 'vigente',
@@ -164,7 +165,7 @@ describe('evaluateApplicability', () => {
   it('bloquea ordenanzas incompatibles', () => {
     const result = evaluateApplicability(
       completeContext(),
-      [candidate(), candidate({ id: 'chunk-2', title: 'Ordenanza Z-7', content: 'Ordenanza Z-7.' })],
+      [candidate(), candidate({ id: 'chunk-2', title: 'Ordenanza Z-7', ordinance: 'Ordenanza Z-7', content: 'Ordenanza Z-7.' })],
       true
     )
 

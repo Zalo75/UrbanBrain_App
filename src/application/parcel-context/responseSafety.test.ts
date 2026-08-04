@@ -228,7 +228,7 @@ describe('buildSafeAbstention', () => {
     expect(answer).toContain('Confianza: alta')
     expect(answer).toMatch(/cobertura parcial/i)
     expect(answer).toContain('CLASIFICACIÓN Y PLANEAMIENTO')
-    expect(answer).toMatch(/Estado conflictivo/i)
+    expect(answer).toMatch(/Estado no determinado/i)
     expect(answer).toContain('COMPROBACIONES PENDIENTES')
     expect(answer).toContain('Comprobar otras afecciones sectoriales no cubiertas')
     expect(answer).toMatch(/abstengo únicamente.*clasificación.*planeamiento.*parámetros/i)

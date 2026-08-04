@@ -3,7 +3,10 @@ import { and, eq } from 'drizzle-orm'
 import type { PlanningApplicability, PlanningPort } from '@/domain/territorial-resolver/types'
 import { db } from '@/infrastructure/db/client'
 import { municipalPlanning } from '@/infrastructure/db/schema'
-import { getActiveP1PlanningKnowledge } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
+import {
+  getActiveP1PlanningKnowledge,
+  getPlanningDocumentsByInstrument,
+} from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
 
 export function buildApplicablePlanningQuery(database: typeof db, municipalityCode: string) {
   return database
@@ -12,6 +15,7 @@ export function buildApplicablePlanningQuery(database: typeof db, municipalityCo
       approvalDate: municipalPlanning.approvalDate,
       sourceSystem: municipalPlanning.sourceSystem,
       sourceUrl: municipalPlanning.sourceUrl,
+      sourceDocumentId: municipalPlanning.sourceDocumentId,
     })
     .from(municipalPlanning)
     .where(
@@ -43,6 +47,7 @@ export class DatabasePlanningAdapter implements PlanningPort {
 
     const knowledge = getActiveP1PlanningKnowledge(municipalityCode)
     if (knowledge) {
+      const documents = [...knowledge.documents]
       return {
         status: 'determined',
         instrument: knowledge.instrument.name,
@@ -58,13 +63,14 @@ export class DatabasePlanningAdapter implements PlanningPort {
             sourceUrl: knowledge.instrument.inventoryUrl,
           },
         ],
-        canAnswerConcreteParameters: false,
+        documents,
+        canAnswerConcreteParameters: documents.length > 0,
         evidence: [
           {
             source: 'siotuga',
             sourceUrl: knowledge.instrument.inventoryUrl,
             retrievedAt: knowledge.activation.verifiedAt,
-            method: `Planning Knowledge Base ${knowledge.knowledgeVersion}`,
+            method: `Planning Knowledge Base ${knowledge.knowledgeVersion}; inventario documental ${knowledge.documentCatalog.sourceSha256}`,
             scope: 'planning_instrument',
           },
         ],
@@ -92,11 +98,25 @@ export class DatabasePlanningAdapter implements PlanningPort {
     }
 
     const planning = sourced[0]
+    const instrumentId = planning.sourceDocumentId ?? undefined
+    const documents = getPlanningDocumentsByInstrument(instrumentId)
     return {
       status: 'determined',
       instrument: planning.name,
       approvalDate: planning.approvalDate?.toISOString(),
       sourceUrl: planning.sourceUrl!,
+      applicableInstruments: instrumentId
+        ? [{
+            id: instrumentId,
+            name: planning.name,
+            kind: 'general',
+            status: 'current',
+            approvalDate: planning.approvalDate?.toISOString(),
+            sourceUrl: planning.sourceUrl!,
+          }]
+        : undefined,
+      documents: documents.length > 0 ? documents : undefined,
+      canAnswerConcreteParameters: documents.length > 0,
       evidence: [
         {
           source: planning.sourceSystem === 'SIOTUGA' ? 'siotuga' : 'urbanbrain',

@@ -15,6 +15,7 @@ function resolution(overrides: Partial<ClassificationResolution> = {}): Classifi
     nextAction: 'auto_accept',
     candidates: [
       {
+        kind: 'official_classification' as const,
         id: 'siotuga:su',
         classification: {
           code: 'SU',

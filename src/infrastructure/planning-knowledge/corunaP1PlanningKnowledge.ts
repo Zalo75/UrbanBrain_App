@@ -1,6 +1,14 @@
+import type { PlanningDocumentReference } from '@/domain/territorial-resolver/types'
+
+import {
+  CORUNA_P1_DOCUMENT_CATALOG_GENERATED_AT,
+  CORUNA_P1_DOCUMENT_CATALOG_SOURCE_SHA256,
+  CORUNA_P1_DOCUMENTS_BY_INSTRUMENT,
+} from './corunaP1PlanningDocuments.generated'
+
 const VERIFIED_AT = '2026-07-29'
 
-export const CORUNA_P1_KNOWLEDGE_VERSION = 'coruna-p1-2026-07-29.1'
+export const CORUNA_P1_KNOWLEDGE_VERSION = 'coruna-p1-2026-08-03.2'
 export const CORUNA_P1_SOURCE_RELEASE_SHA256 =
   '3221caa2a74f52bd6bf612711bb1976e5aa797dbf1c6961f2c34e1feb3ed9b39'
 
@@ -73,6 +81,11 @@ export interface ActiveP1MunicipalityPlanning {
     attributes: readonly string[]
     capabilitiesUrl: string
   }
+  documents: readonly PlanningDocumentReference[]
+  documentCatalog: {
+    generatedAt: string
+    sourceSha256: string
+  }
   activation: {
     status: 'active'
     technicalPattern: 'single_current_layer'
@@ -82,38 +95,46 @@ export interface ActiveP1MunicipalityPlanning {
     classification: true
     category: true
     zoneOrOrdinance: false
-    normativeDocument: false
+    normativeDocument: boolean
     endToEndParameters: false
   }
 }
 
 export const CORUNA_P1_PLANNING_KNOWLEDGE: readonly ActiveP1MunicipalityPlanning[] =
-  P1_RECORDS.map(([code, municipalityName, figure, instrumentName, approvalDate, officialId]) => ({
-    municipalityCode: code,
-    municipalityName,
-    knowledgeVersion: CORUNA_P1_KNOWLEDGE_VERSION,
-    sourceReleaseSha256: CORUNA_P1_SOURCE_RELEASE_SHA256,
-    instrument: {
-      officialId,
-      name: instrumentName,
-      approvalDate,
-      inventoryUrl: `https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=${code}`,
-    },
-    classificationLayer: {
-      name: `_${code}_${figure}_${approvalDate.slice(0, 7).replace('-', '')}_AD_3CLAS_${officialId}`,
-      attributes: CLASSIFICATION_ATTRIBUTES,
-      capabilitiesUrl: `https://siotuga.xunta.gal/siotuga/ws?codine=${code}&SERVICE=WFS&VERSION=1.1.0&REQUEST=GetCapabilities`,
-    },
-    activation: {
-      status: 'active',
-      technicalPattern: 'single_current_layer',
-      verifiedAt: VERIFIED_AT,
-    },
-    coverage: {
-      classification: true,
-      category: true,
-      zoneOrOrdinance: false,
-      normativeDocument: false,
-      endToEndParameters: false,
-    },
-  }))
+  P1_RECORDS.map(([code, municipalityName, figure, instrumentName, approvalDate, officialId]) => {
+    const documents = CORUNA_P1_DOCUMENTS_BY_INSTRUMENT[officialId] ?? []
+    return {
+      municipalityCode: code,
+      municipalityName,
+      knowledgeVersion: CORUNA_P1_KNOWLEDGE_VERSION,
+      sourceReleaseSha256: CORUNA_P1_SOURCE_RELEASE_SHA256,
+      instrument: {
+        officialId,
+        name: instrumentName,
+        approvalDate,
+        inventoryUrl: `https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=${code}`,
+      },
+      classificationLayer: {
+        name: `_${code}_${figure}_${approvalDate.slice(0, 7).replace('-', '')}_AD_3CLAS_${officialId}`,
+        attributes: CLASSIFICATION_ATTRIBUTES,
+        capabilitiesUrl: `https://siotuga.xunta.gal/siotuga/ws?codine=${code}&SERVICE=WFS&VERSION=1.1.0&REQUEST=GetCapabilities`,
+      },
+      documents,
+      documentCatalog: {
+        generatedAt: CORUNA_P1_DOCUMENT_CATALOG_GENERATED_AT,
+        sourceSha256: CORUNA_P1_DOCUMENT_CATALOG_SOURCE_SHA256,
+      },
+      activation: {
+        status: 'active',
+        technicalPattern: 'single_current_layer',
+        verifiedAt: VERIFIED_AT,
+      },
+      coverage: {
+        classification: true,
+        category: true,
+        zoneOrOrdinance: false,
+        normativeDocument: documents.length > 0,
+        endToEndParameters: false,
+      },
+    }
+  })

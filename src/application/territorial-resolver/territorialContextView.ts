@@ -1,6 +1,9 @@
 import type {
+  ActionAreaSelection,
   ClassificationResolution,
+  ContextDetermination,
   OfficialResourceLink,
+  PlanningDocumentReference,
   TerritorialEvidence,
   ManualTerritorialContext,
   OfficialSourceCheck,
@@ -18,6 +21,7 @@ import {
   applyManualFactDecisions,
   territorialAffectKey,
 } from '@/application/territorial-resolver/manualTerritorialContext';
+import { applyActionAreaToUrbanisticFacts } from '@/application/territorial-resolver/actionAreaSelection';
 
 export interface TerritorialContextView {
   status: 'confirmed' | 'approximate' | 'provisional' | 'conflict' | 'undetermined';
@@ -29,6 +33,8 @@ export interface TerritorialContextView {
   address?: string;
   coordinates?: TerritorialResolution['coordinates'];
   parcelGeometry?: TerritorialResolution['parcelGeometry'];
+  parcelSurfaceSquareMetres?: number;
+  actionArea?: ActionAreaSelection;
   municipality?: string;
   municipalityCode?: string;
   province?: string;
@@ -38,6 +44,7 @@ export interface TerritorialContextView {
   classificationResolution?: ClassificationResolution;
   urbanisticFacts?: UrbanisticRegimeFacts;
   officialLinks?: OfficialResourceLink[];
+  planningDocuments?: PlanningDocumentReference[];
   areas: string[];
   instrument?: string;
   affects: Array<{
@@ -54,7 +61,15 @@ export interface TerritorialContextView {
     confidence: string;
     source: string;
   }>;
+  parcelAffects?: Array<{
+    key: string;
+    category: string;
+    name: string;
+    confidence: string;
+    source: string;
+  }>;
   conflicts: string[];
+  parcelConflicts?: string[];
   warnings: string[];
   sources: TerritorialEvidence[];
   canAnswerConcreteParameters: boolean;
@@ -64,6 +79,7 @@ export interface TerritorialContextView {
   officialContextResolvedAt?: string;
   usingPreviousOfficialContext: boolean;
   manualContext?: Omit<ManualTerritorialContext, 'validatedBy'>;
+  manualOrdinance?: Omit<ContextDetermination<string>, 'recordedBy' | 'validatedBy'>;
   technicallyReviewed: boolean;
   sourceChecks: OfficialSourceCheck[];
 }
@@ -93,18 +109,50 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
   const result = value;
   const effective = officialContextForUse(result);
   const manual = result.continuity?.manualContext;
+  const actionArea = manual?.actionAreaSelection?.current;
+  const actionAreaCandidate = actionArea?.selectedCandidateId
+    ? effective?.planning.classificationResolution?.candidates.find(
+        (candidate) => candidate.id === actionArea.selectedCandidateId
+      )
+    : undefined;
+  const actionAreaClassification = actionAreaCandidate?.classification ??
+    (actionArea?.selectionType === 'detected_zone' && actionArea.classification
+      ? {
+          code: actionArea.classification,
+          categoryCode: actionArea.category,
+          label: actionArea.classification,
+          categoryLabel: actionArea.category,
+          sourceFeatureIds: [],
+        }
+      : undefined);
+  const manualOrdinance = manual?.ordinanceDetermination?.technician;
   const sourceChecks = allSourceChecks(result);
   const incompleteSource = sourceChecks.some((check) =>
     ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
   );
+  const parcelPlanningConflicts = effective?.planning.conflicts ?? result.planning.conflicts ?? [];
   const conflicts = [
     ...result.conflicts.map((conflict) => conflict.reason),
-    ...(effective?.planning.conflicts ?? result.planning.conflicts ?? []),
+    ...(actionArea ? [] : parcelPlanningConflicts),
   ];
   const classificationResolution = effective?.planning.classificationResolution
     ? {
         ...effective.planning.classificationResolution,
-        finalSelection: manual?.classification
+        finalSelection: actionAreaClassification && actionArea
+          ? {
+              origin: 'manual' as const,
+              candidateId: actionArea.selectedCandidateId,
+              classificationCode: actionAreaClassification.code,
+              categoryCode: actionAreaClassification.categoryCode,
+              operationalValue: actionAreaClassification.code,
+              areaNames: actionArea?.planningZones ?? [],
+              reason: 'Zona territorial seleccionada como área de actuación.',
+              primarySource: actionArea.source,
+              confidence: actionArea.confidence === 'unknown' ? 'low' : actionArea.confidence,
+              selectedAt: actionArea.selectedAt,
+              technicianValidated: actionArea.verification === 'technician_validated',
+            }
+          : manual?.classification
           ? {
               origin: 'manual' as const,
               classificationCode: manual.classification,
@@ -127,9 +175,17 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       ? urbanisticFactsFromClassificationResolution(effective.planning, result.resolvedAt)
       : undefined);
   const urbanisticFacts = rawUrbanisticFacts
-    ? applyManualFactDecisions(rawUrbanisticFacts, manual).effective
+    ? applyActionAreaToUrbanisticFacts(
+        applyManualFactDecisions(rawUrbanisticFacts, manual).effective,
+        effective,
+        actionArea
+      )
     : undefined;
-  const automaticAffects = (effective?.affects ?? result.affects).detected;
+  const parcelAutomaticAffects = (effective?.affects ?? result.affects).detected;
+  const automaticAffects =
+    actionArea?.selectionType === 'detected_zone' && actionArea.affects
+      ? actionArea.affects.detected
+      : parcelAutomaticAffects;
   const affectResolution = applyManualAffectDecisions(
     automaticAffects,
     manual?.affectDecisions
@@ -175,6 +231,11 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       evidence.map((item) => [`${item.source}|${item.sourceUrl}|${item.method}`, item])
     ).values(),
   ];
+  const mixedParcelWithoutActionArea = Boolean(
+    !actionArea &&
+      (classificationResolution?.status === 'multiple_intersections' ||
+        (classificationResolution?.candidates.length ?? 0) > 1)
+  );
 
   return {
     status,
@@ -186,11 +247,15 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     address: effective?.normalizedAddress ?? manual?.address,
     coordinates: effective?.coordinates ?? manual?.coordinates,
     parcelGeometry: effective?.parcelGeometry,
+    parcelSurfaceSquareMetres: actionArea?.parcelSurfaceSquareMetres,
+    actionArea,
     municipality: effective?.municipality ?? manual?.municipality,
     municipalityCode: effective?.municipalityCode,
     province: effective?.province,
     classification:
-      manual?.classification
+      actionAreaClassification
+        ? actionAreaClassification
+        : manual?.classification
         ? {
             code: manual.classification,
             categoryCode: manual.category,
@@ -199,7 +264,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
             sourceFeatureIds: [],
           }
         : effective?.planning.classification,
-    classificationOrigin: manual?.classification
+    classificationOrigin: actionAreaClassification || manual?.classification
       ? 'manual'
       : effective?.planning.classification
         ? 'automatic'
@@ -208,9 +273,13 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     classificationResolution,
     urbanisticFacts,
     officialLinks: effective ? officialResourceLinks(effective) : [],
-    areas: manual?.area
-      ? [manual.area]
-      : (effective?.planning.areas?.map((area) => area.name) ?? []),
+    planningDocuments: effective?.planning.documents,
+    areas:
+      actionArea?.selectionType === 'detected_zone'
+        ? actionArea.planningZones ?? []
+        : manual?.area
+          ? [manual.area]
+          : (effective?.planning.areas?.map((area) => area.name) ?? []),
     instrument: effective?.planning.instrument,
     affects: affectResolution.effective.map((affect) => ({
       key: territorialAffectKey(affect),
@@ -226,7 +295,15 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       confidence: affect.confidence,
       source: affect.evidence.source,
     })),
+    parcelAffects: parcelAutomaticAffects.map((affect) => ({
+      key: territorialAffectKey(affect),
+      category: affect.category,
+      name: affect.name,
+      confidence: affect.confidence,
+      source: affect.evidence.source,
+    })),
     conflicts,
+    parcelConflicts: parcelPlanningConflicts,
     warnings: [
       ...(result.status === 'ambiguous' && result.candidates.length > 1
         ? [`La dirección devolvió ${result.candidates.length} candidatos y requiere selección.`]
@@ -235,11 +312,22 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       ...result.planning.warnings.map((warning) => warning.message),
       ...result.affects.warnings.map((warning) => warning.message),
       ...sourceChecks.map((check) => check.message),
+      ...(mixedParcelWithoutActionArea
+        ? [
+            'La parcela contiene varias zonas territoriales. Seleccione un área de actuación para utilizar un régimen concreto.',
+          ]
+        : []),
+      ...(actionArea && parcelPlanningConflicts.length > 0
+        ? [
+            'La parcela completa conserva varios regímenes. El contexto efectivo se limita al área de actuación seleccionada.',
+          ]
+        : []),
     ],
     sources,
     canAnswerConcreteParameters:
       effective?.planning.canAnswerConcreteParameters === true &&
-      manual?.verification !== 'unverified',
+      manual?.verification !== 'unverified' &&
+      (!actionArea || actionArea.verification === 'technician_validated'),
     canRuleOutUndetectedAffects: false,
     candidateCount: result.candidates.length,
     latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,
@@ -258,10 +346,23 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
           ordinance: manual.ordinance,
           observations: manual.observations,
           affectDecisions: manual.affectDecisions,
+          actionAreaSelection: manual.actionAreaSelection,
           provenance: manual.provenance,
           verification: manual.verification,
           recordedAt: manual.recordedAt,
           validatedAt: manual.validatedAt,
+        }
+      : undefined,
+    manualOrdinance: manualOrdinance
+      ? {
+          value: manualOrdinance.value,
+          origin: manualOrdinance.origin,
+          source: manualOrdinance.source,
+          verification: manualOrdinance.verification,
+          determinedAt: manualOrdinance.determinedAt,
+          recordedAt: manualOrdinance.recordedAt,
+          validatedAt: manualOrdinance.validatedAt,
+          previousAutomaticValue: manualOrdinance.previousAutomaticValue,
         }
       : undefined,
     technicallyReviewed: manual?.verification === 'technician_validated',

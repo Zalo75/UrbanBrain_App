@@ -34,7 +34,9 @@ const CONFIDENCE_SCORE: Record<TerritorialConfidence, number> = {
 }
 
 function semanticKey(candidate: ClassificationCandidate) {
-  return `${candidate.classification.code}|${candidate.classification.categoryCode ?? ''}`
+  return candidate.kind === 'official_classification'
+    ? `${candidate.classification.code}|${candidate.classification.categoryCode ?? ''}`
+    : 'derived_unmapped_complement'
 }
 
 function sourceKey(candidate: ClassificationCandidate) {
@@ -78,13 +80,14 @@ function reliabilityScore(candidate: ClassificationCandidate) {
     representative_point: 200,
     official_document: 100,
   }[candidate.evidenceBasis]
-  const traceability = {
+  const traceability = candidate.kind === 'official_classification' ? {
     verified: 30,
     pending: 10,
     mismatch: 0,
-  }[candidate.instrumentTraceability]
+  }[candidate.instrumentTraceability] : 0
   const normalization = candidate.normalizationStatus === 'mapped' ? 3 : 0
-  return basis + traceability + normalization + CONFIDENCE_SCORE[candidate.confidence]
+  const confidenceScore = candidate.confidence !== 'unknown' ? CONFIDENCE_SCORE[candidate.confidence as TerritorialConfidence] : 0
+  return basis + traceability + normalization + confidenceScore
 }
 
 function proposalFor(
@@ -102,16 +105,16 @@ function proposalFor(
     representative_point: 'consulta sobre el punto representativo oficial',
     official_document: 'evidencia del documento oficial sin resolución parcelaria completa',
   }[candidate.evidenceBasis]
-  const traceability = {
+  const traceability = candidate.kind === 'official_classification' ? {
     verified: 'verificada',
     pending: 'pendiente de verificar',
     mismatch: 'no coincidente con el instrumento identificado',
-  }[candidate.instrumentTraceability]
+  }[candidate.instrumentTraceability] : 'desconocida'
 
   return {
     candidateId: candidate.id,
     explanation: `Propuesta priorizada por ${basis} y trazabilidad ${traceability}.`,
-    confidence: candidate.confidence,
+    confidence: candidate.confidence === 'unknown' ? 'low' : candidate.confidence,
     requiresProfessionalReview: true,
   }
 }
@@ -139,13 +142,13 @@ function automaticSelection(
   return {
     origin: 'automatic',
     candidateId: candidate.id,
-    classificationCode: candidate.classification.code,
-    categoryCode: candidate.classification.categoryCode,
+    classificationCode: candidate.kind === 'official_classification' ? candidate.classification.code : undefined,
+    categoryCode: candidate.kind === 'official_classification' ? candidate.classification.categoryCode : undefined,
     areaNames: candidate.areas.map((area) => area.name),
     reason,
     primarySource: sourceKey(candidate),
     corroboratingSources,
-    confidence: candidate.confidence,
+    confidence: candidate.confidence === 'unknown' ? 'low' : candidate.confidence,
     technicianValidated: false,
   }
 }
@@ -161,7 +164,7 @@ function probableSelection(
     reason: `Clasificación única respaldada por evidencia oficial. Requiere comprobar: ${[
       ...reviewReasons,
     ].join(', ')}.`,
-    confidence: candidate.confidence === 'high' ? 'medium' : candidate.confidence,
+    confidence: candidate.confidence === 'high' ? 'medium' : (candidate.confidence === 'unknown' ? 'low' : candidate.confidence),
   }
 }
 
@@ -278,7 +281,7 @@ export function evaluateClassificationResolution(
       assertions: candidates.map((candidate) => ({
         candidateId: candidate.id,
         value: semanticKey(candidate),
-        source: candidate.source,
+        source: candidate.source === 'derived_geometry_complement' ? 'urbanbrain' : candidate.source,
         evidence: candidate.evidence,
       })),
     })

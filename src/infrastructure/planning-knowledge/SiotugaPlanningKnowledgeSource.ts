@@ -7,6 +7,7 @@ import type {
   PlanningInstrumentKind,
   PlanningInstrumentKnowledge,
   PlanningKnowledgeGenerationInput,
+  PlanningNormativeDocument,
   RawOfficialSource,
 } from '@/domain/planning-knowledge/types'
 import { aCorunaMunicipalities } from '@/shared/territory/provinces/a_coruna'
@@ -35,6 +36,26 @@ interface SiotugaInventoryRow {
   fechadog?: unknown
   fechanormativabop?: unknown
   incidencias_iuris?: unknown
+}
+
+interface SiotugaDocumentComponent {
+  id?: unknown
+  descripcion?: unknown
+  [key: string]: unknown
+}
+
+interface SiotugaDocumentGroup {
+  description?: unknown
+  componentes?: unknown
+}
+
+interface SiotugaDocumentInventory {
+  datos_xerais?: {
+    id?: unknown
+    filesroot?: unknown
+    folder?: unknown
+  }
+  elementos?: unknown
 }
 
 function requiredString(value: unknown, field: string) {
@@ -100,6 +121,88 @@ function parseInventoryResponse(content: string, kind: PlanningInstrumentKind, s
   })
 }
 
+function documentType(groupName: string): PlanningNormativeDocument['documentType'] {
+  if (/ordenanza/i.test(groupName)) return 'ordinance'
+  if (/normativa/i.test(groupName)) return 'normative_text'
+  if (/ficha|ficheiro/i.test(groupName)) return 'sheet'
+  if (/cat[aá]logo/i.test(groupName)) return 'catalogue'
+  return 'other'
+}
+
+function officialDocumentUrl(filesRoot: string, folder: string, fileName: string) {
+  const root = filesRoot.endsWith('/') ? filesRoot : `${filesRoot}/`
+  const relative = `${root}${encodeURIComponent(folder)}/documents/${encodeURIComponent(fileName)}`
+  return new URL(relative, SIOTUGA_BASE_URL).toString()
+}
+
+export function parseSiotugaDocumentInventory(
+  content: string,
+  expectedInstrumentId: string,
+  sourceId: string
+): PlanningNormativeDocument[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    throw new Error('SIOTUGA document inventory contract changed: invalid JSON')
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('SIOTUGA document inventory contract changed: object expected')
+  }
+
+  const inventory = parsed as SiotugaDocumentInventory
+  const instrumentId = requiredString(inventory.datos_xerais?.id, 'datos_xerais.id')
+  if (instrumentId !== expectedInstrumentId) {
+    throw new Error('SIOTUGA document inventory contract changed: instrument id mismatch')
+  }
+  const filesRoot = requiredString(inventory.datos_xerais?.filesroot, 'datos_xerais.filesroot')
+  const folder = requiredString(inventory.datos_xerais?.folder, 'datos_xerais.folder')
+  if (!Array.isArray(inventory.elementos)) {
+    throw new Error('SIOTUGA document inventory contract changed: elementos array expected')
+  }
+
+  const documents = inventory.elementos.flatMap((value): PlanningNormativeDocument[] => {
+    const group = value as SiotugaDocumentGroup
+    const groupName = requiredString(group.description, 'elementos.description')
+    if (!Array.isArray(group.componentes)) {
+      throw new Error('SIOTUGA document inventory contract changed: componentes array expected')
+    }
+
+    return group.componentes.flatMap((componentValue) => {
+      const component = componentValue as SiotugaDocumentComponent
+      const fileName = requiredString(component['path' + 'esperado'], 'componentes.pathesperado')
+      if (!/\.pdf$/i.test(fileName)) return []
+      const officialDocumentId = requiredString(component.id, 'componentes.id')
+      const description = optionalString(component.descripcion) ?? groupName
+      return [{
+        id: `siotuga-file-${officialDocumentId}`,
+        officialDocumentId,
+        instrumentId,
+        name: description,
+        officialUrl: officialDocumentUrl(filesRoot, folder, fileName),
+        documentType: documentType(groupName),
+        corpusDocumentNames: [fileName],
+        validationStatus: 'candidate' as const,
+        sourceIds: [sourceId],
+      }]
+    })
+  })
+
+  const ids = new Set<string>()
+  return documents
+    .filter((document) => {
+      if (ids.has(document.officialDocumentId)) {
+        throw new Error(
+          `SIOTUGA document inventory contract changed: duplicate component ${document.officialDocumentId}`
+        )
+      }
+      ids.add(document.officialDocumentId)
+      return true
+    })
+    .sort((left, right) => left.officialDocumentId.localeCompare(right.officialDocumentId))
+}
+
 function source(input: Omit<RawOfficialSource, 'provider'>): RawOfficialSource {
   return { provider: 'siotuga', ...input }
 }
@@ -152,7 +255,83 @@ export class SiotugaPlanningKnowledgeSource {
       instruments.push(...parseInventoryResponse(content, inventoryClass.kind, sourceId))
     }
 
-    return { instruments, rawSources }
+    const normativeDocuments: PlanningNormativeDocument[] = []
+    for (const instrument of [
+      ...new Map(instruments.map((item) => [item.officialId, item])).values(),
+    ]) {
+      const endpoint = `${SIOTUGA_BASE_URL}assets/inventario/getIOTPU.php`
+      const body = new URLSearchParams({
+        iddoc: instrument.officialId,
+        idp: '0',
+        lang: 'es_ES',
+        token,
+      })
+      const response = await this.fetcher(endpoint, {
+        method: 'POST',
+        headers: {
+          ...REQUEST_HEADERS,
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          cookie,
+        },
+        body,
+      })
+      const content = await responseText(
+        response,
+        `SIOTUGA document inventory ${instrument.officialId}`
+      )
+      const sourceId = `siotuga:instrument-documents:${instrument.officialId}`
+      rawSources.push(
+        source({
+          id: sourceId,
+          url: `${endpoint}#iddoc=${instrument.officialId}`,
+          retrievedAt,
+          mediaType: 'application/json',
+          content,
+        })
+      )
+      normativeDocuments.push(
+        ...parseSiotugaDocumentInventory(content, instrument.officialId, sourceId)
+      )
+    }
+
+    return { instruments, normativeDocuments, rawSources }
+  }
+
+
+  async collectInstrumentDocuments(
+    municipalityCode: string,
+    instrumentId: string,
+    retrievedAt: string
+  ) {
+    const pageUrl = `${SIOTUGA_BASE_URL}inventario.php?inv=1&idconcello=${municipalityCode}`
+    const pageResponse = await this.fetcher(pageUrl, { headers: REQUEST_HEADERS })
+    const pageContent = await responseText(pageResponse, `SIOTUGA inventory ${municipalityCode}`)
+    const cookie = sessionCookie(pageResponse)
+    const token = inventoryToken(pageContent)
+    const endpoint = `${SIOTUGA_BASE_URL}assets/inventario/getIOTPU.php`
+    const response = await this.fetcher(endpoint, {
+      method: 'POST',
+      headers: {
+        ...REQUEST_HEADERS,
+        accept: 'application/json',
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        cookie,
+      },
+      body: new URLSearchParams({ iddoc: instrumentId, idp: '0', lang: 'es_ES', token }),
+    })
+    const content = await responseText(response, `SIOTUGA document inventory ${instrumentId}`)
+    const sourceId = `siotuga:instrument-documents:${instrumentId}`
+    return {
+      documents: parseSiotugaDocumentInventory(content, instrumentId, sourceId),
+      rawSource: source({
+        id: sourceId,
+        url: `${endpoint}#iddoc=${instrumentId}`,
+        retrievedAt,
+        mediaType: 'application/json',
+        content,
+      }),
+    }
   }
 
   async collectMunicipality(municipalityCode: string, retrievedAt: string) {
@@ -207,6 +386,7 @@ export class SiotugaPlanningKnowledgeSource {
       capabilitiesSourceId,
       capabilitiesXml,
       inventory: inventory.instruments,
+      normativeDocuments: inventory.normativeDocuments,
       layerSchemas,
       sourceIds: rawSources.map((item) => item.id),
       rawSources,
@@ -269,6 +449,7 @@ export async function collectCorunaPlanningKnowledgeInput(options?: {
       capabilitiesSourceId: municipality.capabilitiesSourceId,
       capabilitiesXml: municipality.capabilitiesXml,
       inventory: municipality.inventory,
+      normativeDocuments: municipality.normativeDocuments,
       layerSchemas: municipality.layerSchemas,
       sourceIds: municipality.sourceIds,
     })),

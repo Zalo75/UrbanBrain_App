@@ -41,36 +41,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       }
     }
   } catch (error: unknown) {
-    const err = error as Error & { code?: string };
-    console.error('Database connection failed in Dashboard Layout:', err);
-    if (
-      err?.message?.includes('ECONNREFUSED') ||
-      err?.code === 'ECONNREFUSED' ||
-      err?.message?.includes('ENOTFOUND')
-    ) {
-      activeOrg = {
-        id: 'temp',
-        name: 'Mi Estudio (Sin BD)',
-        slug: 'temp',
-        plan: 'freemium',
-        verificationStatus: 'pending',
-        contactName: null,
-        phone: null,
-        province: null,
-        verifiedAt: null,
-        verifiedBy: null,
-        createdAt: new Date(),
-      } as unknown as Organization;
-      userProfile = {
-        id: userId,
-        fullName: 'Usuario (Falta BD)',
-        avatarUrl: null,
-        createdAt: new Date(),
-      } as unknown as Profile;
-    } else {
-      // If it's a "relation does not exist" or other error, better to let it crash or go to onboarding
-      needsOnboarding = true;
-    }
+    console.error('Database connection failed in Dashboard Layout:', error);
+    throw error;
   }
 
   if (needsOnboarding) {

@@ -1,3 +1,5 @@
+import polygonClipping from 'polygon-clipping';
+
 import type {
   ClassificationCandidate,
   ClassificationDiscrepancy,
@@ -186,6 +188,10 @@ function pointInPolygon(point: Point, polygon: Polygon) {
   return pointInRing(point, polygon.exterior) && !polygon.interiors.some((ring) => pointInRing(point, ring));
 }
 
+
+
+
+
 function segmentsIntersect(a: Point, b: Point, c: Point, d: Point) {
   const o1 = orientation(a, b, c);
   const o2 = orientation(a, b, d);
@@ -245,6 +251,25 @@ function warning(code: string, message: string): TerritorialWarning {
 
 function classificationLabel(code: string) {
   return ({ SU: 'Suelo urbano', SNR: 'Suelo de núcleo rural', SR: 'Suelo rústico' }[code] ?? `Clasificación oficial ${code}`);
+}
+
+export function categoryLabel(categoryCode?: string): string | undefined {
+  if (!categoryCode) return undefined;
+  const normalizedKey = categoryCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const officialCategoryLabels: Record<string, string> = {
+    SNRC: 'Núcleo rural común',
+    SNRT: 'Núcleo rural tradicional',
+    NR: 'Núcleo rural',
+    NRC: 'Núcleo rural común',
+    NRT: 'Núcleo rural tradicional',
+    SUC: 'Suelo urbano consolidado',
+    SUNC: 'Suelo urbano no consolidado',
+    SUSC: 'Suelo urbano sin consolidar',
+    SRO: 'Suelo rústico ordinario',
+    SRP: 'Suelo rústico de protección',
+    SRSC: 'Suelo rústico sin especial protección',
+  };
+  return officialCategoryLabels[normalizedKey] ?? `Categoría homogénea oficial ${categoryCode}`;
 }
 
 function normalizationStatus(code: string) {
@@ -479,7 +504,10 @@ export class SiotugaClassificationAdapter implements PlanningPort {
     const candidates: ClassificationCandidate[] = [...groups.entries()].map(([key, matching]) => {
       const first = matching[0];
       const coverage = location.geometry
-        ? parcelCoverage(location.geometry, matching)
+        ? parcelCoverage(location.geometry, matching, {
+            municipalityCode: layer.municipalityCode,
+            categoryCode: first.categoryCode ?? first.classificationCode,
+          })
         : undefined;
       const areas: PlanningArea[] = [
         ...new Map(
@@ -494,14 +522,13 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       }));
       return {
         id: `${layer.layerName}:${key}`,
+        kind: 'official_classification',
         sourceKey: layer.layerName,
         classification: {
           code: first.classificationCode,
           categoryCode: first.categoryCode,
           label: classificationLabel(first.classificationCode),
-          categoryLabel: first.categoryCode
-            ? `Categoría homogénea oficial ${first.categoryCode}`
-            : undefined,
+          categoryLabel: categoryLabel(first.categoryCode),
           sourceFeatureIds: matching.map((feature) => feature.id),
         },
         areas,
@@ -518,6 +545,22 @@ export class SiotugaClassificationAdapter implements PlanningPort {
         officialAttributes: matching.map(officialAttributes),
       };
     });
+
+    if (location.geometry && candidates.length > 0) {
+      const complement = deriveComplementCandidate(
+        location.geometry,
+        candidates,
+        layer.layerName,
+        retrievedAt
+      );
+      if (complement.candidate) {
+        candidates.push(complement.candidate);
+      }
+      if (complement.evidence) {
+        evidence.push(complement.evidence);
+      }
+    }
+
     const discrepancies: ClassificationDiscrepancy[] =
       layerTraceability === 'verified'
         ? []
@@ -531,7 +574,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
               explanation:
                 layer.note ??
                 'La capa cartográfica no está vinculada inequívocamente al instrumento vigente.',
-              assertions: candidates.map((candidate) => ({
+              assertions: candidates.filter((c) => c.kind === 'official_classification').map((candidate) => ({
                 candidateId: candidate.id,
                 value: layer.instrument.name,
                 source: 'siotuga',
@@ -552,6 +595,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
         explanation:
           'La respuesta WFS contiene recintos cuyo estado o versión no coincide con la capa registrada como activa.',
         assertions: candidates
+          .filter((c) => c.kind === 'official_classification')
           .filter((candidate) =>
             candidate.officialAttributes?.some((attributes) =>
               unexpectedLayerFeatures.some(
@@ -574,6 +618,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
     }
     for (const scope of applicableReviewScopes) {
       const affectedCandidates = candidates.filter((candidate) =>
+        candidate.kind === 'official_classification' &&
         candidate.officialAttributes?.some(
           (attributes) =>
             scope.classificationCodes.includes(attributes.classificationCode) &&
@@ -588,7 +633,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
         explanation: scope.explanation,
         assertions: affectedCandidates.map((candidate) => ({
           candidateId: candidate.id,
-          value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}; revisar ${scope.name} (${scope.instrumentId})`,
+          value: `${candidate.kind === 'official_classification' ? candidate.classification.code : ''}/${candidate.kind === 'official_classification' ? (candidate.classification.categoryCode ?? '-') : ''}; revisar ${scope.name} (${scope.instrumentId})`,
           source: 'siotuga',
           evidence: candidate.evidence,
         })),
@@ -602,9 +647,9 @@ export class SiotugaClassificationAdapter implements PlanningPort {
           field: 'coverage',
           explanation:
             'No se pudo calcular de forma fiable la superficie intersectada por los recintos oficiales.',
-          assertions: candidates.map((candidate) => ({
+          assertions: candidates.filter((c) => c.kind === 'official_classification').map((candidate) => ({
             candidateId: candidate.id,
-            value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}`,
+            value: candidate.kind === 'official_classification' ? `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}` : '',
             source: 'siotuga',
             evidence: candidate.evidence,
           })),
@@ -616,9 +661,9 @@ export class SiotugaClassificationAdapter implements PlanningPort {
           explanation:
             'Los recintos de clasificación devueltos por la capa oficial sólo cubren una parte de la parcela; el resto queda sin clasificación estructurada.',
           assertions: [
-            ...candidates.map((candidate) => ({
+            ...candidates.filter((c) => c.kind === 'official_classification').map((candidate) => ({
               candidateId: candidate.id,
-              value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}: ${candidate.parcelCoverage?.intersectionAreaSquareMetres ?? 0} m² (${candidate.parcelCoverage?.parcelPercentage ?? 0} % de la parcela)`,
+              value: candidate.kind === 'official_classification' ? `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}: ${candidate.parcelCoverage?.intersectionAreaSquareMetres ?? 0} m² (${candidate.parcelCoverage?.parcelPercentage ?? 0} % de la parcela)` : '',
               source: 'siotuga' as const,
               evidence: candidate.evidence,
             })),
@@ -647,9 +692,9 @@ export class SiotugaClassificationAdapter implements PlanningPort {
           explanation:
             'La clasificación obtenida con el punto no coincide con las clases intersectadas por la geometría completa de la parcela.',
           assertions: [
-            ...candidates.map((candidate) => ({
+            ...candidates.filter((c) => c.kind === 'official_classification').map((candidate) => ({
               candidateId: candidate.id,
-              value: `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}`,
+              value: candidate.kind === 'official_classification' ? `${candidate.classification.code}/${candidate.classification.categoryCode ?? '-'}` : '',
               source: 'siotuga' as const,
               evidence: candidate.evidence,
             })),
@@ -699,7 +744,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
     const areas = candidates.flatMap((candidate) => candidate.areas);
     return {
       ...planning,
-      classification: selectedCandidate?.classification,
+      classification: selectedCandidate?.kind === 'official_classification' ? selectedCandidate.classification : undefined,
       classificationResolution,
       areas: areas.length ? areas : planning.areas,
       evidence,
@@ -953,7 +998,8 @@ function round(value: number, decimals: number) {
 
 function parcelCoverage(
   geometry: ParcelGeometry,
-  features: Feature[]
+  features: Feature[],
+  context?: { municipalityCode?: string; categoryCode?: string }
 ): ClassificationParcelCoverage | undefined {
   const points = geometry.coordinates.flatMap((polygon) =>
     polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
@@ -994,13 +1040,263 @@ function parcelCoverage(
     }
   }
   intersectionArea = Math.min(parcelArea, Math.max(0, intersectionArea));
+  const referenceIntersectionArea = round(intersectionArea, 2);
+  const intersectionGeometry = computeValidatedIntersectionGeometry(
+    geometry,
+    features,
+    referenceIntersectionArea,
+    context
+  );
+
   return {
     parcelAreaSquareMetres: round(parcelArea, 2),
-    intersectionAreaSquareMetres: round(intersectionArea, 2),
+    intersectionAreaSquareMetres: referenceIntersectionArea,
     parcelPercentage: round((intersectionArea / parcelArea) * 100, 2),
     method: 'polygon_intersection',
+    intersectionGeometry,
   };
 }
+
+function cleanRing(ring: [number, number][]): [number, number][] | undefined {
+  if (!ring || ring.length < 3) return undefined;
+  const cleaned: [number, number][] = [];
+  for (const pt of ring) {
+    if (!pt || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) continue;
+    if (
+      cleaned.length > 0 &&
+      cleaned[cleaned.length - 1][0] === pt[0] &&
+      cleaned[cleaned.length - 1][1] === pt[1]
+    ) {
+      continue;
+    }
+    cleaned.push([pt[0], pt[1]]);
+  }
+  if (cleaned.length < 3) return undefined;
+  const first = cleaned[0];
+  const last = cleaned[cleaned.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    cleaned.push([first[0], first[1]]);
+  }
+  return cleaned.length >= 4 ? cleaned : undefined;
+}
+
+function cleanPolygon(polygon: [number, number][][]): [number, number][][] | undefined {
+  const exterior = cleanRing(polygon[0]);
+  if (!exterior) return undefined;
+  const interiors: [number, number][][] = [];
+  for (let i = 1; i < polygon.length; i += 1) {
+    const hole = cleanRing(polygon[i]);
+    if (hole) interiors.push(hole);
+  }
+  return [exterior, ...interiors];
+}
+
+function computeValidatedIntersectionGeometry(
+  parcelGeometry: ParcelGeometry,
+  features: Feature[],
+  referenceIntersectionArea: number,
+  context?: { municipalityCode?: string; categoryCode?: string }
+): ParcelGeometry | undefined {
+  try {
+    const parcelPolys: [number, number][][][] = [];
+    for (const poly of parcelGeometry.coordinates) {
+      const cleaned = cleanPolygon(poly as [number, number][][]);
+      if (cleaned) parcelPolys.push(cleaned);
+    }
+    if (!parcelPolys.length) return undefined;
+
+    const featurePolys: [number, number][][][] = [];
+    for (const feature of features) {
+      for (const poly of feature.polygons) {
+        const rawCoords: [number, number][][] = [
+          poly.exterior,
+          ...(poly.interiors ?? []),
+        ];
+        const cleaned = cleanPolygon(rawCoords);
+        if (cleaned) featurePolys.push(cleaned);
+      }
+    }
+    if (!featurePolys.length) return undefined;
+
+    const clipped = polygonClipping.intersection(parcelPolys, featurePolys);
+    if (!clipped || !clipped.length) return undefined;
+
+    const outputCoords: [number, number][][][] = [];
+    for (const poly of clipped) {
+      const cleaned = cleanPolygon(poly as unknown as [number, number][][]);
+      if (cleaned) outputCoords.push(cleaned);
+    }
+    if (!outputCoords.length) return undefined;
+
+    const candidateGeometry: ParcelGeometry = {
+      type: 'MultiPolygon',
+      coordinates: outputCoords,
+      crs: 'EPSG:4326',
+    };
+
+    const allPoints = candidateGeometry.coordinates.flatMap((polygon) =>
+      polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
+    );
+    if (!allPoints.length) return undefined;
+
+    const refLng = allPoints.reduce((sum, [lng]) => sum + lng, 0) / allPoints.length;
+    const refLat = allPoints.reduce((sum, [, lat]) => sum + lat, 0) / allPoints.length;
+    const rad = Math.PI / 180;
+    const proj = ([lng, lat]: Point): MetricPoint => [
+      EARTH_RADIUS_METRES * (lng - refLng) * rad * Math.cos(refLat * rad),
+      EARTH_RADIUS_METRES * (lat - refLat) * rad,
+    ];
+
+    const metricPolys: MetricPolygon[] = candidateGeometry.coordinates.map((polygon) => ({
+      exterior: polygon[0].map(([lng, lat]) => proj([lng, lat])),
+      interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => proj([lng, lat]))),
+    }));
+
+    const computedArea = metricPolys.reduce(
+      (total, polygon) =>
+        total +
+        Math.abs(signedRingArea(polygon.exterior)) -
+        polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
+      0
+    );
+
+    const maxTolerance = Math.max(0.005 * referenceIntersectionArea, 0.25);
+    const areaDiff = Math.abs(computedArea - referenceIntersectionArea);
+
+    if (areaDiff > maxTolerance) {
+      console.warn('[SIOTUGA_GEOMETRY_AREA_DISCREPANCY]', {
+        municipalityCode: context?.municipalityCode,
+        categoryCode: context?.categoryCode,
+        referenceIntersectionArea,
+        computedArea: round(computedArea, 2),
+        areaDiff: round(areaDiff, 2),
+        maxTolerance: round(maxTolerance, 2),
+      });
+      return undefined;
+    }
+
+    return candidateGeometry;
+  } catch (err) {
+    console.warn('[SIOTUGA_GEOMETRY_INTERSECTION_FAILED]', {
+      municipalityCode: context?.municipalityCode,
+      categoryCode: context?.categoryCode,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+function deriveComplementCandidate(
+  geometry: ParcelGeometry,
+  candidates: ClassificationCandidate[],
+  layerName: string,
+  retrievedAt: string
+): { candidate?: ClassificationCandidate; evidence?: TerritorialEvidence } {
+  try {
+    const parcelPolys: [number, number][][][] = [];
+    for (const poly of geometry.coordinates) {
+      const cleaned = cleanPolygon(poly as [number, number][][]);
+      if (cleaned) parcelPolys.push(cleaned);
+    }
+    if (!parcelPolys.length) return {};
+
+    const intersectionPolys: [number, number][][][] = [];
+    for (const candidate of candidates) {
+      if (candidate.kind === 'official_classification' && candidate.parcelCoverage?.intersectionGeometry) {
+        for (const poly of candidate.parcelCoverage.intersectionGeometry.coordinates) {
+          const cleaned = cleanPolygon(poly as [number, number][][]);
+          if (cleaned) intersectionPolys.push(cleaned);
+        }
+      }
+    }
+    if (!intersectionPolys.length) return {};
+
+    const clipped = polygonClipping.difference(parcelPolys, intersectionPolys);
+    if (!clipped || !clipped.length) return {};
+
+    const outputCoords: [number, number][][][] = [];
+    for (const poly of clipped) {
+      const cleaned = cleanPolygon(poly as unknown as [number, number][][]);
+      if (cleaned) outputCoords.push(cleaned);
+    }
+    if (!outputCoords.length) return {};
+
+    const complementGeometry: ParcelGeometry = {
+      type: 'MultiPolygon',
+      coordinates: outputCoords,
+      crs: 'EPSG:4326',
+    };
+
+    const allPoints = complementGeometry.coordinates.flatMap((polygon) =>
+      polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
+    );
+    if (!allPoints.length) return {};
+
+    const refLng = allPoints.reduce((sum, [lng]) => sum + lng, 0) / allPoints.length;
+    const refLat = allPoints.reduce((sum, [, lat]) => sum + lat, 0) / allPoints.length;
+    const rad = Math.PI / 180;
+    const proj = ([lng, lat]: Point): MetricPoint => [
+      EARTH_RADIUS_METRES * (lng - refLng) * rad * Math.cos(refLat * rad),
+      EARTH_RADIUS_METRES * (lat - refLat) * rad,
+    ];
+
+    const metricPolys: MetricPolygon[] = complementGeometry.coordinates.map((polygon) => ({
+      exterior: polygon[0].map(([lng, lat]) => proj([lng, lat])),
+      interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => proj([lng, lat]))),
+    }));
+
+    const computedArea = metricPolys.reduce(
+      (total, polygon) =>
+        total +
+        Math.abs(signedRingArea(polygon.exterior)) -
+        polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
+      0
+    );
+
+    const roundedArea = round(computedArea, 2);
+
+    if (roundedArea >= 1.0) {
+      const parcelArea = candidates[0].parcelCoverage?.parcelAreaSquareMetres ?? 0;
+      return {
+        candidate: {
+          id: `${layerName}:derived_complement`,
+          kind: 'derived_unmapped_complement',
+          source: 'derived_geometry_complement',
+          areas: [],
+          evidence: [],
+          confidence: 'unknown',
+          evidenceBasis: 'parcel_geometry',
+          instrumentTraceability: 'pending',
+          normalizationStatus: 'unmapped',
+          parcelCoverage: {
+            parcelAreaSquareMetres: parcelArea,
+            intersectionAreaSquareMetres: roundedArea,
+            parcelPercentage: parcelArea > 0 ? round((roundedArea / parcelArea) * 100, 2) : 0,
+            method: 'polygon_intersection',
+            intersectionGeometry: complementGeometry,
+          },
+        },
+      };
+    } else if (roundedArea > 0) {
+      return {
+        evidence: {
+          source: 'urbanbrain',
+          sourceUrl: '',
+          retrievedAt,
+          method: `residuo geométrico sin cobertura de ${roundedArea} m² descartado por ser inferior a 1 m²`,
+          scope: 'planning_classification',
+        },
+      };
+    }
+    return {};
+  } catch (err) {
+    console.warn('[SIOTUGA_COMPLEMENT_CALCULATION_FAILED]', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return {};
+  }
+}
+
 
 /**
  * Fuente SIOTUGA para el agregador multi-fuente. Consulta todas las capas

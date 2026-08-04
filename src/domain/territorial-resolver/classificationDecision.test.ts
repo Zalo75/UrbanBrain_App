@@ -26,6 +26,7 @@ function candidate(
   overrides: Partial<ClassificationCandidate> = {}
 ): ClassificationCandidate {
   return {
+    kind: 'official_classification' as const,
     id,
     classification: {
       code: classificationCode,

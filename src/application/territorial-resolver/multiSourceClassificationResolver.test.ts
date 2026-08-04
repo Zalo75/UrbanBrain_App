@@ -18,6 +18,7 @@ function candidate(
   confidence: ClassificationCandidate['confidence'] = 'high'
 ): ClassificationCandidate {
   return {
+    kind: 'official_classification' as const,
     id,
     sourceKey,
     classification: {

@@ -11,15 +11,32 @@ vi.mock('@/components/maps/ParcelMap', () => ({
   ParcelMap: ({
     geometry,
     coordinates,
+    candidates,
+    selectedCandidateId,
+    onCandidateSelect,
   }: {
     geometry?: unknown
     coordinates?: { lat: number; lng: number }
+    candidates?: Array<{ id: string }>
+    selectedCandidateId?: string
+    onCandidateSelect?: (id: string) => void
   }) => (
     <div
       data-testid="parcel-map"
       data-has-geometry={geometry ? 'true' : 'false'}
       data-coordinates={coordinates ? `${coordinates.lat},${coordinates.lng}` : ''}
-    />
+      data-selected-candidate={selectedCandidateId ?? ''}
+    >
+      {candidates?.map((c) => (
+        <button
+          key={c.id}
+          data-testid={`select-candidate-${c.id}`}
+          onClick={() => onCandidateSelect?.(c.id)}
+        >
+          Seleccionar {c.id}
+        </button>
+      ))}
+    </div>
   ),
 }))
 
@@ -361,6 +378,7 @@ describe('ExpedienteForm', () => {
   it('preselects a review proposal without presenting it as confirmed and keeps manual controls', async () => {
     const candidate = {
       id: 'oleiros-layer:SU|SUC',
+      kind: 'official_classification' as const,
       classification: {
         code: 'SU',
         categoryCode: 'SUC',
@@ -426,13 +444,19 @@ describe('ExpedienteForm', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
 
-    await screen.findByText(/requiere revisión profesional/i)
-    expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe(
-      'urbano_consolidado'
-    )
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe(
+        'urbano_consolidado'
+      )
+    })
     expect((screen.getByLabelText(/Ámbito o zona/i) as HTMLInputElement).value).toBe(
       'Ámbito oficial'
     )
+    // With the new UX, "Motivo de la selección manual" is only required after an explicit manual edit,
+    // not just because the detection status is review_required.
+    expect(screen.queryByLabelText(/Motivo de la selección manual/i)).toBeNull()
+    // After a manual edit, the field and its controls do appear
+    fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'rustico_no_urbanizable' } })
     expect(screen.getByLabelText(/Motivo de la selección manual/i)).toBeTruthy()
     expect(screen.getByRole('link', { name: /Ver en Catastro/i })).toBeTruthy()
     expect(screen.queryByText(/^Confirmado$/i)).toBeNull()
@@ -525,5 +549,162 @@ describe('ExpedienteForm', () => {
     const landClass = screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement
     expect(landClass.value).toBe('')
     expect(landClass.selectedOptions[0]?.text).toMatch(/Seleccionar si no se ha determinado/i)
+  })
+
+  // ─── Auto-sync: zona seleccionada en el mapa → formulario actualizado ───────
+
+  const candidateA = {
+    id: 'zona-a',
+    kind: 'official_classification' as const,
+    classification: { code: 'SU', categoryCode: 'SUC', label: 'Suelo urbano', sourceFeatureIds: [] },
+    areas: [{ type: 'zone' as const, name: 'Ámbito A', sourceFeatureIds: [] }],
+    source: 'siotuga' as const,
+    evidence: [],
+    confidence: 'high' as const,
+    evidenceBasis: 'parcel_geometry' as const,
+    instrumentTraceability: 'verified' as const,
+    normalizationStatus: 'mapped' as const,
+    officialAttributes: [],
+    parcelCoverage: undefined,
+  }
+
+  const candidateB = {
+    id: 'zona-b',
+    kind: 'official_classification' as const,
+    classification: { code: 'SR', categoryCode: 'NR', label: 'Núcleo rural', sourceFeatureIds: [] },
+    areas: [{ type: 'zone' as const, name: 'Ámbito B', sourceFeatureIds: [] }],
+    source: 'siotuga' as const,
+    evidence: [],
+    confidence: 'medium' as const,
+    evidenceBasis: 'parcel_geometry' as const,
+    instrumentTraceability: 'pending' as const,
+    normalizationStatus: 'mapped' as const,
+    officialAttributes: [],
+    parcelCoverage: undefined,
+  }
+
+  function multiZoneDetection() {
+    return {
+      detectionId: '00000000-0000-4000-8000-000000000200' as `${string}-${string}-${string}-${string}-${string}`,
+      detection: {
+        detected: { cadastralReference: '3995302NH5939N0001HQ', municipalityId: 'culleredo' },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+        classificationResolution: {
+          status: 'review_required' as const,
+          nextAction: 'review_official_sources' as const,
+          candidates: [candidateA, candidateB],
+          discrepancies: [],
+          reviewReasons: [],
+          proposal: { candidateId: candidateA.id, explanation: 'Propuesta', confidence: 'medium' as const, requiresProfessionalReview: false },
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+      },
+    }
+  }
+
+  it('auto-fills classification when a zone is selected on the map', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    // Wait for detection to render map with candidates
+    await waitFor(() => {
+      expect(screen.getByTestId('select-candidate-zona-a')).toBeTruthy()
+    })
+
+    // Click zona-a on the map
+    fireEvent.click(screen.getByTestId('select-candidate-zona-a'))
+
+    await waitFor(() => {
+      const landClass = screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement
+      expect(landClass.value).toBe('urbano_consolidado')
+    })
+    expect((screen.getByLabelText(/Ámbito o zona/i) as HTMLInputElement).value).toBe('Ámbito A')
+    // Badge visible
+    expect(screen.getByTestId('auto-detected-badge')).toBeTruthy()
+  })
+
+  it('shows manual-override badge when user edits classification after zone selection', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('select-candidate-zona-a')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('select-candidate-zona-a'))
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
+    })
+
+    // User manually changes the classification
+    fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'rustico_no_urbanizable' } })
+
+    // Auto badge disappears; manual badge appears
+    expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
+    expect(screen.getByText(/Modificado manualmente/i)).toBeTruthy()
+    expect(screen.getByTestId('reset-auto-classification')).toBeTruthy()
+  })
+
+  it('does NOT overwrite a manual override when the user clicks another zone on the map', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('select-candidate-zona-a')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('select-candidate-zona-a'))
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
+    })
+
+    // Manual override
+    fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'urbanizable' } })
+    expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbanizable')
+
+    // Click zona-b; classification must NOT change
+    fireEvent.click(screen.getByTestId('select-candidate-zona-b'))
+    await waitFor(() => {
+      // Small delay to allow any potential state update
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbanizable')
+    })
+  })
+
+  it('restores auto classification when the reset button is clicked', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
+    render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('select-candidate-zona-a')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByTestId('select-candidate-zona-a'))
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
+    })
+
+    // Manual override
+    fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'urbanizable' } })
+    expect(screen.getByTestId('reset-auto-classification')).toBeTruthy()
+
+    // Click reset
+    fireEvent.click(screen.getByTestId('reset-auto-classification'))
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
+    })
+    expect((screen.getByLabelText(/Ámbito o zona/i) as HTMLInputElement).value).toBe('Ámbito A')
+    expect(screen.getByTestId('auto-detected-badge')).toBeTruthy()
+    expect(screen.queryByTestId('reset-auto-classification')).toBeNull()
   })
 })

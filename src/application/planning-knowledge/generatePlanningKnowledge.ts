@@ -288,20 +288,7 @@ function buildMunicipalityKnowledge(
     layers,
     instrumentRelations: [],
     regimeIdentifiers: [],
-    normativeDocuments: [...source.inventory]
-      .map((instrument) => ({
-        id: `siotuga-document-${instrument.officialId}`,
-        officialDocumentId: instrument.officialId,
-        instrumentId: instrument.officialId,
-        name: instrument.name,
-        officialUrl:
-          currentPlanning[0]?.sourceUrl ??
-          `https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=${municipality.ineCode}`,
-        documentType: 'other' as const,
-        corpusDocumentNames: [],
-        validationStatus: 'discovered' as const,
-        sourceIds: [instrument.sourceId],
-      }))
+    normativeDocuments: [...(source.normativeDocuments ?? [])]
       .sort((left, right) => left.id.localeCompare(right.id)),
     territorialScopes: municipalSuccessionResolved
       ? municipalSuccession!.predecessors.map((predecessor) => ({

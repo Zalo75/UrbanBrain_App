@@ -112,6 +112,7 @@ export interface ManualTerritorialContext {
   recordedAt: string
   validatedAt?: string
   validatedBy?: string
+  actionAreaSelection?: ActionAreaSelectionState
 }
 
 export type ManualAffectDecisionAction = 'add' | 'confirm' | 'exclude'
@@ -235,7 +236,8 @@ export interface OfficialClassificationAttributes {
   version?: string
 }
 
-export interface ClassificationCandidate {
+export interface OfficialClassificationCandidate {
+  kind: 'official_classification'
   id: string
   sourceKey?: string
   classification: PlanningClassification
@@ -249,6 +251,25 @@ export interface ClassificationCandidate {
   parcelCoverage?: ClassificationParcelCoverage
   officialAttributes?: OfficialClassificationAttributes[]
 }
+
+export interface DerivedUnmappedComplementCandidate {
+  kind: 'derived_unmapped_complement'
+  id: string
+  sourceKey?: string
+  classification?: undefined
+  category?: undefined
+  planningZone?: undefined
+  source: 'derived_geometry_complement'
+  evidence: TerritorialEvidence[]
+  confidence: 'unknown'
+  evidenceBasis: 'parcel_geometry'
+  instrumentTraceability: 'pending'
+  normalizationStatus: 'unmapped'
+  parcelCoverage: ClassificationParcelCoverage
+  areas: PlanningArea[]
+}
+
+export type ClassificationCandidate = OfficialClassificationCandidate | DerivedUnmappedComplementCandidate
 
 export interface ClassificationDiscrepancyAssertion {
   candidateId?: string
@@ -519,4 +540,34 @@ export interface AffectPort {
     coordinates?: TerritorialCoordinates
     geometry?: ParcelGeometry
   }): Promise<AffectApplicability>
+}
+
+export interface ActionAreaSelectionSnapshot {
+  id: string
+  geometry: ParcelGeometry
+  surfaceSquareMetres: number
+  parcelSurfaceSquareMetres: number
+  selectionType: 'detected_zone' | 'whole_parcel'
+  selectedCandidateId?: string
+  classification?: string
+  category?: string
+  planningZone?: string
+  planningZones?: string[]
+  source: string
+  confidence: TerritorialConfidence | 'unknown'
+  selectedBy: string
+  selectedAt: string
+  verification: DeterminationVerification
+  affects?: AffectApplicability
+}
+
+export interface ActionAreaSelection extends ActionAreaSelectionSnapshot {
+  previousSnapshot?: ActionAreaSelectionSnapshot
+}
+
+export interface ActionAreaSelectionState {
+  current?: ActionAreaSelection
+  history: ActionAreaSelectionSnapshot[]
+  revokedAt?: string
+  revokedBy?: string
 }

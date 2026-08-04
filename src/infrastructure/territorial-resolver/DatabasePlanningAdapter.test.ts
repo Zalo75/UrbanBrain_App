@@ -29,7 +29,7 @@ describe('buildApplicablePlanningQuery', () => {
         status: 'determined',
         instrument: knowledge.instrument.name,
         approvalDate: knowledge.instrument.approvalDate,
-        canAnswerConcreteParameters: false,
+        canAnswerConcreteParameters: knowledge.coverage.normativeDocument,
         applicableInstruments: [{ id: knowledge.instrument.officialId, status: 'current' }],
       })
       expect(result.evidence[0]?.method).toContain('Planning Knowledge Base')

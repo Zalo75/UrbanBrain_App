@@ -2,14 +2,17 @@
 
 import Link from 'next/link'
 import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, CircleDashed, Loader2, Sparkles, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, CircleDashed, ExternalLink, Loader2, Sparkles, TriangleAlert, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel'
+import { ActiveZoneContext } from '@/components/territorial/ActiveZoneContext'
+import { AvailableZonesSummary } from '@/components/territorial/AvailableZonesSummary'
+import { GeometricAuditAccordion } from '@/components/territorial/GeometricAuditAccordion'
+import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap'
 import type { Municipality, Province } from '@/shared/territory'
 import type { ClassificationCandidate } from '@/domain/territorial-resolver/types'
@@ -142,7 +145,9 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   const [landClass, setLandClass] = useState('')
   const [urbanPlanningZone, setUrbanPlanningZone] = useState('')
   const [selectedClassificationCandidateId, setSelectedClassificationCandidateId] = useState('')
+  const [exploredCandidateId, setExploredCandidateId] = useState('')
   const [classificationSelectionReason, setClassificationSelectionReason] = useState('')
+  const [classificationManuallyOverridden, setClassificationManuallyOverridden] = useState(false)
   const [actionType, setActionType] = useState('')
   const [notes, setNotes] = useState('')
   const [contextNoticeAccepted, setContextNoticeAccepted] = useState(false)
@@ -195,6 +200,35 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     return () => { active = false }
   }, [selectedMunicipality])
 
+  // Sync landClass/urbanPlanningZone with the explored candidate,
+  // unless the user has manually overridden those fields.
+  useEffect(() => {
+    if (classificationManuallyOverridden) return
+    if (!exploredCandidateId || !detection?.classificationResolution) {
+      // Returning to whole-parcel state: restore suggested-candidate values or clear
+      if (!exploredCandidateId && detection?.classificationResolution) {
+        const suggestedCandidateId =
+          detection.classificationResolution.automaticSelection?.candidateId ??
+          detection.classificationResolution.proposal?.candidateId
+        const suggested = detection.classificationResolution.candidates.find(
+          (c) => c.id === suggestedCandidateId
+        )
+        if (suggested) {
+          setLandClass(landClassFromCandidate(suggested) ?? '')
+          setUrbanPlanningZone(suggested.areas.length === 1 ? suggested.areas[0].name : '')
+        }
+      }
+      return
+    }
+    const candidate = detection.classificationResolution.candidates.find(
+      (c) => c.id === exploredCandidateId
+    )
+    if (!candidate) return
+    setLandClass(landClassFromCandidate(candidate) ?? '')
+    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exploredCandidateId, classificationManuallyOverridden])
+
   useEffect(() => {
     if (!isCreating) submitLock.current = false
   }, [isCreating])
@@ -228,7 +262,9 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     setLandClass('')
     setUrbanPlanningZone('')
     setSelectedClassificationCandidateId('')
+    setExploredCandidateId('')
     setClassificationSelectionReason('')
+    setClassificationManuallyOverridden(false)
     setDetection(null)
     setDetectionId('')
   }
@@ -332,7 +368,9 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         values.urbanPlanningZone ??
           (suggestedCandidate?.areas.length === 1 ? suggestedCandidate.areas[0].name : '')
       )
-      setSelectedClassificationCandidateId(suggestedCandidateId ?? '')
+      // En el rediseño, no autoseleccionamos ninguna zona al arrancar, forzamos selección explícita
+      setSelectedClassificationCandidateId('')
+      setExploredCandidateId('')
       setClassificationSelectionReason('')
       toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
     } catch {
@@ -346,14 +384,28 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   function selectClassificationCandidate(candidate: ClassificationCandidate) {
     const candidateLandClass = landClassFromCandidate(candidate)
     setSelectedClassificationCandidateId(candidate.id)
+    setExploredCandidateId(candidate.id)
     setLandClass(candidateLandClass ?? '')
     setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
     setClassificationSelectionReason('')
+    // Fixing a zone is an explicit system-driven action; clear any prior manual override
+    setClassificationManuallyOverridden(false)
     if (!candidateLandClass) {
       toast.info(
         'El código oficial se conserva como evidencia, pero no tiene una equivalencia automática segura. Seleccione manualmente el valor operativo.'
       )
     }
+  }
+
+  function resetToAutoClassification() {
+    if (!exploredCandidateId || !detection?.classificationResolution) return
+    const candidate = detection.classificationResolution.candidates.find(
+      (c) => c.id === exploredCandidateId
+    )
+    if (!candidate) return
+    setClassificationManuallyOverridden(false)
+    setLandClass(landClassFromCandidate(candidate) ?? '')
+    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
   }
 
   return (
@@ -362,6 +414,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       <input type="hidden" name="territorialDetectionInvalidated" value={detectionInvalidated ? 'true' : ''} />
       <input type="hidden" name="territorialInputSource" value={territorialInputSource ?? ''} />
       <input type="hidden" name="classificationCandidateId" value={selectedClassificationCandidateId} />
+      <input type="hidden" name="actionAreaMode" value={selectedClassificationCandidateId ? 'detected_zone' : 'whole_parcel'} />
 
       {createState.status === 'error' && (
         <div id="creation-error" role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
@@ -436,13 +489,107 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
         </div>
         <ProgressPanel detection={detection} calculating={isDetecting} detectionInvalidated={detectionInvalidated} />
         {detection?.classificationResolution && !detectionInvalidated && (
-          <ClassificationResolutionPanel
-            resolution={detection.classificationResolution}
-            selectedCandidateId={selectedClassificationCandidateId}
-            onSelectCandidate={selectClassificationCandidate}
+          <MapcentricWorkspace
+            mapSlot={
+              <ParcelMap
+                geometry={detectionInvalidated ? undefined : detection.detected.parcelGeometry}
+                coordinates={detectedMapCoordinates}
+                candidates={detectionInvalidated ? undefined : detection.classificationResolution.candidates}
+                selectedCandidateId={exploredCandidateId || undefined}
+                onCandidateSelect={(candidateId: string) => {
+                  setExploredCandidateId(candidateId)
+                }}
+              />
+            }
+            activeZoneSlot={
+              <div className="flex flex-col gap-4">
+                {selectedClassificationCandidateId ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 dark:bg-emerald-950/20">
+                    <div className="flex items-center gap-2 font-semibold text-emerald-900 dark:text-emerald-400 mb-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      Zona de trabajo confirmada
+                    </div>
+                    <p className="text-sm text-emerald-800 dark:text-emerald-300">
+                      Esta zona será utilizada como ámbito territorial del expediente.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setSelectedClassificationCandidateId('')}>
+                        Volver a parcela completa
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-sky-200 bg-sky-50 p-4 dark:bg-sky-950/20">
+                    <h3 className="font-semibold text-sky-900 dark:text-sky-400">Parcela completa (Estado inicial)</h3>
+                    <p className="mt-1 text-sm text-sky-800 dark:text-sky-300">
+                      {detection.classificationResolution.candidates.length > 1
+                        ? 'Se han detectado varias zonas. Selecciona la zona sobre la que deseas trabajar haciendo clic en el mapa.'
+                        : 'No se ha fijado una zona de trabajo específica. Puede trabajar con la parcela completa o seleccionar una zona en el mapa.'}
+                    </p>
+                  </div>
+                )}
+
+                {exploredCandidateId && (() => {
+                  const candidate = detection.classificationResolution!.candidates.find(c => c.id === exploredCandidateId)
+                  if (!candidate) return null
+                  return (
+                    <div className="flex flex-col gap-3">
+                      <ActiveZoneContext candidate={candidate} />
+                      {selectedClassificationCandidateId !== exploredCandidateId && (
+                        <div className="flex justify-end border-t pt-3">
+                          <Button type="button" onClick={() => selectClassificationCandidate(candidate)}>
+                            Fijar como Zona de Trabajo
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+            }
+            availableZonesSlot={
+              <AvailableZonesSummary
+                candidates={detection.classificationResolution.candidates.filter(c => c.id !== exploredCandidateId)}
+                onSelect={(id) => setExploredCandidateId(id)}
+              />
+            }
+            auditSlot={
+              <GeometricAuditAccordion
+                totalParcelArea={
+                  /* parcelAreaSquareMetres: total catastral parcel area from the first candidate's
+                     parcelCoverage. SmartCaseDetection has no standalone surface field; this is
+                     the closest typed value available without altering the domain model. Falls back to 0. */
+                  detection.classificationResolution.candidates
+                    .find((c) => c.parcelCoverage?.parcelAreaSquareMetres !== undefined)
+                    ?.parcelCoverage?.parcelAreaSquareMetres ?? 0
+                }
+                candidates={detection.classificationResolution.candidates}
+              />
+            }
           />
         )}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        {!detection?.classificationResolution && (
+          <ParcelMap
+            geometry={detection?.detected?.parcelGeometry}
+            coordinates={detectedMapCoordinates}
+          />
+        )}
+        {detection?.classificationResolution && (detection.classificationResolution.officialLinks?.length ?? 0) > 0 && (
+          <div className="bg-background flex flex-wrap gap-3 rounded-lg border p-4 text-xs mt-4">
+            {detection.classificationResolution.officialLinks?.map((link) => (
+              <a
+                key={`${link.kind}-${link.url}`}
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
+              >
+                {link.label} <ExternalLink className="h-3 w-3" />
+              </a>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 mt-6">
           <div className="grid gap-3">
             <Label htmlFor="address" className="text-base font-medium">Dirección aproximada</Label>
             <Input id="address" name="address" value={address} onChange={(event) => changeLocationInput('address', event.target.value)} placeholder="Se completa desde Catastro cuando está disponible" aria-invalid={createState.field === 'address'} aria-describedby={createState.field === 'address' ? 'creation-error' : undefined} className={`h-12 text-base shadow-sm ${createState.field === 'address' ? 'border-destructive' : ''}`} />
@@ -452,10 +599,6 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             <div className="grid gap-2"><Label htmlFor="lng" className="text-sm font-medium">Longitud</Label><Input id="lng" name="lng" type="number" step="any" value={lng} onChange={(event) => changeLocationInput('coordinates', event.target.value, 'lng')} aria-invalid={createState.field === 'coordinates'} aria-describedby={createState.field === 'coordinates' ? 'creation-error' : undefined} className={`h-12 ${createState.field === 'coordinates' ? 'border-destructive' : ''}`} /></div>
           </div>
         </div>
-        <ParcelMap
-          geometry={detectionInvalidated ? undefined : detection?.detected.parcelGeometry}
-          coordinates={detectedMapCoordinates}
-        />
       </section>
 
       <section className="space-y-6 pt-4">
@@ -470,8 +613,45 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
           <p className="text-xs text-muted-foreground">Las opciones disponibles proceden del catálogo municipal vigente. Si no aparece ninguna, puede dejar este dato pendiente.</p>
         </div>
         <div className="grid gap-3">
-          <Label htmlFor="landClass" className="text-base font-medium">Clasificación del suelo</Label>
-          <select id="landClass" name="landClass" value={landClass} onChange={(event) => { setLandClass(event.target.value); setSelectedClassificationCandidateId('') }} aria-invalid={createState.field === 'landClass'} aria-describedby={createState.field === 'landClass' ? 'creation-error' : undefined} className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'landClass' ? 'border-destructive' : ''}`}>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="landClass" className="text-base font-medium">Clasificación del suelo</Label>
+            {exploredCandidateId && detection?.classificationResolution && (
+              classificationManuallyOverridden ? (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                    <Wand2 className="h-3 w-3" />
+                    Modificado manualmente
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resetToAutoClassification}
+                    className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    data-testid="reset-auto-classification"
+                  >
+                    Volver a la detección automática
+                  </button>
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" data-testid="auto-detected-badge">
+                  <Sparkles className="h-3 w-3" />
+                  Detectado automáticamente
+                </span>
+              )
+            )}
+          </div>
+          <select
+            id="landClass"
+            name="landClass"
+            value={landClass}
+            onChange={(event) => {
+              setLandClass(event.target.value)
+              setSelectedClassificationCandidateId('')
+              if (detection?.classificationResolution) setClassificationManuallyOverridden(true)
+            }}
+            aria-invalid={createState.field === 'landClass'}
+            aria-describedby={createState.field === 'landClass' ? 'creation-error' : undefined}
+            className={`flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm ${createState.field === 'landClass' ? 'border-destructive' : ''}`}
+          >
             <option value="">Seleccionar si no se ha determinado</option>
             {LAND_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -480,12 +660,16 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             id="urbanPlanningZone"
             name="urbanPlanningZone"
             value={urbanPlanningZone}
-            onChange={(event) => { setUrbanPlanningZone(event.target.value); setSelectedClassificationCandidateId('') }}
+            onChange={(event) => {
+              setUrbanPlanningZone(event.target.value)
+              setSelectedClassificationCandidateId('')
+              if (detection?.classificationResolution) setClassificationManuallyOverridden(true)
+            }}
             placeholder="Seleccione o introduzca el ámbito aplicable"
           />
           {detection?.classificationResolution &&
             detection.classificationResolution.status !== 'clear' &&
-            landClass && (
+            landClass && classificationManuallyOverridden && (
               <div className="grid gap-2">
                 <Label htmlFor="classificationSelectionReason" className="text-sm font-medium">
                   Motivo de la selección manual

@@ -28,6 +28,12 @@ const contextWithPlanning: TerritorialContextView = {
     label: 'Suelo urbano',
     sourceFeatureIds: ['feature-a'],
   },
+  automaticClassification: {
+    code: 'SU',
+    categoryCode: 'SUSC',
+    label: 'Suelo urbano',
+    sourceFeatureIds: ['feature-a'],
+  },
   instrument: 'Plan general de ordenación urbana',
   areas: [],
   affects: [],
@@ -50,6 +56,46 @@ beforeAll(() => {
 })
 
 describe('TerritorialContextPanel', () => {
+  it('muestra abierto el diagnóstico y expone los controles manuales previstos', () => {
+    const { container } = render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          automaticAffects: [
+            {
+              key: 'ideg:water-1',
+              category: 'aguas',
+              name: 'Zona de policía',
+              confidence: 'high',
+              source: 'ideg',
+            },
+          ],
+          affects: [
+            {
+              key: 'ideg:water-1',
+              category: 'aguas',
+              name: 'Zona de policía',
+              confidence: 'high',
+              origin: 'automatic',
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(container.querySelector('details')?.hasAttribute('open')).toBe(true)
+    expect(screen.getByText('Diagnóstico territorial')).toBeTruthy()
+    expect(screen.getByText('Clasificación automática')).toBeTruthy()
+    expect(screen.getByText(/Clasificación manual/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Editar clasificación' }))
+    expect(screen.getByLabelText('Clasificación')).toBeTruthy()
+    expect(screen.getByLabelText('Confirmar')).toBeTruthy()
+    expect(screen.getByLabelText('Excluir')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Añadir afección' })).toBeTruthy()
+  })
+
   it('ofrece resolucion oficial, reintento y continuacion manual diferenciada', () => {
     render(<TerritorialContextPanel expedienteId="exp-a" initialInput={{}} context={null} />)
 
@@ -292,5 +338,57 @@ describe('TerritorialContextPanel', () => {
 
     expect(screen.queryByText('Contexto urbanístico incompleto')).toBeNull()
     expect(screen.getByText('Parcial')).toBeTruthy()
+  })
+
+  it('diferencia valores automáticos y manuales y permite editar clasificación y afecciones', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          automaticClassification: contextWithPlanning.classification,
+          classificationOrigin: 'manual',
+          automaticAffects: [
+            {
+              key: 'ideg:water-1',
+              category: 'aguas',
+              name: 'Zona de policía',
+              confidence: 'high',
+              source: 'ideg',
+            },
+          ],
+          manualContext: {
+            classification: 'Suelo rústico',
+            category: 'SRP',
+            provenance: 'manual',
+            verification: 'technician_validated',
+            recordedAt: '2026-07-29T10:00:00.000Z',
+            affectDecisions: [
+              {
+                id: 'decision-1',
+                targetKey: 'ideg:water-1',
+                category: 'aguas',
+                name: 'Zona de policía',
+                action: 'exclude',
+                reason: 'Revisión técnica',
+                provenance: 'manual',
+                verification: 'technician_validated',
+                recordedAt: '2026-07-29T10:00:00.000Z',
+                recordedBy: 'user-a',
+              },
+            ],
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Clasificación automática')).toBeTruthy()
+    expect(screen.getByText(/Clasificación manual · valor operativo/i)).toBeTruthy()
+    expect(screen.getByText(/excluida operativamente/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Editar afecciones' }))
+    expect(screen.getByText('Revisión manual de afecciones')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir afección' }))
+    expect(screen.getByLabelText('Afección nueva')).toBeTruthy()
   })
 })

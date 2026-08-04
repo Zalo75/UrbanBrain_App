@@ -5,6 +5,13 @@ const mocks = vi.hoisted(() => ({
   getExpedienteAccess: vi.fn(),
   loadAuthorizedParcelInputs: vi.fn(),
   insert: vi.fn(),
+  select: vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([]),
+      }),
+    }),
+  }),
   values: vi.fn(),
   embedContent: vi.fn(),
   rpc: vi.fn(),
@@ -19,7 +26,7 @@ vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
   loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
 }))
 vi.mock('@/infrastructure/db/client', () => ({
-  db: { insert: mocks.insert },
+  db: { insert: mocks.insert, select: mocks.select },
 }))
 vi.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: class {

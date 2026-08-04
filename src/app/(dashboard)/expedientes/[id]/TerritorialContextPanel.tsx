@@ -16,7 +16,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ClassificationResolutionPanel } from '@/components/territorial/ClassificationResolutionPanel';
+import { ActiveZoneContext } from '@/components/territorial/ActiveZoneContext'
+import { AvailableZonesSummary } from '@/components/territorial/AvailableZonesSummary'
+import { GeometricAuditAccordion } from '@/components/territorial/GeometricAuditAccordion'
+import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap';
 import {
   resolveTerritorialContextAction,
@@ -57,27 +60,44 @@ export function TerritorialContextPanel({
   const action = resolveTerritorialContextAction.bind(null, expedienteId);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [manualOpen, setManualOpen] = useState(false);
+  const [manualAffectAddOpen, setManualAffectAddOpen] = useState(false);
+  const [exploredCandidateId, setExploredCandidateId] = useState<string | undefined>(undefined);
   const manualOrdinanceRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
   }, [router, state.status]);
 
+  const persistedCandidateId = context?.actionArea?.selectedCandidateId;
+  const activeCandidateId = exploredCandidateId !== undefined ? exploredCandidateId : persistedCandidateId;
+
   const status = context ? statusCopy[context.status] : statusCopy.undetermined;
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
   );
+  const displayedAutomaticAffects =
+    context?.automaticAffects ??
+    context?.affects
+      .filter((affect) => affect.origin !== 'manual')
+      .map((affect) => ({
+        key: affect.key ?? `legacy:${affect.category}:${affect.name}`,
+        category: affect.category,
+        name: affect.name,
+        confidence: affect.confidence,
+        source: 'ideg',
+      })) ??
+    [];
 
   return (
     <details
       className="group border-b bg-zinc-50/70 dark:bg-zinc-950/30"
-      open={!context}
+      open
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 lg:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <MapPinned className="text-muted-foreground h-4 w-4 shrink-0" />
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">Ubicación y contexto territorial</h2>
+            <h2 className="truncate text-sm font-semibold">Diagnóstico territorial</h2>
             <p className="text-muted-foreground truncate text-xs">
               {context?.municipality ?? 'Pendiente de resolución oficial'}
               {context?.cadastralReference ? ` · ${context.cadastralReference}` : ''}
@@ -133,6 +153,7 @@ export function TerritorialContextPanel({
                 Se guardar&aacute;n como manuales y nunca se presentar&aacute;n como una comprobaci&oacute;n oficial.
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <input type="hidden" name="manualAffectsEdited" value="1" />
                 <div className="grid gap-2 sm:col-span-2">
                   <Label htmlFor="territorial-manual-municipality">Municipio conocido</Label>
                   <Input
@@ -185,6 +206,107 @@ export function TerritorialContextPanel({
                     maxLength={1000}
                     placeholder="Información conocida, dudas o comprobaciones pendientes"
                   />
+                </div>
+                <div className="grid gap-3 sm:col-span-2">
+                  <p className="text-sm font-medium">Revisión manual de afecciones</p>
+                  {displayedAutomaticAffects.map((affect, index) => {
+                    const decision = context?.manualContext?.affectDecisions?.find(
+                      (item) => item.targetKey === affect.key
+                    );
+                    return (
+                      <div key={affect.key} className="rounded-md border p-3">
+                        <p className="text-xs font-medium">{affect.name}</p>
+                        <p className="text-muted-foreground text-xs">
+                          Automática · {affect.source.toUpperCase()}
+                        </p>
+                        <div
+                          className="mt-2 flex flex-wrap gap-2"
+                          role="group"
+                          aria-label={`Decisión sobre ${affect.name}`}
+                        >
+                          <label className="cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-50">
+                            <input
+                              type="radio"
+                              name={`manualAffectAction.${index}`}
+                              value="confirm"
+                              defaultChecked={decision?.action === 'confirm'}
+                              className="sr-only"
+                            />
+                            Confirmar
+                          </label>
+                          <label className="cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium has-[:checked]:border-red-600 has-[:checked]:bg-red-50">
+                            <input
+                              type="radio"
+                              name={`manualAffectAction.${index}`}
+                              value="exclude"
+                              defaultChecked={decision?.action === 'exclude'}
+                              className="sr-only"
+                            />
+                            Excluir
+                          </label>
+                        </div>
+                        <Input
+                          className="mt-2"
+                          name={`manualAffectReason.${index}`}
+                          defaultValue={decision?.reason ?? ''}
+                          maxLength={500}
+                          placeholder="Motivo de la decisión (obligatorio al excluir)"
+                        />
+                      </div>
+                    );
+                  })}
+                  {(context?.manualContext?.affectDecisions ?? [])
+                    .filter((decision) => decision.action === 'add')
+                    .map((decision, index) => (
+                      <div key={decision.id} className="rounded-md border border-violet-200 p-3">
+                        <label className="flex items-start gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            name={`manualAddedAffectIncluded.${index}`}
+                            defaultChecked
+                            className="mt-0.5"
+                          />
+                          <span>
+                            <span className="block font-medium">{decision.name}</span>
+                            <span className="text-muted-foreground">Manual</span>
+                          </span>
+                        </label>
+                        <Input
+                          className="mt-2"
+                          name={`manualAddedAffectReason.${index}`}
+                          defaultValue={decision.reason}
+                          maxLength={500}
+                        />
+                      </div>
+                    ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-fit"
+                    onClick={() => setManualAffectAddOpen((open) => !open)}
+                  >
+                    Añadir afección
+                  </Button>
+                  {manualAffectAddOpen && (
+                    <div className="grid gap-2 rounded-md border border-dashed p-3 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="territorial-manual-affect-category">Categoría nueva</Label>
+                        <Input id="territorial-manual-affect-category" name="manualAffectCategory" />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="territorial-manual-affect-name">Afección nueva</Label>
+                        <Input id="territorial-manual-affect-name" name="manualAffectName" />
+                      </div>
+                      <div className="grid gap-2 sm:col-span-2">
+                        <Label htmlFor="territorial-manual-affect-reason">Motivo</Label>
+                        <Input
+                          id="territorial-manual-affect-reason"
+                          name="manualAffectAddReason"
+                          maxLength={500}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <label className="flex items-start gap-2 text-xs sm:col-span-2">
                   <input
@@ -317,15 +439,43 @@ export function TerritorialContextPanel({
                     </p>
                   </div>
                   <div className="bg-background rounded-lg border p-3">
-                    <p className="text-muted-foreground text-xs">Clasificación / categoría</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {context.classification?.label ?? 'Clasificación no determinada'}
-                    </p>
-                    {context.classification?.categoryCode && (
-                      <p className="mt-1 font-mono text-xs">
-                        {context.classification.code} · {context.classification.categoryCode}
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-muted-foreground text-xs">Clasificación / categoría</p>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setManualOpen(true)}>
+                        Editar clasificación
+                      </Button>
+                    </div>
+                    <div className="mt-1">
+                      <p className="text-[11px] font-semibold text-emerald-700">Clasificación automática</p>
+                      {context.automaticClassification ? (
+                        <>
+                        <p className="text-sm font-medium">{context.automaticClassification.label}</p>
+                        <p className="font-mono text-xs">
+                          {context.automaticClassification.code}
+                          {context.automaticClassification.categoryCode
+                            ? ` · ${context.automaticClassification.categoryCode}`
+                            : ''}
+                        </p>
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">No determinada</p>
+                      )}
+                    </div>
+                    <div className="mt-2 border-t pt-2">
+                      <p className="text-[11px] font-semibold text-violet-700">
+                        Clasificación manual · valor operativo cuando existe
                       </p>
-                    )}
+                      {context.manualContext?.classification ? (
+                        <>
+                        <p className="text-sm font-medium">{context.manualContext.classification}</p>
+                        {context.manualContext.category && (
+                          <p className="font-mono text-xs">{context.manualContext.category}</p>
+                        )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">Sin selección manual</p>
+                      )}
+                    </div>
                   </div>
                   <div className="bg-background rounded-lg border p-3">
                     <p className="text-muted-foreground text-xs">Planeamiento</p>
@@ -341,15 +491,95 @@ export function TerritorialContextPanel({
                 </div>
 
                 {context.classificationResolution && (
-                  <ClassificationResolutionPanel
-                    resolution={context.classificationResolution}
-                    selectedCandidateId={
-                      context.classificationResolution.finalSelection?.candidateId ??
-                      context.classificationResolution.automaticSelection?.candidateId
+                  <MapcentricWorkspace
+                    mapSlot={
+                      <ParcelMap
+                        geometry={context.parcelGeometry}
+                        coordinates={context.coordinates}
+                        candidates={context.classificationResolution.candidates}
+                        selectedCandidateId={activeCandidateId}
+                        onCandidateSelect={(candidateId) => setExploredCandidateId(candidateId)}
+                      />
+                    }
+                    activeZoneSlot={
+                      <div className="flex flex-col gap-4">
+                        {persistedCandidateId ? (
+                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 dark:bg-emerald-950/20">
+                            <div className="flex items-center gap-2 font-semibold text-emerald-900 dark:text-emerald-400 mb-2">
+                              <CheckCircle2 className="h-5 w-5" />
+                              Zona de trabajo confirmada
+                            </div>
+                            <p className="text-sm text-emerald-800 dark:text-emerald-300">
+                              Esta zona se está utilizando como ámbito territorial del expediente.
+                            </p>
+                            <form action={formAction} className="mt-3 flex flex-wrap gap-2">
+                              <input type="hidden" name="intent" value="manual" />
+                              <input type="hidden" name="actionAreaEdited" value="1" />
+                              <Button type="submit" name="actionAreaMode" value="revoke" variant="outline" size="sm" disabled={pending}>
+                                Volver a parcela completa
+                              </Button>
+                            </form>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-sky-200 bg-sky-50 p-4 dark:bg-sky-950/20">
+                            <h3 className="font-semibold text-sky-900 dark:text-sky-400">Parcela completa (Estado actual)</h3>
+                            <p className="mt-1 text-sm text-sky-800 dark:text-sky-300">
+                              {context.classificationResolution.candidates.length > 1
+                                ? 'Se han detectado varias zonas. Selecciona la zona sobre la que deseas trabajar haciendo clic en el mapa.'
+                                : 'No se ha fijado una zona de trabajo específica.'}
+                            </p>
+                          </div>
+                        )}
+
+                        {activeCandidateId && (() => {
+                          const candidate = context.classificationResolution!.candidates.find(c => c.id === activeCandidateId);
+                          if (!candidate) return null;
+                          return (
+                            <div className="flex flex-col gap-3">
+                              <ActiveZoneContext candidate={candidate} />
+
+                              {persistedCandidateId !== activeCandidateId && (
+                                <form action={formAction} className="flex justify-end border-t pt-3">
+                                  <input type="hidden" name="intent" value="manual" />
+                                  <input type="hidden" name="actionAreaEdited" value="1" />
+                                  <input type="hidden" name="actionAreaCandidateId" value={activeCandidateId} />
+                                  <input type="hidden" name="actionAreaValidated" value="on" />
+                                  <Button type="submit" name="actionAreaMode" value="detected_zone" disabled={pending}>
+                                    Fijar como Zona de Trabajo
+                                  </Button>
+                                  {persistedCandidateId && (
+                                    <Button type="button" variant="ghost" className="ml-2" onClick={() => setExploredCandidateId(undefined)} disabled={pending}>
+                                      Cancelar
+                                    </Button>
+                                  )}
+                                </form>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    }
+                    availableZonesSlot={
+                      <AvailableZonesSummary
+                        candidates={context.classificationResolution.candidates.filter(c => c.id !== activeCandidateId)}
+                        onSelect={(id) => setExploredCandidateId(id)}
+                      />
+                    }
+                    auditSlot={
+                      <GeometricAuditAccordion
+                        totalParcelArea={context.parcelSurfaceSquareMetres ?? 0}
+                        candidates={context.classificationResolution.candidates}
+                      />
                     }
                   />
                 )}
-                {!context.classificationResolution && (context.officialLinks?.length ?? 0) > 0 && (
+                {context && !context.classificationResolution && (
+                  <ParcelMap
+                    geometry={context.parcelGeometry}
+                    coordinates={context.coordinates}
+                  />
+                )}
+                {context && !context.classificationResolution && (context.officialLinks?.length ?? 0) > 0 && (
                   <div className="bg-background flex flex-wrap gap-3 rounded-lg border p-4 text-xs">
                     {context.officialLinks?.map((link) => (
                       <a
@@ -365,24 +595,34 @@ export function TerritorialContextPanel({
                   </div>
                 )}
 
-                <ParcelMap
-                  geometry={context.parcelGeometry}
-                  coordinates={context.coordinates}
-                />
-
                 <div className="bg-background rounded-lg border p-4">
-                  <h3 className="text-sm font-semibold">Afecciones positivas detectadas</h3>
-                  {context.affects.length ? (
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-sm font-semibold">Afecciones</h3>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setManualOpen(true)}>
+                      Editar afecciones
+                    </Button>
+                  </div>
+                  {displayedAutomaticAffects.length > 0 ? (
                     <ul className="mt-2 space-y-2 text-sm">
-                      {context.affects.map((affect, index) => (
-                        <li
-                          key={`${affect.category}-${affect.name}-${index}`}
-                          className="flex gap-2"
-                        >
+                      {displayedAutomaticAffects.map((affect) => {
+                        const decision = context.manualContext?.affectDecisions?.find(
+                          (item) => item.targetKey === affect.key
+                        );
+                        return (
+                        <li key={affect.key} className="flex gap-2">
                           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                          <span>{affect.name}</span>
+                          <span>
+                            {affect.name}
+                            <span className="text-muted-foreground block text-xs">
+                              Automática · {affect.source.toUpperCase()}
+                              {decision
+                                ? ` · ${decision.action === 'exclude' ? 'excluida operativamente' : 'confirmada manualmente'}`
+                                : ''}
+                            </span>
+                          </span>
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="text-muted-foreground mt-2 text-sm">
@@ -469,6 +709,17 @@ export function TerritorialContextPanel({
                         : 'no verificado'}
                     </p>
                   )}
+                  {(context.manualContext?.affectDecisions ?? [])
+                    .filter((decision) => decision.action === 'add')
+                    .map((decision) => (
+                      <div
+                        key={decision.id}
+                        className="mt-2 rounded-md border border-violet-200 bg-violet-50 p-2 text-sm"
+                      >
+                        <p>{decision.name}</p>
+                        <p className="text-xs text-violet-800">Manual · {decision.reason}</p>
+                      </div>
+                    ))}
                 </div>
 
               </>

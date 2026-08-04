@@ -1,5 +1,6 @@
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type {
+  ContextDetermination,
   PlanningDocumentReference,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types'
@@ -11,6 +12,8 @@ export interface NormativeSearchScope {
   documentNames?: string[]
   ordinance?: string
   planningZone?: string
+  actionAreaId?: string
+  actionAreaSelectionType?: string
   source: 'automatic' | 'technician_validated'
   confidence: 'confirmed' | 'probable' | 'unknown'
   reason: string
@@ -23,6 +26,9 @@ interface BuildNormativeSearchScopeInput {
     manualContext?: {
       ordinance?: string | null
       verification: 'unverified' | 'technician_validated'
+      ordinanceDetermination?: {
+        technician?: ContextDetermination<string>
+      }
     } | null
   } | null
   rawDetection?: unknown
@@ -92,13 +98,16 @@ export function buildNormativeSearchScope({
   const applicableDocuments = documents.filter(
     (document) => document.binding !== 'unverified_for_detected_area'
   )
-  const areaSpecificDocuments = applicableDocuments.filter(
-    (document) => document.binding === 'area_specific'
-  )
-  const manualOrdinance = detected?.manualContext?.ordinance?.trim()
+  const legacyManualOrdinance = detected?.manualContext?.ordinance?.trim()
+  const ordinanceDetermination = detected?.manualContext?.ordinanceDetermination?.technician
+  const manualOrdinance = ordinanceDetermination?.value.trim() || legacyManualOrdinance
   const technicianValidated = Boolean(
-    manualOrdinance && detected?.manualContext?.verification === 'technician_validated'
+    manualOrdinance &&
+      (ordinanceDetermination?.verification === 'technician_validated' ||
+        (!ordinanceDetermination &&
+          detected?.manualContext?.verification === 'technician_validated'))
   )
+  const pendingManualOrdinance = Boolean(manualOrdinance && !technicianValidated)
   const automaticOrdinance =
     !manualOrdinance &&
     context.qualification?.source !== 'manual' &&
@@ -106,25 +115,65 @@ export function buildNormativeSearchScope({
       ? context.qualification.value.trim()
       : undefined
   const ordinance = technicianValidated ? manualOrdinance : automaticOrdinance
-  const scopedDocuments = ordinance ? applicableDocuments : areaSpecificDocuments
+  // La PKB ya ha vinculado estos documentos al identificador estable del
+  // instrumento seleccionado. Delimitan el universo de búsqueda, pero no
+  // prueban por sí solos un parámetro urbanístico concreto.
+  const scopedDocuments = applicableDocuments
   const documentNames = unique(scopedDocuments.map(corpusDocumentName))
   const documentIds = unique(scopedDocuments.map((document) => document.id))
   const planningZone = context.planningArea?.value.trim()
+  const actionAreaId = context.actionArea?.value.id
+  const actionAreaSelectionType = context.actionArea?.value.selectionType
+  const actionAreaValidated =
+    !context.actionArea || context.actionArea.verification === 'confirmed'
+  const actionAreaScope = { actionAreaId, actionAreaSelectionType }
 
   if (!municipioCodigo) {
     return {
       municipioCodigo,
       instrumentId,
+      ...actionAreaScope,
       source: technicianValidated ? 'technician_validated' : 'automatic',
       confidence: 'unknown',
       reason: 'No existe un código INE municipal oficial para limitar el corpus.',
     }
   }
 
-  if (ordinance && ordinance.length >= 2) {
+  if (!actionAreaValidated) {
     return {
       municipioCodigo,
       instrumentId,
+      documentIds: documentIds.length > 0 ? documentIds : undefined,
+      documentNames: documentNames.length > 0 ? documentNames : undefined,
+      planningZone,
+      ...actionAreaScope,
+      source: 'automatic',
+      confidence: 'unknown',
+      reason:
+        'El área de actuación seleccionada sigue pendiente de validación técnica y no puede habilitar parámetros urbanísticos concretos.',
+    }
+  }
+
+  if (pendingManualOrdinance) {
+    return {
+      municipioCodigo,
+      instrumentId,
+      ...actionAreaScope,
+      documentIds: documentIds.length > 0 ? documentIds : undefined,
+      documentNames: documentNames.length > 0 ? documentNames : undefined,
+      planningZone,
+      source: 'automatic',
+      confidence: 'unknown',
+      reason:
+        'La ordenanza seleccionada manualmente sigue pendiente de validación técnica y no puede habilitar parámetros urbanísticos concretos.',
+    }
+  }
+
+  if (ordinance) {
+    return {
+      municipioCodigo,
+      instrumentId,
+      ...actionAreaScope,
       documentIds: documentIds.length > 0 ? documentIds : undefined,
       documentNames: documentNames.length > 0 ? documentNames : undefined,
       ordinance,
@@ -143,18 +192,22 @@ export function buildNormativeSearchScope({
     return {
       municipioCodigo,
       instrumentId,
+      ...actionAreaScope,
       documentIds,
       documentNames,
       planningZone,
       source: 'automatic',
       confidence: automaticScopeConfidence(context),
-      reason: 'Existe documentación oficial vinculada específicamente al ámbito detectado.',
+      reason: planningZone
+        ? `La ordenanza aplicable al ámbito ${planningZone} está pendiente de confirmación técnica.`
+        : 'La ordenanza aplicable está pendiente de confirmación técnica.',
     }
   }
 
   return {
     municipioCodigo,
     instrumentId,
+    ...actionAreaScope,
     planningZone,
     source: technicianValidated ? 'technician_validated' : 'automatic',
     confidence: 'unknown',
@@ -166,8 +219,8 @@ export function buildNormativeSearchScope({
 
 export function canSearchConcreteParameters(scope: NormativeSearchScope) {
   return Boolean(
-    scope.municipioCodigo &&
+      scope.municipioCodigo &&
       scope.confidence !== 'unknown' &&
-      (scope.ordinance || scope.documentNames?.length)
+      scope.ordinance
   )
 }

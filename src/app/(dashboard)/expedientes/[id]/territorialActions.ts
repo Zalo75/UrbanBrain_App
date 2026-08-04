@@ -13,6 +13,12 @@ import {
   officialContextForUse,
 } from '@/application/territorial-resolver/territorialContinuity';
 import { territorialAffectKey } from '@/application/territorial-resolver/manualTerritorialContext';
+import {
+  actionAreaParcelSurface,
+  createDetectedZoneActionArea,
+  createWholeParcelActionArea,
+  revokeActionAreaSelection,
+} from '@/application/territorial-resolver/actionAreaSelection';
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView';
 import type {
   ManualAffectDecision,
@@ -23,7 +29,8 @@ import { db } from '@/infrastructure/db/client';
 import { expedientes } from '@/infrastructure/db/schema';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
 import { createTechnicianDetermination } from '@/domain/territorial-resolver/determinations';
-import type { ContextDetermination, ContextDeterminationState } from '@/domain/territorial-resolver/types';
+import type { ContextDetermination } from '@/domain/territorial-resolver/types';
+import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter';
 
 function updateDetermination<T>(
   newValue: T | undefined,
@@ -99,7 +106,9 @@ export async function resolveTerritorialContextAction(
   const manualCategory = limitedText(formData, 'manualCategory', 80);
   const manualArea = limitedText(formData, 'manualArea', 100);
   const manualOrdinance = limitedText(formData, 'manualOrdinance', 100);
+  const revokeManualOrdinance = formData.get('manualOrdinanceRevoke') === 'on';
   const manualObservations = limitedText(formData, 'manualObservations', 1000);
+  const actionAreaEdited = formData.get('actionAreaEdited') === '1';
   const hasManualData = Boolean(
     cadastralReference ||
       address ||
@@ -109,7 +118,9 @@ export async function resolveTerritorialContextAction(
       manualCategory ||
       manualArea ||
       manualOrdinance ||
-      manualObservations
+      revokeManualOrdinance ||
+      manualObservations ||
+      actionAreaEdited
   );
 
   if (
@@ -147,6 +158,7 @@ export async function resolveTerritorialContextAction(
       const authorizedInputs = await loadAuthorizedParcelInputs(expedienteId, access.userId);
       const previousRaw = authorizedInputs?.latestDetectionRaw as TerritorialResolution | undefined;
       const previousManual = previousRaw?.continuity?.manualContext;
+      const effectiveOfficial = previousRaw ? officialContextForUse(previousRaw) : undefined;
       let affectDecisions: ManualAffectDecision[] = previousManual?.affectDecisions ?? [];
       if (formData.get('manualAffectsEdited') === '1') {
         const automaticAffects = effectiveOfficialContext(previousRaw)?.affects.detected ?? [];
@@ -232,28 +244,148 @@ export async function resolveTerritorialContextAction(
       }
       const classTech = updateDetermination(manualClassification || undefined, access.userId, authorizedInputs?.detected?.classificationDetermination?.automatic?.value, technicianValidated, recordedAt);
       const catTech = updateDetermination(manualCategory || undefined, access.userId, authorizedInputs?.detected?.categoryDetermination?.automatic?.value, technicianValidated, recordedAt);
-      const ordTech = updateDetermination(manualOrdinance || undefined, access.userId, authorizedInputs?.detected?.ordinanceDetermination?.automatic?.value, technicianValidated, recordedAt);
+      const existingOrdinance = previousManual?.ordinance;
+      const ordinanceChanged = manualOrdinance !== existingOrdinance;
+      const ordTech = revokeManualOrdinance
+        ? undefined
+        : manualOrdinance &&
+            (ordinanceChanged || !previousManual?.ordinanceDetermination?.technician)
+          ? updateDetermination(
+              manualOrdinance,
+              access.userId,
+              authorizedInputs?.detected?.ordinanceDetermination?.automatic?.value,
+              technicianValidated,
+              recordedAt
+            )
+          : previousManual?.ordinanceDetermination?.technician;
+      const effectiveManualOrdinance = revokeManualOrdinance
+        ? undefined
+        : manualOrdinance || existingOrdinance;
+
+      let actionAreaSelection = previousManual?.actionAreaSelection;
+      let actionAreaChanged = false;
+      if (actionAreaEdited) {
+        const actionAreaMode = textValue(formData, 'actionAreaMode');
+        const requestedAreaValidation = formData.get('actionAreaValidated') === 'on';
+        const actionAreaValidated = requestedAreaValidation &&
+          hasOrganizationPermission(access.membershipRole, 'context.technical_review');
+        if (requestedAreaValidation && !actionAreaValidated) {
+          return {
+            status: 'error',
+            message: 'Tu rol permite seleccionar un área, pero no validarla como técnico.',
+          };
+        }
+        const areaVerification = actionAreaValidated ? 'technician_validated' : 'unverified';
+        if (actionAreaMode === 'detected_zone') {
+          const candidateId = textValue(formData, 'actionAreaCandidateId');
+          const candidate = effectiveOfficial?.planning.classificationResolution?.candidates.find(
+            (item) => item.id === candidateId
+          );
+          if (!candidate?.parcelCoverage?.intersectionGeometry) {
+            return {
+              status: 'error',
+              message: 'La zona seleccionada no dispone de una geometría oficial utilizable.',
+            };
+          }
+          const areaAffects = await new IdegAffectAdapter().findAffects({
+            geometry: candidate.parcelCoverage.intersectionGeometry,
+          });
+          actionAreaSelection = createDetectedZoneActionArea({
+            candidate,
+            selectedBy: access.userId,
+            selectedAt: recordedAt,
+            verification: areaVerification,
+            affects: areaAffects,
+            previous: previousManual?.actionAreaSelection,
+          });
+          if (!actionAreaSelection) {
+            return {
+              status: 'error',
+              message: 'No se ha podido construir el área de actuación desde la zona detectada.',
+            };
+          }
+          actionAreaChanged =
+            previousManual?.actionAreaSelection?.current?.selectedCandidateId !== candidateId;
+        } else if (actionAreaMode === 'whole_parcel') {
+          const geometry = effectiveOfficial?.parcelGeometry;
+          const surfaceSquareMetres = actionAreaParcelSurface(effectiveOfficial);
+          if (!geometry || !surfaceSquareMetres) {
+            return {
+              status: 'error',
+              message: 'La parcela completa no dispone de geometría y superficie calculada.',
+            };
+          }
+          actionAreaSelection = createWholeParcelActionArea({
+            geometry,
+            surfaceSquareMetres,
+            selectedBy: access.userId,
+            selectedAt: recordedAt,
+            verification: areaVerification,
+            affects: effectiveOfficial.affects,
+            previous: previousManual?.actionAreaSelection,
+          });
+          actionAreaChanged =
+            previousManual?.actionAreaSelection?.current?.selectionType !== 'whole_parcel';
+        } else if (actionAreaMode === 'revoke') {
+          actionAreaSelection = revokeActionAreaSelection(
+            previousManual?.actionAreaSelection,
+            access.userId,
+            recordedAt
+          );
+          actionAreaChanged = Boolean(previousManual?.actionAreaSelection?.current);
+        } else {
+          return { status: 'error', message: 'La selección del área de actuación no es válida.' };
+        }
+      }
+
+      const preservedManual = actionAreaEdited ? previousManual : undefined;
+      const finalManualOrdinance = actionAreaChanged
+        ? undefined
+        : (effectiveManualOrdinance ?? preservedManual?.ordinance);
+      const finalOrdinanceDetermination = actionAreaChanged
+        ? undefined
+        : (ordTech ?? preservedManual?.ordinanceDetermination?.technician);
+      const finalAffectDecisions = actionAreaChanged ? [] : affectDecisions;
 
       const manualContext: ManualTerritorialContext = {
-        cadastralReference: cadastralReference ?? undefined,
-        municipality: manualMunicipality || undefined,
-        address: address || undefined,
-        coordinates: input.coordinates,
-        classification: manualClassification || undefined,
-        category: manualCategory || undefined,
-        area: manualArea || undefined,
-        ordinance: manualOrdinance || undefined,
-        observations: manualObservations || undefined,
-        classificationDetermination: classTech ? { technician: classTech } : undefined,
-        categoryDetermination: catTech ? { technician: catTech } : undefined,
-        ordinanceDetermination: ordTech ? { technician: ordTech } : undefined,
-        affectDecisions,
+        cadastralReference: cadastralReference ?? preservedManual?.cadastralReference,
+        municipality: manualMunicipality || preservedManual?.municipality,
+        address: address || preservedManual?.address,
+        coordinates: input.coordinates ?? preservedManual?.coordinates,
+        classification: manualClassification || preservedManual?.classification,
+        category: manualCategory || preservedManual?.category,
+        area: manualArea || preservedManual?.area,
+        ordinance: finalManualOrdinance,
+        observations: manualObservations || preservedManual?.observations,
+        classificationDetermination: classTech
+          ? { technician: classTech }
+          : preservedManual?.classificationDetermination,
+        categoryDetermination: catTech
+          ? { technician: catTech }
+          : preservedManual?.categoryDetermination,
+        ordinanceDetermination: finalOrdinanceDetermination
+          ? { technician: finalOrdinanceDetermination }
+          : undefined,
+        actionAreaSelection,
+        affectDecisions: finalAffectDecisions,
         urbanisticFacts: previousManual?.urbanisticFacts,
         provenance: 'manual',
-        verification: technicianValidated ? 'technician_validated' : 'unverified',
+        verification: actionAreaEdited
+          ? (previousManual?.verification ?? 'unverified')
+          : technicianValidated
+            ? 'technician_validated'
+            : 'unverified',
         recordedAt,
-        validatedAt: technicianValidated ? recordedAt : undefined,
-        validatedBy: technicianValidated ? access.userId : undefined,
+        validatedAt: actionAreaEdited
+          ? previousManual?.validatedAt
+          : technicianValidated
+            ? recordedAt
+            : undefined,
+        validatedBy: actionAreaEdited
+          ? previousManual?.validatedBy
+          : technicianValidated
+            ? access.userId
+            : undefined,
       };
       result = await engine.recordManualContext(
         expedienteId,

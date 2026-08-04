@@ -4,7 +4,12 @@ import {
   getProvinceNameById,
   resolveMunicipalityIdentity,
 } from '@/shared/territory'
-import type { UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
+import type {
+  ActionAreaSelectionState,
+  ManualTerritorialContext,
+  ParcelGeometry,
+  UrbanisticRegimeFacts,
+} from '@/domain/territorial-resolver/types'
 import type {
   NormalizedParcelContext,
   ParcelContextField,
@@ -13,13 +18,14 @@ import type {
   ParcelCoordinates,
 } from '@/domain/parcel-context/types'
 import { getEffectiveDetermination } from '@/domain/territorial-resolver/determinations'
-import type { ContextDetermination, ContextDeterminationState } from '@/domain/territorial-resolver/types'
+import type { ContextDeterminationState } from '@/domain/territorial-resolver/types'
 
 export interface ParcelExpedienteInput {
   refCatastral?: string | null
   address?: string | null
   lat?: number | null
   lng?: number | null
+  parcelGeometry?: ParcelGeometry | null
   municipio?: string | null
   province?: string | null
   landClass?: string | null
@@ -31,6 +37,7 @@ export interface ParcelExpedienteInput {
 export interface DetectedParcelInput {
   cadastralReference?: string | null
   parcelReference?: string | null
+  parcelGeometry?: ParcelGeometry | null
   provinceId?: string | null
   provinceName?: string | null
   municipalityId?: string | null
@@ -53,6 +60,7 @@ export interface DetectedParcelInput {
   locationConfidence?: 'high' | 'medium' | 'low' | null
   planningWarnings?: Array<{ code: string; message: string }> | null
   planningConflicts?: string[] | null
+  parcelPlanningConflicts?: string[] | null
   classificationDetermination?: ContextDeterminationState<string>
   categoryDetermination?: ContextDeterminationState<string>
   ordinanceDetermination?: ContextDeterminationState<string>
@@ -62,24 +70,14 @@ export interface DetectedParcelInput {
       name: string
       confidence?: 'high' | 'medium' | 'low'
     }>
+    parcel?: Array<{
+      category: string
+      name: string
+      confidence?: 'high' | 'medium' | 'low'
+    }>
   } | null
-  manualContext?: {
-    cadastralReference?: string | null
-    municipality?: string | null
-    address?: string | null
-    coordinates?: ParcelCoordinates | null
-    classification?: string | null
-    category?: string | null
-    area?: string | null
-    ordinance?: string | null
-    observations?: string | null
-    classificationDetermination?: { technician?: ContextDetermination<string> }
-    categoryDetermination?: { technician?: ContextDetermination<string> }
-    ordinanceDetermination?: { technician?: ContextDetermination<string> }
-    provenance: 'manual'
-    verification: 'unverified' | 'technician_validated'
-    recordedAt: string
-  } | null
+  manualContext?: ManualTerritorialContext | null
+  actionAreaSelection?: ActionAreaSelectionState | null
   reliability?: {
     mode:
       | 'current_official'
@@ -134,6 +132,32 @@ export function normalizeComparable(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+function landClassFamily(value: string) {
+  const normalized = normalizeComparable(value)
+  if (
+    normalized === 'su' ||
+    normalized === 'suc' ||
+    normalized === 'susc' ||
+    normalized === 'sunc' ||
+    normalized === 'urbano' ||
+    normalized.startsWith('urbano ')
+  ) {
+    return 'urbano'
+  }
+  if (normalized === 'sur' || normalized === 'urbanizable' || normalized.startsWith('urbanizable ')) {
+    return 'urbanizable'
+  }
+  if (normalized === 'sr' || normalized === 'rustico' || normalized.includes('no urbanizable')) {
+    return 'rustico'
+  }
+  if (normalized === 'nr' || normalized.includes('nucleo rural')) return 'nucleo_rural'
+  return normalized
+}
+
+function landClassesAreCompatible(first: string, second: string) {
+  return landClassFamily(first) === landClassFamily(second)
 }
 
 export function normalizeCadastralReference(value: string | null | undefined): string | null {
@@ -280,6 +304,7 @@ export function buildNormalizedParcelContext(
   const context: NormalizedParcelContext = {
     canAnswerConcreteParameters: detected?.planningCanAnswerConcreteParameters === true,
     urbanisticFacts: detected?.urbanisticFacts ?? undefined,
+    parcelGeometry: detected?.parcelGeometry ?? undefined,
     knownConstraints: [],
     conflicts: [],
     pendingValidation: [],
@@ -533,7 +558,11 @@ export function buildNormalizedParcelContext(
           : effectiveLandClassDet?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
     )
   }
-  if (expediente.landClass && detected?.landClass) {
+  if (
+    expediente.landClass &&
+    detected?.landClass &&
+    !landClassesAreCompatible(expediente.landClass, detected.landClass)
+  ) {
     addConflict(
       context,
       'landClass',
@@ -542,7 +571,11 @@ export function buildNormalizedParcelContext(
       'La detección territorial y el expediente indican clases de suelo distintas.'
     )
   }
-  if (expediente.landClass && conversation.landClass) {
+  if (
+    expediente.landClass &&
+    conversation.landClass &&
+    !landClassesAreCompatible(expediente.landClass, conversation.landClass)
+  ) {
     addConflict(
       context,
       'landClass',
@@ -687,8 +720,23 @@ export function buildNormalizedParcelContext(
       constraint.source ?? undefined
     )
   )
+  context.parcelKnownConstraints = detected?.affects?.parcel?.length
+    ? detected.affects.parcel.map((affect) =>
+        field(
+          `${affect.category}: ${affect.name}`,
+          'ideg',
+          affect.confidence === 'high' ? 0.95 : affect.confidence === 'medium' ? 0.75 : 0.55,
+          affect.confidence === 'high' ? 'confirmed' : 'unverified'
+        )
+      )
+    : [...context.knownConstraints]
 
   const manual = detected?.manualContext
+  const manualOrdinanceDetermination = manual?.ordinanceDetermination?.technician
+  const automaticOrdinanceDetermination = detected?.ordinanceDetermination?.automatic
+  const manualOrdinance = manualOrdinanceDetermination?.value.trim() || manual?.ordinance?.trim()
+  const manualOrdinanceVerification =
+    manualOrdinanceDetermination?.verification ?? manual?.verification
   const manualVerification: ParcelContextVerification =
     manual?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
   const manualConfidence = manual?.verification === 'technician_validated' ? 0.85 : 0.55
@@ -711,7 +759,11 @@ export function buildNormalizedParcelContext(
       'El municipio manual no coincide con el contexto oficial conservado.'
     )
   }
-  if (manual?.classification?.trim() && context.landClass) {
+  if (
+    manual?.classification?.trim() &&
+    context.landClass &&
+    !landClassesAreCompatible(context.landClass.value, manual.classification.trim())
+  ) {
     addConflict(
       context,
       'landClass',
@@ -720,12 +772,16 @@ export function buildNormalizedParcelContext(
       'La clasificacion manual no coincide con el contexto oficial conservado.'
     )
   }
-  if (manual?.ordinance?.trim() && context.qualification) {
+  if (
+    manualOrdinance &&
+    automaticOrdinanceDetermination?.source === 'siotuga' &&
+    automaticOrdinanceDetermination.value.trim() !== manualOrdinance
+  ) {
     addConflict(
       context,
       'qualification',
-      context.qualification.value,
-      manual.ordinance.trim(),
+      automaticOrdinanceDetermination.value,
+      manualOrdinance,
       'La ordenanza manual no coincide con el contexto oficial conservado.'
     )
   }
@@ -785,13 +841,13 @@ export function buildNormalizedParcelContext(
       manual.recordedAt
     )
   }
-  if (!context.qualification && manual?.ordinance?.trim()) {
+  if (manualOrdinance) {
     context.qualification = field(
-      manual.ordinance.trim(),
+      manualOrdinance,
       'manual',
-      manualConfidence,
-      manualVerification,
-      manual.recordedAt
+      manualOrdinanceVerification === 'technician_validated' ? 0.95 : manualConfidence,
+      manualOrdinanceVerification === 'technician_validated' ? 'confirmed' : 'unverified',
+      manual?.recordedAt
     )
   }
   if (!context.planningArea && manual?.area?.trim()) {
@@ -817,6 +873,133 @@ export function buildNormalizedParcelContext(
     context.pendingValidation.push(
       'El contexto incluye datos manuales no verificados; no pueden habilitar parametros urbanisticos concretos.'
     )
+  }
+
+  const actionArea = detected?.actionAreaSelection?.current ?? manual?.actionAreaSelection?.current
+  if (actionArea) {
+    const actionAreaVerification: ParcelContextVerification =
+      actionArea.verification === 'technician_validated' ? 'confirmed' : 'unverified'
+    const actionAreaConfidence =
+      actionArea.confidence === 'high' ? 0.95 : actionArea.confidence === 'medium' ? 0.75 : 0.55
+    context.actionArea = field(
+      actionArea,
+      'manual',
+      actionAreaConfidence,
+      actionAreaVerification,
+      actionArea.selectedAt
+    )
+    context.parcelSurfaceSquareMetres = actionArea.parcelSurfaceSquareMetres
+
+    if (actionArea.selectionType === 'detected_zone') {
+      const selectedLandClass =
+        actionArea.classification === 'SU'
+          ? actionArea.category === 'SUSC' || actionArea.category === 'SUNC'
+            ? 'urbano_no_consolidado'
+            : actionArea.category === 'SUC'
+              ? 'urbano_consolidado'
+              : 'urbano'
+          : actionArea.classification === 'SNR'
+            ? 'nucleo_rural'
+            : actionArea.classification === 'SR'
+              ? 'rustico'
+              : actionArea.classification
+      if (selectedLandClass) {
+        context.landClass = field(
+          selectedLandClass,
+          'manual',
+          actionAreaConfidence,
+          actionAreaVerification,
+          actionArea.selectedAt
+        )
+      }
+      context.planningArea = actionArea.planningZone
+        ? field(
+          actionArea.planningZone,
+          'manual',
+          actionAreaConfidence,
+          actionAreaVerification,
+          actionArea.selectedAt
+        )
+        : undefined
+      if (context.urbanisticFacts && actionArea.classification) {
+        const factStatus = actionArea.verification === 'technician_validated'
+          ? 'technician_validated' as const
+          : 'manual_review_required' as const
+        context.urbanisticFacts = {
+          ...context.urbanisticFacts,
+          classification: {
+            ...context.urbanisticFacts.classification,
+            value: {
+              code: actionArea.classification,
+              label: context.urbanisticFacts.classification.value?.code === actionArea.classification
+                ? context.urbanisticFacts.classification.value.label
+                : actionArea.classification,
+            },
+            status: factStatus,
+            origin: 'technician_selection',
+            confidence: actionArea.confidence,
+            discrepancies: [],
+          },
+          category: actionArea.category
+            ? {
+                ...context.urbanisticFacts.category,
+                value: {
+                  code: actionArea.category,
+                  label: context.urbanisticFacts.category.value?.code === actionArea.category
+                    ? context.urbanisticFacts.category.value.label
+                    : actionArea.category,
+                },
+                status: factStatus,
+                origin: 'technician_selection',
+                confidence: actionArea.confidence,
+                discrepancies: [],
+              }
+            : {
+                ...context.urbanisticFacts.category,
+                value: undefined,
+                label: undefined,
+                status: 'not_available',
+                confidence: 'unknown',
+                origin: 'technician_selection',
+                discrepancies: [],
+                nextAction: 'review_official_sources',
+              },
+        }
+      }
+      if (actionArea.affects) {
+        context.knownConstraints = actionArea.affects.detected.map((affect) =>
+          field(
+            `${affect.category}: ${affect.name}`,
+            affect.evidence.source,
+            affect.confidence === 'high' ? 0.95 : affect.confidence === 'medium' ? 0.75 : 0.55,
+            affect.confidence === 'high' ? 'confirmed' : 'unverified',
+            affect.evidence.method
+          )
+        )
+      }
+      if (!actionArea.planningZone && (actionArea.planningZones?.length ?? 0) > 1) {
+        context.pendingValidation.push(
+          'El área de actuación seleccionada incluye varios ámbitos y requiere concretar el ámbito operativo.'
+        )
+      }
+    }
+    if (actionArea.verification !== 'technician_validated') {
+      context.canAnswerConcreteParameters = false
+      context.pendingValidation.push(
+        'El área de actuación seleccionada está pendiente de validación técnica.'
+      )
+    }
+  }
+  if (
+    manualOrdinanceVerification === 'technician_validated' &&
+    context.municipality?.verification === 'confirmed' &&
+    context.landClass?.verification === 'confirmed' &&
+    context.qualification?.verification === 'confirmed' &&
+    context.planningArea?.verification === 'confirmed' &&
+    context.planningInstrument?.verification === 'confirmed' &&
+    context.validity?.verification === 'confirmed'
+  ) {
+    context.canAnswerConcreteParameters = true
   }
   if (context.reliability?.usingPreviousOfficialContext) {
     context.pendingValidation.push(
@@ -866,6 +1049,14 @@ export function buildNormalizedParcelContext(
       values: [],
       reason: planningConflict,
     })
+  }
+  if (
+    (detected?.actionAreaSelection?.current || detected?.manualContext?.actionAreaSelection?.current) &&
+    (detected?.parcelPlanningConflicts?.length ?? 0) > 0
+  ) {
+    context.pendingValidation.push(
+      'La parcela catastral completa contiene varios regímenes; el contexto operativo se limita al área de actuación seleccionada.'
+    )
   }
 
   return context

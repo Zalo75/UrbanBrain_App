@@ -1,4 +1,8 @@
-import type { UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
+import type {
+  ActionAreaSelection,
+  ParcelGeometry,
+  UrbanisticRegimeFacts,
+} from '@/domain/territorial-resolver/types'
 
 export type ParcelContextSource =
   | 'expediente'
@@ -46,6 +50,10 @@ export interface NormalizedParcelContext {
   technicalNotes?: ParcelContextField<string>
   canAnswerConcreteParameters?: boolean
   urbanisticFacts?: UrbanisticRegimeFacts
+  actionArea?: ParcelContextField<ActionAreaSelection>
+  parcelGeometry?: ParcelGeometry
+  parcelSurfaceSquareMetres?: number
+  parcelKnownConstraints?: Array<ParcelContextField<string>>
   knownConstraints: Array<ParcelContextField<string>>
   conflicts: ParcelConflict[]
   pendingValidation: string[]

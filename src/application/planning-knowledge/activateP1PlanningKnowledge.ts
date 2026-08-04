@@ -55,6 +55,13 @@ export function activateP1PlanningKnowledge(
       : new Set<string>()
   const municipalities = draft.municipalities.map((municipality) => {
     if (!candidateCodes.has(municipality.municipalityCode)) return municipality
+    const currentInstrumentId = municipality.currentInstrumentCandidates[0]
+    const hasCurrentInstrumentDocuments = municipality.normativeDocuments.some(
+      (document) =>
+        document.instrumentId === currentInstrumentId &&
+        document.validationStatus !== 'invalid' &&
+        document.corpusDocumentNames.length > 0
+    )
     return {
       ...municipality,
       activation: {
@@ -65,9 +72,11 @@ export function activateP1PlanningKnowledge(
         classification: true,
         category: true,
         zoneOrOrdinance: false,
-        normativeDocument: false,
+        normativeDocument: hasCurrentInstrumentDocuments,
         endToEndParameters: false,
-        blockers: ['lot_1_regime_to_document_not_activated'],
+        blockers: hasCurrentInstrumentDocuments
+          ? ['zone_or_ordinance_not_resolved']
+          : ['instrument_document_inventory_missing'],
       },
     }
   })

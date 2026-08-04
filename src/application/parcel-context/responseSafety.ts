@@ -5,6 +5,7 @@ import type {
   NormativeHierarchyLevel,
   SafeAnswerContract,
 } from '@/domain/parcel-context/types'
+import type { UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import {
   NORMATIVE_HIERARCHY,
   requiresDeterminedParcelRegime,
@@ -31,6 +32,240 @@ function isUsableUrbanisticFactStatus(status?: string) {
   return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated'
 }
 
+type StructuredParcelFactTopic =
+  | 'classification'
+  | 'category'
+  | 'municipality'
+  | 'area'
+  | 'coordinates'
+  | 'affects'
+
+export interface StructuredParcelFactAnswer {
+  answer: string
+  hasConflict: boolean
+}
+
+const NORMATIVE_CONSEQUENCE_PATTERN =
+  /\b(?:implica|consecuencias?|deberes?|licencias?|art[ií]culos?|normativa|edificabilidad|ocupaci[oó]n|alturas?|retranqueos?|parcela\s+m[ií]nima|usos?\s+(?:permitidos?|compatibles?|prohibidos?|urban[ií]sticos?)|par[aá]metros?\s+urban[ií]sticos?)\b/i
+
+function requestedStructuredFactTopics(question: string): Set<StructuredParcelFactTopic> | null {
+  if (NORMATIVE_CONSEQUENCE_PATTERN.test(question)) return null
+
+  const topics = new Set<StructuredParcelFactTopic>()
+  if (/\bclasificaci[oó]n(?:\s+(?:urban[ií]stica|del\s+suelo))?\b/i.test(question)) {
+    topics.add('classification')
+  }
+  if (/\bcategor[ií]a(?:\s+del\s+suelo)?\b/i.test(question)) topics.add('category')
+  if (/\bmunicipio\b|\bc[oó]digo\s+ine\b|\bine\b/i.test(question)) topics.add('municipality')
+  if (/\b[aá]mbito\b|\bzona\s+(?:urban[ií]stica|detectada)\b/i.test(question)) topics.add('area')
+  if (/\bcoordenadas?\b|\blatitud\b|\blongitud\b/i.test(question)) topics.add('coordinates')
+  if (/\bafecciones?(?:\s+detectadas?)?\b/i.test(question)) topics.add('affects')
+
+  return topics.size > 0 ? topics : null
+}
+
+function readableSource(source?: string) {
+  const labels: Record<string, string> = {
+    catastro: 'Catastro',
+    cartociudad: 'CartoCiudad',
+    siotuga: 'SIOTUGA',
+    ideg: 'Cartografía oficial de Galicia (IDEG)',
+    urbanbrain: 'UrbanBrain',
+    expediente: 'expediente',
+    manual: 'selección manual',
+    territory_catalogue: 'catálogo territorial',
+    conversation: 'conversación',
+    automatic_source: 'fuente oficial automática',
+    official_document: 'documentación oficial',
+    spatial_intersection: 'intersección espacial',
+    structured_catalog: 'catálogo estructurado',
+    technician_selection: 'selección técnica',
+    technician_confirmation: 'confirmación técnica',
+    conditional_scenario: 'escenario condicionado',
+  }
+  return source ? labels[source] ?? source : 'no indicada'
+}
+
+function readableConfidence(confidence?: string | number) {
+  if (typeof confidence === 'number') return confidenceLabel(confidence)
+  if (confidence === 'high') return 'alta'
+  if (confidence === 'medium') return 'media'
+  if (confidence === 'low') return 'baja'
+  return 'no determinada'
+}
+
+function factSource(
+  fact: Pick<UrbanisticRegimeFacts['classification'], 'evidence' | 'origin'>
+) {
+  const sources = unique(fact.evidence.map((item) => item.source))
+  if (fact.origin === 'spatial_intersection') {
+    return sources.includes('siotuga')
+      ? 'intersección espacial con cartografía oficial de SIOTUGA'
+      : `intersección espacial con cartografía oficial${sources.length ? ` (${sources.map(readableSource).join(', ')})` : ''}`
+  }
+  if (sources.length > 0) return sources.map(readableSource).join(', ')
+  return fact.origin ? readableSource(fact.origin) : 'no indicada'
+}
+
+function explicitStructuredConflicts(
+  context: NormalizedParcelContext,
+  topics: Set<StructuredParcelFactTopic>
+) {
+  const facts = context.urbanisticFacts
+  if (!facts) return []
+  const selected = [
+    ...(topics.has('classification')
+      ? [{ fact: facts.classification, fields: ['classification'] as const }]
+      : []),
+    ...(topics.has('category')
+      ? [{ fact: facts.category, fields: ['category'] as const }]
+      : []),
+  ]
+  const seen = new Set<string>()
+
+  return selected.flatMap(({ fact, fields }) =>
+    fact.discrepancies.flatMap((discrepancy) => {
+      if (!(fields as readonly string[]).includes(discrepancy.field)) return []
+      const assertions = discrepancy.assertions.filter(
+        (assertion, index, all) =>
+          all.findIndex(
+            (candidate) =>
+              candidate.value.toLocaleLowerCase('es') === assertion.value.toLocaleLowerCase('es') &&
+              candidate.source === assertion.source
+          ) === index
+      )
+      const distinctValues = new Set(
+        assertions.map((assertion) => assertion.value.toLocaleLowerCase('es'))
+      )
+      if (assertions.length < 2 || distinctValues.size < 2) return []
+      const key = `${discrepancy.field}:${assertions
+        .map((assertion) => `${assertion.value}:${assertion.source}`)
+        .join('|')}`
+      if (seen.has(key)) return []
+      seen.add(key)
+      return [{ field: discrepancy.field, explanation: discrepancy.explanation, assertions }]
+    })
+  )
+}
+
+function enumeratedTerritorialConflictLines(context: NormalizedParcelContext) {
+  return explicitStructuredConflicts(
+    context,
+    new Set<StructuredParcelFactTopic>(['classification', 'category'])
+  ).flatMap((conflict) => [
+    conflict.explanation,
+    ...conflict.assertions.map(
+      (assertion, index) =>
+        `Valor ${String.fromCharCode(65 + index)}: ${assertion.value}. Fuente: ${readableSource(assertion.source)}.`
+    ),
+  ])
+}
+
+export function buildStructuredParcelFactAnswer(
+  question: string,
+  context: NormalizedParcelContext
+): StructuredParcelFactAnswer | null {
+  const topics = requestedStructuredFactTopics(question)
+  if (!topics) return null
+
+  const explicitConflicts = explicitStructuredConflicts(context, topics)
+  if (explicitConflicts.length > 0) {
+    const lines = ['Conflicto territorial comprobado:']
+    for (const conflict of explicitConflicts) {
+      lines.push(`- ${conflict.explanation}`)
+      conflict.assertions.forEach((assertion, index) => {
+        lines.push(`  - Valor ${String.fromCharCode(65 + index)}: ${assertion.value}. Fuente: ${readableSource(assertion.source)}.`)
+      })
+    }
+    return { answer: lines.join('\n'), hasConflict: true }
+  }
+
+  const facts = context.urbanisticFacts
+  const lines: string[] = []
+  const usedFacts: Array<
+    UrbanisticRegimeFacts['classification'] | UrbanisticRegimeFacts['category']
+  > = []
+
+  if (topics.has('classification')) {
+    const fact = facts?.classification
+    if (fact?.value && isUsableUrbanisticFactStatus(fact.status)) {
+      lines.push(`Clasificación: ${fact.value.label} (${fact.value.code}).`)
+      usedFacts.push(fact)
+    } else {
+      lines.push('Clasificación: no determinada.')
+    }
+  }
+  if (topics.has('category')) {
+    const fact = facts?.category
+    if (fact?.value && isUsableUrbanisticFactStatus(fact.status)) {
+      lines.push(`Categoría: ${fact.value.label ?? fact.value.code} (${fact.value.code}).`)
+      usedFacts.push(fact)
+    } else {
+      lines.push('Categoría: no determinada.')
+    }
+  }
+  if (topics.has('municipality')) {
+    lines.push(
+      context.municipality
+        ? `Municipio: ${context.municipality.value.name}${context.municipality.value.ineCode ? ` (INE ${context.municipality.value.ineCode})` : ''}.`
+        : 'Municipio: no determinado.'
+    )
+  }
+  if (
+    topics.has('area') ||
+    ((topics.has('classification') || topics.has('category')) && context.planningArea)
+  ) {
+    lines.push(context.planningArea ? `Ámbito: ${context.planningArea.value}.` : 'Ámbito: no determinado.')
+  }
+  if (topics.has('coordinates')) {
+    lines.push(
+      context.coordinates
+        ? `Coordenadas: ${context.coordinates.value.lat}, ${context.coordinates.value.lng}. Fuente: ${readableSource(context.coordinates.source)}. Confianza: ${readableConfidence(context.coordinates.confidence)}.`
+        : 'Coordenadas: no determinadas.'
+    )
+  }
+  if (topics.has('affects')) {
+    const asksForWholeParcel = /\b(?:parcela\s+(?:catastral\s+)?completa|toda\s+la\s+parcela)\b/i.test(question)
+    const constraintScope =
+      context.actionArea && asksForWholeParcel
+        ? context.parcelKnownConstraints ?? context.knownConstraints
+        : context.knownConstraints
+    const confirmed = constraintScope.filter((constraint) => constraint.verification === 'confirmed')
+    if (confirmed.length === 0) {
+      lines.push('Afecciones detectadas y confirmadas: ninguna disponible en el expediente.')
+    } else {
+      lines.push(
+        context.actionArea
+          ? asksForWholeParcel
+            ? 'Afecciones detectadas y confirmadas para la parcela catastral completa:'
+            : 'Afecciones detectadas y confirmadas para el área de actuación seleccionada:'
+          : 'Afecciones detectadas y confirmadas:'
+      )
+      for (const constraint of confirmed) {
+        lines.push(`- ${constraint.value}. Fuente: ${readableSource(constraint.source)}. Confianza: ${readableConfidence(constraint.confidence)}.`)
+      }
+    }
+  }
+
+  if (usedFacts.length > 0) {
+    const sources = unique(usedFacts.map(factSource))
+    const confidences = unique(usedFacts.map((fact) => readableConfidence(fact.confidence)))
+    lines.push(`Fuente: ${sources.join('; ')}.`)
+    lines.push(`Confianza: ${confidences.join('/')}.`)
+    lines.push(
+      'Estos hechos territoriales no acreditan por sí solos parámetros normativos como edificabilidad, ocupación, retranqueos o usos.'
+    )
+  }
+
+  if (context.actionArea) {
+    lines.unshift(
+      `Los datos territoriales anteriores se refieren al área de actuación seleccionada (${context.actionArea.value.surfaceSquareMetres.toLocaleString('es-ES', { maximumFractionDigits: 2 })} m²). La parcela catastral completa se conserva separadamente.`
+    )
+  }
+
+  return { answer: lines.join('\n'), hasConflict: false }
+}
+
 function structuredFactLines(context: NormalizedParcelContext): string[] {
   const facts = context.urbanisticFacts
   if (!facts || !isUsableUrbanisticFactStatus(facts.classification.status)) return []
@@ -39,6 +274,12 @@ function structuredFactLines(context: NormalizedParcelContext): string[] {
   const category = facts.category
   const lines = [
     'HECHOS ESTRUCTURADOS DEL EXPEDIENTE',
+    context.actionArea
+      ? `- Área de actuación: ${context.actionArea.value.surfaceSquareMetres.toLocaleString('es-ES', { maximumFractionDigits: 2 })} m²; selección ${context.actionArea.value.selectionType}; verificación ${context.actionArea.value.verification}. Los hechos de régimen siguientes se refieren a esta área.`
+      : '- Área de actuación: no seleccionada; los hechos se refieren a la parcela catastral completa.',
+    context.parcelSurfaceSquareMetres
+      ? `- Parcela catastral completa: ${context.parcelSurfaceSquareMetres.toLocaleString('es-ES', { maximumFractionDigits: 2 })} m².`
+      : null,
     context.municipality
       ? `- Municipio: ${context.municipality.value.name}${context.municipality.value.ineCode ? ` (INE ${context.municipality.value.ineCode})` : ''}.`
       : null,
@@ -75,8 +316,9 @@ function buildSectionedTerritorialAnswer(
     const source = affect.evidence?.trim() || affect.source
     return `- ${affect.value}. Fuente: ${source}. Confianza: ${confidenceLabel(affect.confidence)}.`
   })
+  const territorialConflicts = enumeratedTerritorialConflictLines(context)
   const planningDetails = unique([
-    ...applicability.conflicts,
+    ...territorialConflicts,
     ...applicability.missingData.map((item) => `Pendiente: ${item}.`),
   ])
   const pendingChecks = unique([
@@ -93,7 +335,7 @@ function buildSectionedTerritorialAnswer(
     'Advertencia de cobertura parcial: estas detecciones positivas no descartan otras afecciones ni sustituyen los informes sectoriales aplicables.',
     '',
     'CLASIFICACIÓN Y PLANEAMIENTO',
-    applicability.status === 'CONFLICTIVO'
+    applicability.status === 'CONFLICTIVO' && territorialConflicts.length > 0
       ? 'Estado conflictivo: no puede determinarse una clasificación o un planeamiento inequívocos.'
       : 'Estado no determinado: no puede confirmarse una clasificación o un planeamiento inequívocos.',
     ...(planningDetails.length > 0 ? planningDetails : ['Falta evidencia compatible para determinar esta sección.']),
@@ -105,7 +347,7 @@ function buildSectionedTerritorialAnswer(
       : ['- Validación técnica del régimen urbanístico aplicable.']),
     '',
     'DECISIÓN',
-    'Se comunican las afecciones confirmadas; se mantiene la abstención sobre clasificación, planeamiento y parámetros hasta resolver el conflicto.',
+    'Se comunican las afecciones confirmadas; se mantiene la abstención sobre clasificación, planeamiento y parámetros hasta disponer de evidencia compatible.',
   ].join('\n')
 }
 
@@ -123,8 +365,9 @@ export function buildSafeAbstention(
   if (applicability.missingData.length > 0) {
     details.push(`Faltan estos datos: ${unique(applicability.missingData).join(', ')}.`)
   }
-  if (applicability.conflicts.length > 0) {
-    details.push(`Existen conflictos: ${applicability.conflicts.join(' ')}`)
+  const territorialConflicts = context ? enumeratedTerritorialConflictLines(context) : []
+  if (territorialConflicts.length > 0) {
+    details.push(`Conflicto territorial comprobado: ${territorialConflicts.join(' ')}`)
   }
   if (applicability.rejected.length > 0 && applicability.applicable.length === 0) {
     details.push('Los fragmentos recuperados no pueden vincularse de forma segura con esta parcela.')
@@ -152,6 +395,12 @@ export function buildSafeAbstention(
 function describeContext(context: NormalizedParcelContext) {
   const facts = structuredFactLines(context)
   const lines = [
+    context.actionArea
+      ? `Área de actuación efectiva: ${context.actionArea.value.surfaceSquareMetres.toLocaleString('es-ES', { maximumFractionDigits: 2 })} m²; tipo ${context.actionArea.value.selectionType}; candidato ${context.actionArea.value.selectedCandidateId ?? 'no aplicable'}; verificación ${context.actionArea.value.verification}. La clasificación, categoría, ámbito y afecciones operativas se refieren a esta geometría.`
+      : 'Área de actuación: no seleccionada; el contexto efectivo se refiere a la parcela catastral completa.',
+    context.parcelSurfaceSquareMetres
+      ? `Superficie de la parcela catastral completa conservada: ${context.parcelSurfaceSquareMetres.toLocaleString('es-ES', { maximumFractionDigits: 2 })} m².`
+      : null,
     context.cadastralReference
       ? `Referencia catastral: ${context.cadastralReference.value} (${context.cadastralReference.verification}, fuente ${context.cadastralReference.source})`
       : null,
@@ -179,6 +428,11 @@ function describeContext(context: NormalizedParcelContext) {
       ? `Fiabilidad: ${context.reliability.mode}; ultimo intento ${context.reliability.latestAttemptAt ?? 'sin fecha'}; contexto oficial ${context.reliability.officialContextResolvedAt ?? 'no disponible'}`
       : null,
     ...(context.reliability?.sourceIssues.map((issue) => `Fuente pendiente: ${issue}`) ?? []),
+    ...(context.actionArea && context.parcelKnownConstraints
+      ? context.parcelKnownConstraints.map(
+          (constraint) => `Afección de la parcela completa (no necesariamente del área seleccionada): ${constraint.value}`
+        )
+      : []),
   ].filter(Boolean)
 
   return lines.length > 0 ? lines.join('\n') : 'Sin contexto de parcela confirmado.'

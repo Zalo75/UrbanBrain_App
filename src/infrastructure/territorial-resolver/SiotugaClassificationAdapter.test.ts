@@ -636,4 +636,58 @@ describe('SiotugaClassificationAdapter', () => {
       )
     ).toBe(true);
   });
+
+  it('adjunta una geometría MultiPolygon válida en intersectionGeometry de parcelCoverage', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      text: async () => gml(feature('f1', 'SNR', 'SNRSC', sadaRing)),
+    }));
+    const adapter = new SiotugaClassificationAdapter(culleredoPlanning(), fetcher);
+    const result = await adapter.findApplicablePlanning({
+      municipalityCode: '15031',
+      geometry: geometry(sadaRing),
+    });
+    const candidate = result.classificationResolution?.candidates[0];
+    expect(candidate?.parcelCoverage?.intersectionGeometry).toBeDefined();
+    expect(candidate?.parcelCoverage?.intersectionGeometry?.type).toBe('MultiPolygon');
+    expect(Array.isArray(candidate?.parcelCoverage?.intersectionGeometry?.coordinates)).toBe(true);
+  });
+
+  it('genera geometrías de intersección independientes para parcela multicategoría que suman el 100 % de la parcela', async () => {
+    // Left polygon covering ~98% and right polygon covering ~2% of parcel geometry
+    const p1: Array<[number, number]> = [
+      [-8.2977, 43.37859],
+      [-8.29761, 43.37859],
+      [-8.29761, 43.37869],
+      [-8.2977, 43.37869],
+      [-8.2977, 43.37859],
+    ];
+    const p2: Array<[number, number]> = [
+      [-8.29761, 43.37859],
+      [-8.29759, 43.37859],
+      [-8.29759, 43.37869],
+      [-8.29761, 43.37869],
+      [-8.29761, 43.37859],
+    ];
+    const fetcher = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      text: async () => gml(feature('f1', 'SNR', 'SNRC', p1), feature('f2', 'SNR', 'SNRT', p2)),
+    }));
+    const adapter = new SiotugaClassificationAdapter(culleredoPlanning(), fetcher);
+    const result = await adapter.findApplicablePlanning({
+      municipalityCode: '15031',
+      geometry: geometry(sadaRing),
+    });
+    const candidates = result.classificationResolution?.candidates ?? [];
+    expect(candidates).toHaveLength(2);
+    const snrc = candidates.find((c) => c.classification.categoryCode === 'SNRC');
+    const snrt = candidates.find((c) => c.classification.categoryCode === 'SNRT');
+
+    expect(snrc?.parcelCoverage?.intersectionGeometry).toBeDefined();
+    expect(snrt?.parcelCoverage?.intersectionGeometry).toBeDefined();
+
+    const pct1 = snrc?.parcelCoverage?.parcelPercentage ?? 0;
+    const pct2 = snrt?.parcelCoverage?.parcelPercentage ?? 0;
+    expect(pct1 + pct2).toBeCloseTo(100, 1);
+  });
 });

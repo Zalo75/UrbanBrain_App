@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Map as LeafletMap } from 'leaflet';
 
 import type { ParcelGeometry } from '@/domain/territorial-resolver/types';
-import { applyParcelViewport, parcelGeometryBounds } from './LeafletParcelMap';
+import { applyParcelViewport, getCategoryStyle, parcelGeometryBounds } from './LeafletParcelMap';
 
 const geometry: ParcelGeometry = {
   type: 'MultiPolygon',
@@ -47,5 +47,15 @@ describe('LeafletParcelMap viewport', () => {
 
     expect(map.setView).toHaveBeenCalledWith([43.27, -8.21], 18);
     expect(map.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('asigna estilos sobrios y diferenciados por código de categoría', () => {
+    const snrc = getCategoryStyle('SNRC', 'SNR', 0);
+    const snrt = getCategoryStyle('SNRT', 'SNR', 1);
+    const suc = getCategoryStyle('SUC', 'SU', 2);
+    expect(snrc.fillColor).not.toBe(snrt.fillColor);
+    expect(snrc.fillColor).toBe('#10b981');
+    expect(snrt.fillColor).toBe('#f59e0b');
+    expect(suc.fillColor).toBe('#3b82f6');
   });
 });

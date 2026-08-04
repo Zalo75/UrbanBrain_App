@@ -245,6 +245,7 @@ export interface PlanningKnowledgeGenerationInput {
     capabilitiesSourceId: string
     capabilitiesXml: string
     inventory: PlanningInstrumentKnowledge[]
+    normativeDocuments?: PlanningNormativeDocument[]
     layerSchemas: Record<string, { sourceId: string; xml: string }>
     sourceIds: string[]
   }>

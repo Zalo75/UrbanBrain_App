@@ -36,6 +36,7 @@ import {
 } from '@/application/territorial-resolver/manualTerritorialContext'
 import { assessClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
 import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
+import { applyActionAreaToUrbanisticFacts } from '@/application/territorial-resolver/actionAreaSelection'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
 
@@ -70,6 +71,12 @@ function detectionSummary(result: TerritorialResolution) {
     effective?.planning.classificationResolution
   )
   const manual = result.continuity?.manualContext
+  const actionArea = manual?.actionAreaSelection?.current
+  const actionAreaCandidate = actionArea?.selectedCandidateId
+    ? effective?.planning.classificationResolution?.candidates.find(
+        (candidate) => candidate.id === actionArea.selectedCandidateId
+      )
+    : undefined
   const municipality = getMunicipalityByName(effective?.municipality ?? '')
   const province =
     getProvinceByMunicipalityIneCode(effective?.municipalityCode) ??
@@ -86,13 +93,45 @@ function detectionSummary(result: TerritorialResolution) {
 
   const automaticSource = effective?.planning.evidence.some(e => e.source === 'siotuga') ? 'siotuga' : 'urbanbrain'
   const automaticLandClassDet = automaticLandClass ? createAutomaticDetermination(automaticLandClass, automaticSource) : undefined
+  const actionAreaLandClass = actionAreaCandidate?.kind === 'official_classification' ? (
+    actionAreaCandidate.classification.code === 'SU'
+      ? actionAreaCandidate.classification.categoryCode === 'SUSC' ||
+        actionAreaCandidate.classification.categoryCode === 'SUNC'
+        ? 'urbano_no_consolidado'
+        : actionAreaCandidate.classification.categoryCode === 'SUC'
+          ? 'urbano_consolidado'
+          : 'urbano'
+      : actionAreaCandidate.classification.code === 'SNR'
+        ? 'nucleo_rural'
+        : actionAreaCandidate.classification.code === 'SR'
+          ? 'rustico'
+          : undefined
+  ) : undefined
+  const actionAreaLandClassDetermination = actionAreaLandClass && actionArea
+    ? {
+        value: actionAreaLandClass,
+        origin: 'technician_selection' as const,
+        source: 'manual' as const,
+        verification: actionArea.verification,
+        recordedAt: actionArea.selectedAt,
+        recordedBy: actionArea.selectedBy,
+        validatedAt:
+          actionArea.verification === 'technician_validated' ? actionArea.selectedAt : undefined,
+        validatedBy:
+          actionArea.verification === 'technician_validated' ? actionArea.selectedBy : undefined,
+        previousAutomaticValue: automaticLandClass,
+      }
+    : undefined
   const classDet: ContextDeterminationState<string> = {
     automatic: automaticLandClassDet,
-    technician: manual?.classificationDetermination?.technician
+    technician: actionAreaLandClassDetermination ?? manual?.classificationDetermination?.technician
   }
 
   const landClass = getEffectiveValue(classDet, manual?.classification ?? automaticLandClass)
-  const automaticAffects = effective?.affects ?? result.affects
+  const parcelAffects = effective?.affects ?? result.affects
+  const automaticAffects = actionArea?.selectionType === 'detected_zone' && actionArea.affects
+    ? actionArea.affects
+    : parcelAffects
   const affectResolution = applyManualAffectDecisions(
     automaticAffects.detected,
     manual?.affectDecisions
@@ -118,7 +157,11 @@ function detectionSummary(result: TerritorialResolution) {
       ? urbanisticFactsFromClassificationResolution(effective.planning, result.resolvedAt)
       : undefined)
   const urbanisticFacts = baseUrbanisticFacts
-    ? applyManualFactDecisions(baseUrbanisticFacts, manual).effective
+    ? applyActionAreaToUrbanisticFacts(
+        applyManualFactDecisions(baseUrbanisticFacts, manual).effective,
+        effective,
+        actionArea
+      )
     : undefined
 
   return {
@@ -149,7 +192,12 @@ function detectionSummary(result: TerritorialResolution) {
       : effective?.planning.status === 'determined'
         ? 'vigente'
         : undefined,
-    planningApplicabilityStatus: effective?.planning.status ?? 'not_determined',
+    planningApplicabilityStatus:
+      actionArea?.selectionType === 'detected_zone'
+        ? actionArea.verification === 'technician_validated'
+          ? 'determined'
+          : 'partial'
+        : effective?.planning.status ?? 'not_determined',
     planningCanAnswerConcreteParameters:
       effective?.planning.canAnswerConcreteParameters ?? false,
     classificationConfidenceLevel: classificationAssessment.level,
@@ -158,7 +206,11 @@ function detectionSummary(result: TerritorialResolution) {
     classificationWarnings: classificationAssessment.warnings,
     urbanisticFacts,
     planningWarnings: effective?.planning.warnings ?? [],
-    planningConflicts: effective?.planning.conflicts ?? [],
+    planningConflicts:
+      actionArea?.selectionType === 'detected_zone'
+        ? []
+        : effective?.planning.conflicts ?? [],
+    parcelPlanningConflicts: effective?.planning.conflicts ?? [],
     planningSource: effective?.planning.evidence.some((item) => item.source === 'siotuga')
       ? 'siotuga'
       : effective?.planning.status === 'determined'
@@ -167,7 +219,9 @@ function detectionSummary(result: TerritorialResolution) {
     landClass,
     automaticLandClass,
     planningArea:
-      manual?.area ??
+      actionArea?.selectionType === 'detected_zone'
+        ? actionArea.planningZone
+        : manual?.area ??
       (effective?.planning.status !== 'conflict' && effective?.planning.areas?.length === 1
         ? effective.planning.areas[0].name
         : undefined),
@@ -178,6 +232,7 @@ function detectionSummary(result: TerritorialResolution) {
     categoryDetermination: manual?.categoryDetermination,
     ordinanceDetermination: manual?.ordinanceDetermination,
     manualContext: manual,
+    actionAreaSelection: manual?.actionAreaSelection,
     reliability: {
       mode: reliabilityMode,
       latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,
@@ -195,6 +250,7 @@ function detectionSummary(result: TerritorialResolution) {
     affects: {
       ...automaticAffects,
       automatic: automaticAffects.detected,
+      parcel: parcelAffects.detected,
       manualDecisions: manual?.affectDecisions ?? [],
       detected: affectResolution.effective,
     },

@@ -366,8 +366,8 @@ export async function createExpediente(
                       ? {
                           origin: 'manual' as const,
                           candidateId: selectedCandidate?.id,
-                          classificationCode: selectedCandidate?.classification.code,
-                          categoryCode: selectedCandidate?.classification.categoryCode,
+                          classificationCode: selectedCandidate?.kind === 'official_classification' ? selectedCandidate.classification.code : undefined,
+                          categoryCode: selectedCandidate?.kind === 'official_classification' ? selectedCandidate.classification.categoryCode : undefined,
                           operationalValue: landClass ?? undefined,
                           areaNames: urbanPlanningZone ? [urbanPlanningZone] : [],
                           reason: classificationSelectionReason,

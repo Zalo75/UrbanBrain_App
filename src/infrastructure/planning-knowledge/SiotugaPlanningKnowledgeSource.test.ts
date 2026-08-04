@@ -35,6 +35,14 @@ function fetcherWithInventory(inventoryJson = '[]') {
         headers: { 'content-type': 'application/json' },
       })
     }
+    if (url.includes('getIOTPU.php')) {
+      const body = init?.body as URLSearchParams
+      const iddoc = body.get('iddoc')
+      return response(JSON.stringify({
+        datos_xerais: { id: iddoc, filesroot: 'root', folder: 'folder' },
+        elementos: []
+      }), { headers: { 'content-type': 'application/json' } })
+    }
     return new Response('not found', { status: 404 })
   }) as unknown as typeof fetch
 }
@@ -76,9 +84,9 @@ describe('SIOTUGA Planning Knowledge source', () => {
       expect.objectContaining({ officialId: '23095', kind: 'general_modification' })
     )
     expect(result.layerSchemas[layerName]?.xml).toContain('cla_homo')
-    expect(result.rawSources).toHaveLength(6)
+    expect(result.rawSources).toHaveLength(8)
     expect(result.rawSources.some((item) => item.content.includes('ephemeral-token'))).toBe(false)
-    expect(fetcher).toHaveBeenCalledTimes(7)
+    expect(fetcher).toHaveBeenCalledTimes(9)
 
     const inventoryCalls = fetcher.mock.calls.filter(([input]) =>
       String(input).includes('query_document.php')

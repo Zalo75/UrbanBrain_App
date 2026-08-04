@@ -28,6 +28,17 @@ export const NORMATIVE_HIERARCHY: NormativeHierarchyLevel[] = [
 
 export type ParcelQuestionScope = 'independent' | 'regime' | 'mixed'
 
+function isMunicipalDetailedCandidate(candidate: NormativeCandidate) {
+  const hierarchy = candidate.hierarchy ?? 'municipal'
+  return (
+    hierarchy === 'municipal' ||
+    hierarchy === 'desarrollo' ||
+    hierarchy === 'ordenanza' ||
+    hierarchy === 'ficha' ||
+    Boolean(candidate.municipalityName)
+  )
+}
+
 function candidateText(candidate: NormativeCandidate) {
   return [candidate.documentName, candidate.title, candidate.content].filter(Boolean).join('\n')
 }
@@ -41,6 +52,13 @@ function uniqueNormalized(values: Array<string | null | undefined>) {
   return [...map.values()]
 }
 
+const PLAUSIBLE_ORDINANCE_IDENTIFIER = /^(?=.{1,16}$)(?=.*\d)[A-Z0-9]+(?:[._/-][A-Z0-9]+)*$/
+
+function normalizePlausibleOrdinanceIdentifier(value: string | undefined) {
+  const normalized = value?.trim().toUpperCase()
+  return normalized && PLAUSIBLE_ORDINANCE_IDENTIFIER.test(normalized) ? normalized : undefined
+}
+
 function extractOrdinances(candidate: NormativeCandidate): string[] {
   if (candidate.ordinance?.trim()) return [candidate.ordinance.trim()]
   const metadataText = [candidate.documentName, candidate.title].filter(Boolean).join('\n')
@@ -52,7 +70,7 @@ function extractOrdinances(candidate: NormativeCandidate): string[] {
     : [...candidate.content.matchAll(
         /\bordenanza\s+(?:n(?:[ºo°.]|umero)?\s*)?([A-Z0-9][A-Z0-9._/-]{0,15})\b/gi
       )]
-  return uniqueNormalized(matches.map((match) => match[1]))
+  return uniqueNormalized(matches.map((match) => normalizePlausibleOrdinanceIdentifier(match[1])))
 }
 
 function extractLandClasses(candidate: NormativeCandidate): string[] {
@@ -146,26 +164,28 @@ export function evaluateApplicability(
     result.conflicts.push(`La recuperación contiene varios municipios incompatibles: ${municipalityNames.join(', ')}.`)
   }
 
+  const municipalCandidates = candidates.filter(isMunicipalDetailedCandidate)
+
   if (concreteParameterRequested) {
-    const ordinances = uniqueNormalized(candidates.flatMap(extractOrdinances))
+    const ordinances = uniqueNormalized(municipalCandidates.map((candidate) => candidate.ordinance))
     if (ordinances.length > 1) {
       result.conflicts.push(`La recuperación contiene varias ordenanzas incompatibles: ${ordinances.join(', ')}.`)
     }
 
-    const landClasses = uniqueNormalized(candidates.flatMap(extractLandClasses))
+    const landClasses = uniqueNormalized(municipalCandidates.flatMap(extractLandClasses))
     if (landClasses.length > 1) {
       result.conflicts.push(`La recuperación mezcla clases de suelo incompatibles: ${landClasses.join(', ')}.`)
     }
 
-    const planningAreas = uniqueNormalized(candidates.flatMap(extractPlanningAreas))
+    const planningAreas = uniqueNormalized(municipalCandidates.flatMap(extractPlanningAreas))
     if (planningAreas.length > 1) {
       result.conflicts.push(`La recuperación mezcla ámbitos, sectores o fichas incompatibles: ${planningAreas.join(', ')}.`)
     }
   }
-  const hasSpecificAreaCandidate = candidates.some(
+  const hasSpecificAreaCandidate = municipalCandidates.some(
     (candidate) => extractPlanningAreas(candidate).length > 0 || candidate.hierarchy === 'ficha'
   )
-  const hasUnscopedGeneralCandidate = candidates.some(
+  const hasUnscopedGeneralCandidate = municipalCandidates.some(
     (candidate) =>
       extractPlanningAreas(candidate).length === 0 &&
       /\b(?:normas?|disposiciones?|ordenanza)\s+generales?\b/i.test(candidateText(candidate))
@@ -223,7 +243,8 @@ export function evaluateApplicability(
   )
 
   for (const candidate of candidates) {
-    if (candidate.hierarchy === 'municipal' || candidate.municipalityName) {
+    const municipalDetailed = isMunicipalDetailedCandidate(candidate)
+    if (municipalDetailed) {
       if (!candidate.municipalityName) {
         result.rejected.push({ candidate, reason: 'El chunk municipal no identifica su municipio.' })
         continue
@@ -242,7 +263,7 @@ export function evaluateApplicability(
       continue
     }
 
-    const candidateLandClasses = extractLandClasses(candidate)
+    const candidateLandClasses = municipalDetailed ? extractLandClasses(candidate) : []
     if (
       expectedLandClass &&
       candidateLandClasses.length > 0 &&
@@ -254,17 +275,28 @@ export function evaluateApplicability(
       continue
     }
 
-    if (expectedArea && extractPlanningAreas(candidate).length > 0 && !matchesExpected(candidate, expectedArea)) {
+    if (
+      municipalDetailed &&
+      expectedArea &&
+      extractPlanningAreas(candidate).length > 0 &&
+      !matchesExpected(candidate, expectedArea)
+    ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otro ámbito, sector o ficha.' })
       continue
     }
 
-    if (expectedQualification && extractOrdinances(candidate).length > 0 && !matchesExpected(candidate, expectedQualification)) {
+    if (
+      municipalDetailed &&
+      expectedQualification &&
+      extractOrdinances(candidate).length > 0 &&
+      !matchesExpected(candidate, expectedQualification)
+    ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otra ordenanza o calificación.' })
       continue
     }
 
     if (
+      municipalDetailed &&
       concreteParameterRequested &&
       (expectedQualification || expectedArea) &&
       !matchesExpected(candidate, expectedQualification ?? expectedArea!)

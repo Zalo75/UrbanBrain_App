@@ -51,8 +51,8 @@ export function classificationSummaryFromRaw(raw: unknown): Partial<DetectedParc
     effective.planning?.classificationResolution
   )
   const automaticLandClass = landClassFromOfficialCode(
-    assessment.candidate?.classification.code,
-    assessment.candidate?.classification.categoryCode
+    assessment.candidate?.kind === 'official_classification' ? assessment.candidate.classification.code : undefined,
+    assessment.candidate?.kind === 'official_classification' ? assessment.candidate.classification.categoryCode : undefined
   )
   if (!automaticLandClass || assessment.level === 'unknown') return undefined
   return {

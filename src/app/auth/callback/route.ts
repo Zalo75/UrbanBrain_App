@@ -4,6 +4,25 @@ import { NextResponse } from 'next/server'
 
 const DEFAULT_DESTINATION = '/dashboard'
 
+function traceCallback(event: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG_AUTH_CALLBACK === 'true') {
+    console.info('[auth/callback]', JSON.stringify({ event, ...details }))
+  }
+}
+
+function safeErrorDetails(error: unknown) {
+  const details = error !== null && typeof error === 'object'
+    ? error as Record<string, unknown>
+    : {}
+
+  return {
+    errorName: error instanceof Error ? error.name : 'UnknownError',
+    errorMessage: error instanceof Error ? error.message.slice(0, 160) : 'unknown',
+    errorStatus: typeof details.status === 'number' ? details.status : undefined,
+    errorCode: typeof details.code === 'string' ? details.code : undefined,
+  }
+}
+
 function getCanonicalOrigin(request: Request): string {
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
   if (configuredSiteUrl) {
@@ -45,6 +64,12 @@ export async function GET(request: Request) {
   const code = searchParams.get('code')
   const next = getInternalDestination(searchParams.get('next'), origin)
 
+  traceCallback('callback_received', {
+    origin,
+    hasAuthorizationCode: Boolean(code),
+    hasInternalNextDestination: next !== DEFAULT_DESTINATION,
+  })
+
   if (code) {
     const cookieStore = await cookies()
     const supabase = createServerClient(
@@ -70,11 +95,20 @@ export async function GET(request: Request) {
       }
     )
     
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    
-    if (error) {
+    let error
+    try {
+      ({ error } = await supabase.auth.exchangeCodeForSession(code))
+    } catch (exchangeError) {
+      traceCallback('session_exchange_threw', safeErrorDetails(exchangeError))
       return loginRedirect(origin, 'auth_callback_failed')
     }
+    
+    if (error) {
+      traceCallback('session_exchange_failed', safeErrorDetails(error))
+      return loginRedirect(origin, 'auth_callback_failed')
+    }
+
+    traceCallback('session_exchange_succeeded', { origin })
     
     return NextResponse.redirect(new URL(next, `${origin}/`))
   }

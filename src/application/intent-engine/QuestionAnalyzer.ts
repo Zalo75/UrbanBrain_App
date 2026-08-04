@@ -3,7 +3,7 @@ import { IntentAnalyzerResponse, IntentType, ScopeType, CategoryType } from "@/d
 
 export class QuestionAnalyzer {
   private openai: OpenAI;
-  private modelName = "deepseek-chat";
+  private modelName = "deepseek-v4-flash";
 
   constructor() {
     this.openai = new OpenAI({
@@ -37,15 +37,21 @@ Tu tarea es analizar la petición del usuario y devolver un JSON estricto con es
 
 Responde ÚNICAMENTE con el JSON válido. Sin markdown, sin explicaciones.`;
 
-      const completion = await this.openai.chat.completions.create({
+      const completionRequest = {
         model: this.modelName,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userText }
         ],
         temperature: 0.1,
-        response_format: { type: "json_object" }
-      }, { signal });
+        response_format: { type: "json_object" },
+        thinking: {
+          type: "disabled" as const
+        }
+      } satisfies Parameters<typeof this.openai.chat.completions.create>[0] & {
+        thinking: { type: "disabled" }
+      };
+      const completion = await this.openai.chat.completions.create(completionRequest, { signal });
 
       const responseText = completion.choices[0].message.content || '{}';
       const parsed = JSON.parse(responseText);

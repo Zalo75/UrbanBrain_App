@@ -35,7 +35,7 @@ export default async function OnboardingPage() {
     }
   } catch (error) {
     console.error("Database connection failed in Onboarding:", error)
-    // Silencioso: asumimos que no tiene organización ni nombre para que pueda ver la UI
+    throw error
   }
 
   if (hasOrg) {

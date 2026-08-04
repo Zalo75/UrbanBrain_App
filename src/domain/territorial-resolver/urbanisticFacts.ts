@@ -27,12 +27,15 @@ function candidateForLegacyResolution(
     (planning.classification
       ? ({
           id: 'legacy-planning-classification',
+          kind: 'official_classification',
           classification: planning.classification,
           evidence: planning.evidence,
           confidence: 'medium',
           evidenceBasis: 'official_document',
           instrumentTraceability: 'pending',
           normalizationStatus: 'mapped',
+          areas: [],
+          source: 'siotuga',
         } as ClassificationCandidate)
       : undefined)
   )
@@ -119,15 +122,16 @@ export function urbanisticFactsFromClassificationResolution(
 ): UrbanisticRegimeFacts {
   const resolution = planning.classificationResolution
   const candidate = candidateForLegacyResolution(planning, resolution)
-  const classificationStatus = factStatus(resolution, Boolean(candidate?.classification.code))
+  const isOfficial = candidate?.kind === 'official_classification'
+  const classificationStatus = factStatus(resolution, Boolean(isOfficial && candidate?.classification.code))
   const classificationAvailable =
     classificationStatus === 'automatic_confirmed' ||
     classificationStatus === 'automatic_probable'
   const classification = fact({
-    value: classificationAvailable && candidate
+    value: classificationAvailable && isOfficial && candidate
       ? { code: candidate.classification.code, label: candidate.classification.label }
       : undefined,
-    label: classificationAvailable ? candidate?.classification.label : undefined,
+    label: classificationAvailable && isOfficial && candidate ? candidate.classification.label : undefined,
     status: classificationStatus,
     candidate,
     planning,
@@ -136,6 +140,7 @@ export function urbanisticFactsFromClassificationResolution(
   })
 
   const categoryAvailable = Boolean(
+    isOfficial &&
     candidate?.classification.categoryCode &&
       (classificationStatus === 'automatic_confirmed' ||
         classificationStatus === 'automatic_probable')
@@ -148,17 +153,17 @@ export function urbanisticFactsFromClassificationResolution(
         ? 'source_unavailable'
         : classificationStatus === 'not_available'
           ? 'not_available'
-          : candidate?.classification.code
+          : isOfficial && candidate?.classification.code
       ? 'manual_review_required'
       : 'not_available'
   const category = fact({
-    value: categoryAvailable
+    value: categoryAvailable && isOfficial && candidate
       ? {
-          code: candidate!.classification.categoryCode!,
-          label: candidate!.classification.categoryLabel,
+          code: candidate.classification.categoryCode!,
+          label: candidate.classification.categoryLabel,
         }
       : undefined,
-    label: categoryAvailable ? candidate!.classification.categoryLabel : undefined,
+    label: categoryAvailable && isOfficial && candidate ? candidate.classification.categoryLabel : undefined,
     status: categoryStatus,
     candidate,
     planning,
@@ -179,9 +184,9 @@ export function urbanisticFactsFromClassificationResolution(
         ? 'source_unavailable'
         : classificationStatus === 'not_available'
           ? 'not_available'
-          : candidate?.classification.code === 'SU'
+          : isOfficial && candidate?.classification.code === 'SU'
       ? 'manual_review_required'
-      : candidate?.classification.code
+      : isOfficial && candidate?.classification.code
         ? 'not_applicable'
         : 'not_available'
   const consolidation = fact<ConsolidationFactValue>({
