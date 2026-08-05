@@ -21,6 +21,7 @@ import { AvailableZonesSummary } from '@/components/territorial/AvailableZonesSu
 import { GeometricAuditAccordion } from '@/components/territorial/GeometricAuditAccordion'
 import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap';
+import { PordPlanViewer } from '@/components/territorial/PordPlanViewer';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -721,6 +722,21 @@ export function TerritorialContextPanel({
                       </div>
                     ))}
                 </div>
+
+                <details className="bg-background rounded-lg border p-4 group">
+                  <summary className="text-sm font-semibold cursor-pointer outline-none">
+                    Ver plano oficial de ordenación pormenorizada (PORD)
+                  </summary>
+                  <div className="mt-4 pt-4 border-t">
+                    <PordPlanViewer
+                      municipality={context.municipality || undefined}
+                      instrument={context.instrument || undefined}
+                      wmsLayer={context.municipalityCode === '15009' ? '_15009_NNSSPP_199606_AD_PORD_02CL_22221' : undefined}
+                      parcelGeometry={context.parcelGeometry}
+                      actionAreaGeometry={context.actionArea?.geometry}
+                    />
+                  </div>
+                </details>
 
               </>
             )}
