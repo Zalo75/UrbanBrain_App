@@ -8,6 +8,8 @@ import type {
   ActionAreaSelectionState,
   ManualTerritorialContext,
   ParcelGeometry,
+  TerritorialConflict,
+  TerritorialWarning,
   UrbanisticRegimeFacts,
 } from '@/domain/territorial-resolver/types'
 import type {
@@ -19,6 +21,7 @@ import type {
 } from '@/domain/parcel-context/types'
 import { getEffectiveDetermination } from '@/domain/territorial-resolver/determinations'
 import type { ContextDeterminationState } from '@/domain/territorial-resolver/types'
+import type { TerritorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
 
 export interface ParcelExpedienteInput {
   refCatastral?: string | null
@@ -34,12 +37,19 @@ export interface ParcelExpedienteInput {
   contextoValidadoPorTecnico?: boolean | null
 }
 
-export interface DetectedParcelInput {
+/**
+ * Stable normalized snapshot written after a territorial resolution and read
+ * when rebuilding the parcel context. It deliberately carries references to
+ * observed facts, evidence-derived determinations and manual decisions without
+ * merging their provenance.
+ */
+export interface TerritorialDetectionSummary {
   cadastralReference?: string | null
   parcelReference?: string | null
   parcelGeometry?: ParcelGeometry | null
   provinceId?: string | null
   provinceName?: string | null
+  provinceCode?: string | null
   municipalityId?: string | null
   municipalityName?: string | null
   municipalityCode?: string | null
@@ -56,16 +66,32 @@ export interface DetectedParcelInput {
   planningApplicabilityStatus?: 'determined' | 'partial' | 'conflict' | 'not_determined' | null
   planningCanAnswerConcreteParameters?: boolean | null
   urbanisticFacts?: UrbanisticRegimeFacts | null
+  classificationConfidenceLevel?: 'confirmed' | 'probable' | 'unknown' | null
+  classificationReason?: string | null
+  classificationSources?: string[] | null
+  classificationWarnings?: string[] | null
+  automaticLandClass?: string | null
   locationStatus?: 'confirmed' | 'probable' | 'ambiguous' | 'unresolved' | null
   locationConfidence?: 'high' | 'medium' | 'low' | null
   planningWarnings?: Array<{ code: string; message: string }> | null
   planningConflicts?: string[] | null
   parcelPlanningConflicts?: string[] | null
+  warnings?: TerritorialWarning[] | null
+  conflicts?: TerritorialConflict[] | null
   classificationDetermination?: ContextDeterminationState<string>
   categoryDetermination?: ContextDeterminationState<string>
   ordinanceDetermination?: ContextDeterminationState<string>
   affects?: {
+    analysisGeometry?: 'parcel' | 'point' | 'none'
+    canRuleOutUndetectedAffects?: false
+    warnings?: TerritorialWarning[]
+    sourceChecks?: Array<{ status: string; message: string }>
     detected?: Array<{
+      category: string
+      name: string
+      confidence?: 'high' | 'medium' | 'low'
+    }>
+    automatic?: Array<{
       category: string
       name: string
       confidence?: 'high' | 'medium' | 'low'
@@ -75,9 +101,12 @@ export interface DetectedParcelInput {
       name: string
       confidence?: 'high' | 'medium' | 'low'
     }>
+    manualDecisions?: ManualTerritorialContext['affectDecisions']
   } | null
   manualContext?: ManualTerritorialContext | null
   actionAreaSelection?: ActionAreaSelectionState | null
+  resolvedAt?: string | null
+  fieldConfirmations?: TerritorialFieldConfirmations | null
   reliability?: {
     mode:
       | 'current_official'
@@ -93,6 +122,9 @@ export interface DetectedParcelInput {
   } | null
 }
 
+/** @deprecated Use TerritorialDetectionSummary for new normalization contracts. */
+export type DetectedParcelInput = TerritorialDetectionSummary
+
 export interface KnownConstraintInput {
   name: string
   source?: ParcelContextSource | string | null
@@ -102,7 +134,7 @@ export interface KnownConstraintInput {
 
 export interface BuildParcelContextInput {
   expediente: ParcelExpedienteInput
-  detected?: DetectedParcelInput | null
+  detected?: TerritorialDetectionSummary | null
   userMessages?: string[]
   constraints?: KnownConstraintInput[]
 }

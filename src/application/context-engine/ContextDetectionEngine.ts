@@ -1,4 +1,5 @@
 import { resolveParcelLocation } from '@/application/territorial-resolver/resolveParcelLocation'
+import type { TerritorialDetectionSummary } from '@/application/parcel-context/normalizeParcelContext'
 import type {
   ManualTerritorialContext,
   ResolveParcelLocationInput,
@@ -65,7 +66,7 @@ function officialResolver(): Resolver {
   return (input) => resolveParcelLocation(input, dependencies)
 }
 
-function detectionSummary(result: TerritorialResolution) {
+function detectionSummary(result: TerritorialResolution): TerritorialDetectionSummary {
   const effective = officialContextForUse(result)
   const classificationAssessment = assessClassificationResolution(
     effective?.planning.classificationResolution

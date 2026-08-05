@@ -1,9 +1,9 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 
 import type {
-  DetectedParcelInput,
   KnownConstraintInput,
   ParcelExpedienteInput,
+  TerritorialDetectionSummary,
 } from '@/application/parcel-context/normalizeParcelContext'
 import { db } from '@/infrastructure/db/client'
 import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
@@ -23,7 +23,7 @@ import {
 
 export interface AuthorizedParcelInputs {
   expediente: ParcelExpedienteInput & { id: string; orgId: string; ownerId: string }
-  detected: DetectedParcelInput | null
+  detected: TerritorialDetectionSummary | null
   userMessages: string[]
   constraints: KnownConstraintInput[]
   latestDetectionRaw?: unknown
@@ -43,7 +43,7 @@ function landClassFromOfficialCode(code?: string, categoryCode?: string) {
         : undefined
 }
 
-export function classificationSummaryFromRaw(raw: unknown): Partial<DetectedParcelInput> | undefined {
+export function classificationSummaryFromRaw(raw: unknown): Partial<TerritorialDetectionSummary> | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const result = raw as Partial<TerritorialResolution>
   const effective = result.continuity?.effectiveOfficialContext ?? result
@@ -134,10 +134,10 @@ export async function loadAuthorizedParcelInputs(
       ),
   ])
 
-  const storedSummary = latestDetection[0]?.summary as DetectedParcelInput | undefined
+  const storedSummary = latestDetection[0]?.summary as TerritorialDetectionSummary | undefined
   const derivedClassification = classificationSummaryFromRaw(latestDetection[0]?.rawResponse)
   const derivedUrbanisticFacts = urbanisticFactsFromRaw(latestDetection[0]?.rawResponse)
-  const detected: DetectedParcelInput | null = storedSummary
+  const detected: TerritorialDetectionSummary | null = storedSummary
     ? {
         ...storedSummary,
         landClass: storedSummary.landClass ?? derivedClassification?.landClass,

@@ -5,8 +5,35 @@ import {
   trustedMunicipalityCodeFilter,
   trustedMunicipalityFilter,
 } from './normalizeParcelContext'
+import type { TerritorialDetectionSummary } from './normalizeParcelContext'
 
 describe('buildNormalizedParcelContext', () => {
+  it('acepta el snapshot territorial normalizado sin mezclar su procedencia', () => {
+    const detected: TerritorialDetectionSummary = {
+      cadastralReference: '7709702NH4970N0001SZ',
+      municipalityName: 'Culleredo',
+      municipalityCode: '15031',
+      locationStatus: 'confirmed',
+      locationConfidence: 'high',
+      locationSource: 'catastro',
+      planningInstrument: 'Plan general de ordenaciÃ³n urbana',
+      planningStatus: 'vigente',
+      planningApplicabilityStatus: 'partial',
+      planningSource: 'siotuga',
+      landClass: 'urbano_no_consolidado',
+      automaticLandClass: 'urbano',
+    }
+
+    const context = buildNormalizedParcelContext({ expediente: {}, detected })
+
+    expect(context.municipality).toMatchObject({ value: { name: 'Culleredo' } })
+    expect(context.landClass).toMatchObject({
+      value: 'urbano_no_consolidado',
+      source: 'siotuga',
+    })
+    expect(context.validity?.value).toBe('vigente')
+  })
+
   it('normaliza una referencia catastral válida y conserva su procedencia', () => {
     const context = buildNormalizedParcelContext({
       expediente: {
