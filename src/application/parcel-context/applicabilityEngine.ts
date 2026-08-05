@@ -108,6 +108,27 @@ function matchesExpected(candidate: NormativeCandidate, expected: string) {
   return normalizeComparable(candidateText(candidate)).includes(normalizedExpected)
 }
 
+function hasCompatiblePlanningArea(candidate: NormativeCandidate, expected: string) {
+  const areas = extractPlanningAreas(candidate)
+  return areas.length > 0
+    ? areas.some((area) => normalizeComparable(area) === normalizeComparable(expected))
+    : matchesExpected(candidate, expected)
+}
+
+function hasCompatibleOrdinance(candidate: NormativeCandidate, expected: string) {
+  const ordinances = extractOrdinances(candidate)
+  return ordinances.length > 0
+    ? ordinances.some(
+        (ordinance) =>
+          normalizeOrdinanceIdentifier(ordinance) === normalizeOrdinanceIdentifier(expected)
+      )
+    : matchesExpected(candidate, expected)
+}
+
+function normalizeOrdinanceIdentifier(value: string) {
+  return normalizeComparable(value).replace(/^ordenanza(?:\s+n(?:umero)?)?\s+/, '')
+}
+
 export function requiresDeterminedParcelRegime(question: string): boolean {
   const urbanParameter = /\b(?:clasificaci[oó]n(?:\s+(?:urban[ií]stica|del\s+suelo))?|categor[ií]a\s+del\s+suelo|calificaci[oó]n|ordenanza|par[aá]metros?\s+urban[ií]sticos?|edificabilidad|ocupaci[oó]n|altura|retranqueos?|alineaci[oó]n|parcel[ae]\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:urban[ií]sticos?|permitidos?|compatibles?|prohibidos?)|condiciones?\s+de\s+cubierta|(?:n[uú]mero\s+de|cu[aá]ntas?)\s+plantas?)\b/i.test(
     question
@@ -279,7 +300,7 @@ export function evaluateApplicability(
       municipalDetailed &&
       expectedArea &&
       extractPlanningAreas(candidate).length > 0 &&
-      !matchesExpected(candidate, expectedArea)
+      !hasCompatiblePlanningArea(candidate, expectedArea)
     ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otro ámbito, sector o ficha.' })
       continue
@@ -289,7 +310,7 @@ export function evaluateApplicability(
       municipalDetailed &&
       expectedQualification &&
       extractOrdinances(candidate).length > 0 &&
-      !matchesExpected(candidate, expectedQualification)
+      !hasCompatibleOrdinance(candidate, expectedQualification)
     ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otra ordenanza o calificación.' })
       continue
@@ -299,7 +320,25 @@ export function evaluateApplicability(
       municipalDetailed &&
       concreteParameterRequested &&
       (expectedQualification || expectedArea) &&
+      extractPlanningAreas(candidate).length === 0 &&
+      extractOrdinances(candidate).length === 0 &&
       !matchesExpected(candidate, expectedQualification ?? expectedArea!)
+    ) {
+      result.rejected.push({
+        candidate,
+        reason: `El fragmento contiene una regulaci\u00f3n potencialmente relevante, pero no acredita su aplicaci\u00f3n a ${expectedQualification ? `la ordenanza o calificaci\u00f3n ${expectedQualification}` : `el \u00e1mbito ${expectedArea}`}.`,
+      })
+      continue
+    }
+
+    if (
+      municipalDetailed &&
+      concreteParameterRequested &&
+      (expectedQualification || expectedArea) &&
+      !(
+        (expectedQualification && hasCompatibleOrdinance(candidate, expectedQualification)) ||
+        (expectedArea && hasCompatiblePlanningArea(candidate, expectedArea))
+      )
     ) {
       result.rejected.push({
         candidate,

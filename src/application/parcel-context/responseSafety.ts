@@ -369,14 +369,24 @@ export function buildSafeAbstention(
   if (territorialConflicts.length > 0) {
     details.push(`Conflicto territorial comprobado: ${territorialConflicts.join(' ')}`)
   }
-  if (applicability.rejected.length > 0 && applicability.applicable.length === 0) {
+  const unprovenLink = applicability.rejected.some((rejection) =>
+    /regulaci\u00f3n potencialmente relevante.*no acredita su aplicaci\u00f3n/i.test(rejection.reason)
+  )
+  if (unprovenLink && context?.planningArea) {
+    const subject = /retranque/i.test(question ?? '') ? 'retranqueos' : 'la materia consultada'
+    details.push(
+      `Se han localizado disposiciones sobre ${subject} en el instrumento municipal, pero no puede acreditarse cu\u00e1l de ellas resulta aplicable al \u00e1mbito ${context.planningArea.value} sin confirmar la ordenanza o regulaci\u00f3n pormenorizada.`
+    )
+  } else if (applicability.rejected.length > 0 && applicability.applicable.length === 0) {
     details.push('Los fragmentos recuperados no pueden vincularse de forma segura con esta parcela.')
   }
 
   const facts = context ? structuredFactLines(context) : []
   return [
     'CONCLUSIÓN',
-    facts.length > 0
+    facts.length > 0 && unprovenLink
+      ? 'El expediente contiene hechos territoriales estructurados v\u00e1lidos. Se han localizado disposiciones documentales potencialmente relevantes, pero no puede acreditarse su aplicaci\u00f3n al r\u00e9gimen concreto de la parcela.'
+      : facts.length > 0
       ? 'El expediente contiene hechos territoriales estructurados válidos. No se ha recuperado evidencia documental suficiente para confirmar las consecuencias jurídicas, deberes, artículos, parámetros o cifras solicitados.'
       : 'No puedo determinar con seguridad el régimen urbanístico aplicable ni dar cifras concretas.',
     ...(facts.length > 0 ? ['', ...facts] : []),

@@ -178,6 +178,38 @@ describe('buildSafeAbstention', () => {
     expect(answer).not.toMatch(/7 m|9 m/)
   })
 
+  it('explica que existen disposiciones recuperadas cuando falta acreditar su aplicaci\u00f3n al \u00e1mbito', () => {
+    const contextWithArea = buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: '1234567NH4913S0001AB',
+        municipio: 'arteixo',
+        landClass: 'urbano_consolidado',
+        urbanPlanningZone: '\u00c1mbito Z-4',
+        planeamiento: 'PXOM de Arteixo',
+      },
+      detected: { planningStatus: 'vigente' },
+    })
+    const answer = buildSafeAbstention(
+      {
+        ...determined,
+        status: 'PARCIAL',
+        applicable: [],
+        rejected: [{
+          candidate: source,
+          reason: 'El fragmento contiene una regulaci\u00f3n potencialmente relevante, pero no acredita su aplicaci\u00f3n al \u00e1mbito Z-4.',
+        }],
+        canAnswerConcreteParameters: false,
+      },
+      contextWithArea,
+      '\u00bfCu\u00e1nto retranqueo hay que dejar?'
+    )
+
+    expect(answer).toContain('disposiciones sobre retranqueos')
+    expect(answer).toContain('\u00e1mbito \u00c1mbito Z-4')
+    expect(answer).not.toContain('No se ha recuperado evidencia documental suficiente')
+    expect(answer).not.toMatch(/3 m|7 m/)
+  })
+
   it('comunica afecciones confirmadas por secciones aunque Betanzos tenga clasificación conflictiva', () => {
     const betanzosContext = buildNormalizedParcelContext({
       expediente: {},

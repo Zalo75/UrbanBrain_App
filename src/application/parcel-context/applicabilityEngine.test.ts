@@ -238,4 +238,41 @@ describe('evaluateApplicability', () => {
     expect(result.applicable).toHaveLength(0)
     expect(result.rejected[0].reason).toMatch(/instrumento superior/i)
   })
+
+  it('distingue un v\u00ednculo de \u00e1mbito no acreditado de un \u00e1mbito distinto', () => {
+    const result = evaluateApplicability(
+      completeContext(),
+      [
+        candidate({
+          ordinance: null,
+          planningArea: null,
+          title: 'Regulaci\u00f3n general de retranqueos',
+          content: 'Las separaciones se regulan en las determinaciones particulares.',
+        }),
+      ],
+      true
+    )
+
+    expect(result.applicable).toHaveLength(0)
+    expect(result.rejected[0].reason).toMatch(/potencialmente relevante.*no acredita su aplicaci\u00f3n/i)
+    expect(result.rejected[0].reason).not.toMatch(/otro \u00e1mbito/i)
+  })
+
+  it('rechaza un \u00e1mbito documental expl\u00edcitamente distinto', () => {
+    const context = completeContext()
+    context.planningArea = {
+      value: 'Z-4',
+      source: 'siotuga',
+      confidence: 0.9,
+      verification: 'confirmed',
+    }
+    const result = evaluateApplicability(
+      context,
+      [candidate({ planningArea: 'Z-7', content: 'Ordenanza Z-4. Regulaci\u00f3n general.' })],
+      true
+    )
+
+    expect(result.applicable).toHaveLength(0)
+    expect(result.rejected[0].reason).toMatch(/otro \u00e1mbito/i)
+  })
 })

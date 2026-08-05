@@ -99,8 +99,10 @@ function mapV1Candidates(
     sourceUrl: chunk.original_path ?? null,
     similarity: chunk.similarity ?? null,
     hierarchy,
-    ordinance: scope?.ordinance ?? null,
-    planningArea: scope?.planningZone ?? null,
+    // The scope limits retrieval; it is not evidence contained in the chunk.
+    // V1 rows do not expose a proven ordinance or planning-area attribute.
+    ordinance: null,
+    planningArea: null,
     parentInstrument: scope?.instrumentId ?? null,
   }));
 }

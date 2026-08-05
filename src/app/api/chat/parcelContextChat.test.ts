@@ -378,7 +378,9 @@ describe('POST /api/chat parcel context boundary', () => {
         landClass: 'urbano',
         planningArea: 'CASCAS',
         planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
         planningStatus: 'vigente',
+        planningApplicabilityStatus: 'determined',
         planningCanAnswerConcreteParameters: true,
         manualContext: {
           classification: 'urbano',
@@ -426,7 +428,7 @@ describe('POST /api/chat parcel context boundary', () => {
       error: null,
     })
 
-    await POST(new NextRequest('http://localhost/api/chat', {
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -434,6 +436,7 @@ describe('POST /api/chat parcel context boundary', () => {
         message: '¿Cuál es el retranqueo aplicable?',
       }),
     }))
+    const payload = await response.json()
 
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks_scoped',
@@ -443,6 +446,8 @@ describe('POST /api/chat parcel context boundary', () => {
         filter_ordinance: 'Ordenanza R4',
       })
     )
+    expect(payload.safety.decision).toBe('answer')
+    expect(payload.answer).not.toMatch(/otro Ã¡mbito|otro \u00e1mbito/i)
   })
 
   it('reconoce hechos estructurados válidos cuando RAG no recupera normativa', async () => {
@@ -509,5 +514,78 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).toContain('PXOM de Culleredo')
     expect(payload.answer).toContain('Suelo urbano sin consolidar (SUSC)')
     expect(payload.answer).not.toContain('Estado no determinado')
+  })
+
+  it('keeps Betanzos parameter abstention without labelling general chunks as another area', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: {
+        id: 'expediente-org-a',
+        orgId: 'org-a',
+        refCatastral: '15009A01300255',
+        municipio: 'betanzos',
+        urbanPlanningZone: 'CASCAS',
+        planeamiento: 'Normas subsidiarias',
+      },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityCode: '15009',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        landClass: 'nucleo_rural',
+        planningArea: 'CASCAS',
+        planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: false,
+        manualContext: {
+          ordinance: 'Ordenanza R4',
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: '2026-08-05T12:00:00.000Z',
+        },
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{ id: '22221', status: 'current' }],
+          documents: [{
+            id: '0060no011.pdf',
+            instrumentId: '22221',
+            title: 'Normas urban\u00edsticas',
+            sourceUrl: 'https://example.invalid/0060no011.pdf',
+            binding: 'general',
+          }],
+        },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [{
+        chunk_id: 'chunk-general-retranqueo',
+        texto: 'El recuado a linderos se regula en las determinaciones particulares.',
+        municipio_nombre: 'Betanzos',
+        nombre_pdf: '0060no011.pdf',
+      }],
+      error: null,
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '\u00bfCu\u00e1nto hay que dejar de retranqueo en la parcela?',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(payload.safety.decision).toBe('abstain')
+    expect(payload.answer).toContain('disposiciones sobre retranqueos')
+    expect(payload.answer).toContain('\u00e1mbito CASCAS')
+    expect(payload.answer).not.toContain('No se ha recuperado evidencia documental suficiente')
+    expect(payload.answer).not.toMatch(/otro \u00e1mbito/i)
+    expect(payload.answer).not.toMatch(/\b\d+(?:[.,]\d+)?\s*m\b/i)
   })
 })
