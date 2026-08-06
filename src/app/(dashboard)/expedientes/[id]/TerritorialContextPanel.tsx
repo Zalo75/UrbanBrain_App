@@ -71,6 +71,23 @@ export function TerritorialContextPanel({
 
   const persistedCandidateId = context?.actionArea?.selectedCandidateId;
   const activeCandidateId = exploredCandidateId !== undefined ? exploredCandidateId : persistedCandidateId;
+  const classificationIsTechnicallyValidated = Boolean(
+    context?.classificationOrigin === 'manual' &&
+      (context.actionArea?.verification === 'technician_validated' ||
+        context.manualContext?.verification === 'technician_validated')
+  );
+  const classificationHeading = classificationIsTechnicallyValidated
+    ? 'Clasificación efectiva'
+    : 'Clasificación detectada';
+  const classificationOriginCopy = classificationIsTechnicallyValidated
+    ? 'Decisión del técnico'
+    : context?.classificationOrigin === 'manual'
+      ? context.actionArea
+        ? 'Zona de trabajo seleccionada; pendiente de validación técnica'
+        : 'Selección manual pendiente de validación técnica'
+      : context?.classificationOrigin === 'automatic'
+        ? 'Detección automática'
+        : 'Desconocido';
 
   const status = context ? statusCopy[context.status] : statusCopy.undetermined;
   const affectsFullyChecked = context?.sourceChecks.some(
@@ -447,36 +464,42 @@ export function TerritorialContextPanel({
                       </Button>
                     </div>
                     <div className="mt-1">
-                      <p className="text-[11px] font-semibold text-emerald-700">Clasificación automática</p>
-                      {context.automaticClassification ? (
+                      <p className="text-[11px] font-semibold text-emerald-700">{classificationHeading}</p>
+                      {context.classification ? (
                         <>
-                        <p className="text-sm font-medium">{context.automaticClassification.label}</p>
+                        <p className="text-sm font-medium">{context.classification.label || context.classification.code}</p>
                         <p className="font-mono text-xs">
-                          {context.automaticClassification.code}
-                          {context.automaticClassification.categoryCode
-                            ? ` · ${context.automaticClassification.categoryCode}`
+                          {context.classification.code}
+                          {context.classification.categoryCode
+                            ? ` · ${context.classification.categoryCode}`
                             : ''}
                         </p>
                         </>
                       ) : (
                         <p className="text-muted-foreground text-sm">No determinada</p>
                       )}
-                    </div>
-                    <div className="mt-2 border-t pt-2">
-                      <p className="text-[11px] font-semibold text-violet-700">
-                        Clasificación manual · valor operativo cuando existe
+                      <p className="text-muted-foreground mt-1 text-[10px]">
+                        Origen: {classificationOriginCopy}
                       </p>
-                      {context.manualContext?.classification ? (
-                        <>
-                        <p className="text-sm font-medium">{context.manualContext.classification}</p>
-                        {context.manualContext.category && (
-                          <p className="font-mono text-xs">{context.manualContext.category}</p>
-                        )}
-                        </>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">Sin selección manual</p>
-                      )}
                     </div>
+
+                    {context.classificationOrigin === 'manual' && context.automaticClassification && (
+                      <div className="mt-2 border-t pt-2">
+                        <p className="text-[11px] font-semibold text-muted-foreground">
+                          Clasificación automática original
+                        </p>
+                        <p className="text-xs">{context.automaticClassification.label}</p>
+                      </div>
+                    )}
+
+                    {context.manualContext?.classification && (
+                      <div className="mt-2 border-t pt-2">
+                        <p className="text-[11px] font-semibold text-violet-700">
+                          Auditoría manual legacy
+                        </p>
+                        <p className="text-xs">{context.manualContext.classification} {context.manualContext.category ? `(${context.manualContext.category})` : ''}</p>
+                      </div>
+                    )}
                   </div>
                   <div className="bg-background rounded-lg border p-3">
                     <p className="text-muted-foreground text-xs">Planeamiento</p>

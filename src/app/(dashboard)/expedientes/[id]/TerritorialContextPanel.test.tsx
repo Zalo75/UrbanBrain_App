@@ -34,6 +34,7 @@ const contextWithPlanning: TerritorialContextView = {
     label: 'Suelo urbano',
     sourceFeatureIds: ['feature-a'],
   },
+  classificationOrigin: 'automatic',
   instrument: 'Plan general de ordenación urbana',
   areas: [],
   affects: [],
@@ -87,8 +88,8 @@ describe('TerritorialContextPanel', () => {
 
     expect(container.querySelector('details')?.hasAttribute('open')).toBe(true)
     expect(screen.getByText('Diagnóstico territorial')).toBeTruthy()
-    expect(screen.getByText('Clasificación automática')).toBeTruthy()
-    expect(screen.getByText(/Clasificación manual/)).toBeTruthy()
+    expect(screen.getByText('Clasificación detectada')).toBeTruthy()
+    expect(screen.getByText('Origen: Detección automática')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Editar clasificación' }))
     expect(screen.getByLabelText('Clasificación')).toBeTruthy()
     expect(screen.getByLabelText('Confirmar')).toBeTruthy()
@@ -340,6 +341,51 @@ describe('TerritorialContextPanel', () => {
     expect(screen.getByText('Parcial')).toBeTruthy()
   })
 
+  it('does not present an unverified work area as an effective technician decision', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          classificationOrigin: 'manual',
+          manualContext: {
+            provenance: 'manual',
+            verification: 'unverified',
+            recordedAt: '2026-08-06T10:00:00.000Z',
+          },
+          actionArea: {
+            id: 'zone-a',
+            selectionType: 'detected_zone',
+            selectedCandidateId: 'candidate-a',
+            geometry: {
+              type: 'MultiPolygon',
+              crs: 'EPSG:4326',
+              coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+            },
+            surfaceSquareMetres: 600,
+            parcelSurfaceSquareMetres: 1000,
+            classification: 'SU',
+            category: 'SUSC',
+            planningZone: 'LEDONO',
+            planningZones: ['LEDONO'],
+            source: 'siotuga',
+            confidence: 'high',
+            selectedBy: 'architect-a',
+            selectedAt: '2026-08-06T10:00:00.000Z',
+            verification: 'unverified',
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Contexto provisional')).toBeTruthy()
+    expect(screen.getByText('Clasificación detectada')).toBeTruthy()
+    expect(screen.queryByText('Clasificación efectiva')).toBeNull()
+    expect(screen.getByText('Origen: Zona de trabajo seleccionada; pendiente de validación técnica')).toBeTruthy()
+    expect(screen.queryByText('Origen: Decisión del técnico')).toBeNull()
+  })
+
   it('diferencia valores automáticos y manuales y permite editar clasificación y afecciones', () => {
     render(
       <TerritorialContextPanel
@@ -383,8 +429,9 @@ describe('TerritorialContextPanel', () => {
       />
     )
 
-    expect(screen.getByText('Clasificación automática')).toBeTruthy()
-    expect(screen.getByText(/Clasificación manual · valor operativo/i)).toBeTruthy()
+    expect(screen.getByText('Clasificación efectiva')).toBeTruthy()
+    expect(screen.getByText(/Clasificación automática original/i)).toBeTruthy()
+    expect(screen.getByText(/Auditoría manual legacy/i)).toBeTruthy()
     expect(screen.getByText(/excluida operativamente/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Editar afecciones' }))
     expect(screen.getByText('Revisión manual de afecciones')).toBeTruthy()
