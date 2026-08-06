@@ -111,3 +111,51 @@ describe('SIOTUGA Planning Knowledge source', () => {
     ).rejects.toThrow('array expected')
   })
 })
+
+import { parseSiotugaDocumentInventory } from './SiotugaPlanningKnowledgeSource'
+
+describe('parseSiotugaDocumentInventory', () => {
+  const baseJson = {
+    datos_xerais: {
+      id: '123',
+      filesroot: 'root',
+      folder: 'folder'
+    }
+  }
+
+  it('keeps current behavior when elementos is an array', () => {
+    const json = JSON.stringify({
+      ...baseJson,
+      elementos: [{
+        description: 'PLANOS',
+        componentes: [{ pathesperado: '123.pdf', id: '456' }]
+      }]
+    })
+    const result = parseSiotugaDocumentInventory(json, '123', 'source-1')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.officialDocumentId).toBe('456')
+  })
+
+  it('returns empty list and does not fail when elementos is null', () => {
+    const json = JSON.stringify({
+      ...baseJson,
+      elementos: null
+    })
+    const result = parseSiotugaDocumentInventory(json, '123', 'source-1')
+    expect(result).toEqual([])
+  })
+
+  it('returns empty list and does not fail when elementos is undefined or missing', () => {
+    const json = JSON.stringify(baseJson)
+    const result = parseSiotugaDocumentInventory(json, '123', 'source-1')
+    expect(result).toEqual([])
+  })
+
+  it('throws contract error when elementos is an invalid type', () => {
+    const json = JSON.stringify({
+      ...baseJson,
+      elementos: { "unexpected": "object" }
+    })
+    expect(() => parseSiotugaDocumentInventory(json, '123', 'source-1')).toThrow('elementos array expected')
+  })
+})

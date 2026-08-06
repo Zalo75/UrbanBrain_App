@@ -158,11 +158,12 @@ export function parseSiotugaDocumentInventory(
   }
   const filesRoot = requiredString(inventory.datos_xerais?.filesroot, 'datos_xerais.filesroot')
   const folder = requiredString(inventory.datos_xerais?.folder, 'datos_xerais.folder')
-  if (!Array.isArray(inventory.elementos)) {
+  const elementos = inventory.elementos ?? []
+  if (!Array.isArray(elementos)) {
     throw new Error('SIOTUGA document inventory contract changed: elementos array expected')
   }
 
-  const documents = inventory.elementos.flatMap((value): PlanningNormativeDocument[] => {
+  const documents = elementos.flatMap((value): PlanningNormativeDocument[] => {
     const group = value as SiotugaDocumentGroup
     const groupName = requiredString(group.description, 'elementos.description')
     if (!Array.isArray(group.componentes)) {
