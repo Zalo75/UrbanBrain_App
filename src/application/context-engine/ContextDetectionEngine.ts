@@ -108,24 +108,14 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
           ? 'rustico'
           : undefined
   ) : undefined
-  const actionAreaLandClassDetermination = actionAreaLandClass && actionArea
-    ? {
-        value: actionAreaLandClass,
-        origin: 'technician_selection' as const,
-        source: 'manual' as const,
-        verification: actionArea.verification,
-        recordedAt: actionArea.selectedAt,
-        recordedBy: actionArea.selectedBy,
-        validatedAt:
-          actionArea.verification === 'technician_validated' ? actionArea.selectedAt : undefined,
-        validatedBy:
-          actionArea.verification === 'technician_validated' ? actionArea.selectedBy : undefined,
-        previousAutomaticValue: automaticLandClass,
-      }
+  // A work-area choice narrows the spatial context using an official candidate;
+  // it must not manufacture a technician selection of the classification.
+  const actionAreaLandClassDetermination = actionAreaLandClass
+    ? createAutomaticDetermination(actionAreaLandClass, automaticSource)
     : undefined
   const classDet: ContextDeterminationState<string> = {
-    automatic: automaticLandClassDet,
-    technician: actionAreaLandClassDetermination ?? manual?.classificationDetermination?.technician
+    automatic: actionAreaLandClassDetermination ?? automaticLandClassDet,
+    technician: manual?.classificationDetermination?.technician
   }
 
   const landClass = getEffectiveValue(classDet, manual?.classification ?? automaticLandClass)

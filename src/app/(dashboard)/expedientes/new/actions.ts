@@ -354,9 +354,79 @@ export async function createExpediente(
     let territorialContextPending = false
     try {
       if (preflight) {
+        const now = new Date().toISOString()
+        const actionAreaMode = formText(formData, 'actionAreaMode')
+        let actionAreaSelection: any = undefined
+        if (actionAreaMode === 'detected_zone' && selectedCandidate) {
+          const parcelCoverage = selectedCandidate.parcelCoverage
+          const areaSqM = parcelCoverage?.intersectionAreaSquareMetres
+          const geom = parcelCoverage?.intersectionGeometry
+          const candidateParcelSurface = parcelCoverage?.parcelAreaSquareMetres ?? classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? 0
+
+          actionAreaSelection = {
+            history: [],
+            current: {
+              id: crypto.randomUUID(),
+              selectionType: 'detected_zone',
+              selectedCandidateId: selectedCandidate.id,
+              geometry: geom ?? preflight.result.parcelGeometry!,
+              surfaceSquareMetres: areaSqM ?? candidateParcelSurface,
+              parcelSurfaceSquareMetres: candidateParcelSurface,
+              classification: selectedCandidate.kind === 'official_classification' ? selectedCandidate.classification.code : undefined,
+              category: selectedCandidate.kind === 'official_classification' ? selectedCandidate.classification.categoryCode : undefined,
+              planningZone: selectedCandidate.areas.length === 1 ? selectedCandidate.areas[0].name : undefined,
+              planningZones: selectedCandidate.areas.map((a: { name: string }) => a.name),
+              source: selectedCandidate.source,
+              confidence: selectedCandidate.confidence,
+              selectedBy: userId,
+              selectedAt: now,
+              // Choosing a detected geometry only scopes the work area. It is
+              // never a technical validation of its territorial facts.
+              verification: 'unverified'
+            }
+          }
+        } else if (actionAreaMode === 'whole_parcel') {
+          const candidateParcelSurface = classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? 0
+          actionAreaSelection = {
+            history: [],
+            current: {
+              id: crypto.randomUUID(),
+              selectionType: 'whole_parcel',
+              geometry: preflight.result.parcelGeometry!,
+              surfaceSquareMetres: candidateParcelSurface,
+              parcelSurfaceSquareMetres: candidateParcelSurface,
+              source: 'manual',
+              confidence: 'unknown',
+              selectedBy: userId,
+              selectedAt: now,
+              verification: 'unverified'
+            }
+          }
+        }
+
+        const baseManualContext = preflight.result.continuity?.manualContext
+        const manualContext = actionAreaSelection || baseManualContext
+          ? {
+              ...(baseManualContext ?? {
+                provenance: 'manual' as const,
+                verification: actionAreaSelection?.current.verification === 'technician_validated' ? 'technician_validated' as const : 'unverified' as const,
+                recordedAt: now
+              }),
+              ...(actionAreaSelection ? { actionAreaSelection } : {})
+            }
+          : undefined
+
+        const newContinuity = manualContext || preflight.result.continuity
+          ? {
+              ...(preflight.result.continuity ?? { usingPreviousOfficialContext: false, sameParcelAsPrevious: false }),
+              ...(manualContext ? { manualContext } : {})
+            }
+          : undefined
+
         const resultForPersistence = classificationResolution
           ? {
               ...preflight.result,
+              ...(newContinuity ? { continuity: newContinuity } : {}),
               planning: {
                 ...preflight.result.planning,
                 classificationResolution: {
@@ -371,7 +441,7 @@ export async function createExpediente(
                           operationalValue: landClass ?? undefined,
                           areaNames: urbanPlanningZone ? [urbanPlanningZone] : [],
                           reason: classificationSelectionReason,
-                          selectedAt: new Date().toISOString(),
+                          selectedAt: now,
                           selectedBy: userId,
                           technicianValidated: false,
                           resolutionFingerprint:
@@ -381,7 +451,10 @@ export async function createExpediente(
                 },
               },
             }
-          : preflight.result
+          : {
+              ...preflight.result,
+              ...(newContinuity ? { continuity: newContinuity } : {}),
+            }
         if (!await engine.persistAuthorizedDetection(newExpedienteId, userId, resultForPersistence)) {
           throw new Error('territorial_context_not_persisted')
         }

@@ -144,7 +144,9 @@ export function applyActionAreaToUrbanisticFacts(
       label: candidate?.kind === 'official_classification' ? (candidate.classification.label ?? selection.classification) : selection.classification,
       status,
       confidence,
-      origin: 'technician_selection',
+      origin: selection.verification === 'technician_validated'
+        ? 'technician_confirmation'
+        : 'spatial_intersection',
       evidence: candidate?.evidence ?? automatic.classification.evidence,
       discrepancies: [],
       warnings: [...automatic.classification.warnings],
@@ -160,7 +162,9 @@ export function applyActionAreaToUrbanisticFacts(
           label: candidate?.kind === 'official_classification' ? (candidate.classification.categoryLabel ?? selection.category) : selection.category,
           status,
           confidence,
-          origin: 'technician_selection',
+          origin: selection.verification === 'technician_validated'
+            ? 'technician_confirmation'
+            : 'spatial_intersection',
           evidence: candidate?.evidence ?? automatic.category.evidence,
           discrepancies: [],
           warnings: [...automatic.category.warnings],
@@ -172,7 +176,9 @@ export function applyActionAreaToUrbanisticFacts(
           label: undefined,
           status: 'not_available',
           confidence: 'unknown',
-          origin: 'technician_selection',
+          origin: selection.verification === 'technician_validated'
+            ? 'technician_confirmation'
+            : 'spatial_intersection',
           evidence: candidate?.evidence ?? automatic.category.evidence,
           discrepancies: [],
           warnings: [

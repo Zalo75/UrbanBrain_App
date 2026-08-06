@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ClassificationCandidate, ParcelGeometry } from '@/domain/territorial-resolver/types'
+import type {
+  ClassificationCandidate,
+  ParcelGeometry,
+  UrbanisticRegimeFacts,
+} from '@/domain/territorial-resolver/types'
 import {
+  applyActionAreaToUrbanisticFacts,
   createDetectedZoneActionArea,
   createWholeParcelActionArea,
   revokeActionAreaSelection,
@@ -42,6 +47,41 @@ function candidate(id: string, code: string, categoryCode: string, area: string)
       parcelPercentage: 22.16,
       method: 'polygon_intersection',
       intersectionGeometry: geometry,
+    },
+  }
+}
+
+function automaticFacts(): UrbanisticRegimeFacts {
+  return {
+    classification: {
+      value: { code: 'SR', label: 'Suelo rústico' },
+      label: 'Suelo rústico',
+      status: 'automatic_confirmed',
+      origin: 'spatial_intersection',
+      confidence: 'high',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: 'none',
+    },
+    category: {
+      value: { code: 'SRP', label: 'Suelo rústico protegido' },
+      label: 'Suelo rústico protegido',
+      status: 'automatic_confirmed',
+      origin: 'spatial_intersection',
+      confidence: 'high',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: 'none',
+    },
+    consolidation: {
+      status: 'not_applicable',
+      confidence: 'unknown',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: 'none',
     },
   }
 }
@@ -110,5 +150,58 @@ describe('action area selection', () => {
       selectedAt: '2026-08-04T10:00:00.000Z',
       verification: 'technician_validated',
     })).toBeUndefined()
+  })
+
+  it('keeps a detected zone pending rather than as a technician selection', () => {
+    const selection = createDetectedZoneActionArea({
+      candidate: candidate('zone-a', 'SNR', 'SNRSC', 'CASCAS'),
+      selectedBy: 'architect-a',
+      selectedAt: '2026-08-04T10:00:00.000Z',
+      verification: 'unverified',
+    })?.current
+
+    const facts = applyActionAreaToUrbanisticFacts(automaticFacts(), undefined, selection)
+
+    expect(selection).toMatchObject({
+      selectionType: 'detected_zone',
+      verification: 'unverified',
+      classification: 'SNR',
+      category: 'SNRSC',
+    })
+    expect(selection).not.toHaveProperty('ordinance')
+    expect(facts.classification).toMatchObject({
+      status: 'manual_review_required',
+      origin: 'spatial_intersection',
+      nextAction: 'manual_selection',
+    })
+    expect(facts.category).toMatchObject({
+      status: 'manual_review_required',
+      origin: 'spatial_intersection',
+      nextAction: 'manual_selection',
+    })
+  })
+
+  it('keeps the same zone when explicitly confirmed by a technician', () => {
+    const selection = createDetectedZoneActionArea({
+      candidate: candidate('zone-a', 'SNR', 'SNRSC', 'CASCAS'),
+      selectedBy: 'architect-a',
+      selectedAt: '2026-08-04T10:00:00.000Z',
+      verification: 'technician_validated',
+    })?.current
+
+    const facts = applyActionAreaToUrbanisticFacts(automaticFacts(), undefined, selection)
+
+    expect(selection).toMatchObject({
+      selectedCandidateId: 'zone-a',
+      verification: 'technician_validated',
+    })
+    expect(facts.classification).toMatchObject({
+      status: 'technician_validated',
+      origin: 'technician_confirmation',
+    })
+    expect(facts.category).toMatchObject({
+      status: 'technician_validated',
+      origin: 'technician_confirmation',
+    })
   })
 })

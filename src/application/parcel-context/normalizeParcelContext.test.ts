@@ -287,4 +287,95 @@ describe('buildNormalizedParcelContext', () => {
       value: 'Z-5'
     })
   })
+
+  it('keeps a selected detected zone unverified and unable to enable concrete parameters', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        planningCanAnswerConcreteParameters: true,
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-08-06T10:00:00.000Z',
+          actionAreaSelection: {
+            history: [],
+            current: {
+              id: 'zone-a',
+              selectionType: 'detected_zone',
+              selectedCandidateId: 'candidate-a',
+              geometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+              },
+              surfaceSquareMetres: 600,
+              parcelSurfaceSquareMetres: 1000,
+              classification: 'SU',
+              category: 'SUSC',
+              planningZone: 'LEDONO',
+              planningZones: ['LEDONO'],
+              source: 'siotuga',
+              confidence: 'high',
+              selectedBy: 'architect-a',
+              selectedAt: '2026-08-06T10:00:00.000Z',
+              verification: 'unverified',
+            },
+          },
+        },
+      },
+    })
+
+    expect(context.actionArea).toMatchObject({ verification: 'unverified' })
+    expect(context.landClass).toMatchObject({
+      value: 'urbano_no_consolidado',
+      verification: 'unverified',
+    })
+    expect(context.canAnswerConcreteParameters).toBe(false)
+    expect(context.pendingValidation).toContain(
+      'El área de actuación seleccionada está pendiente de validación técnica.'
+    )
+  })
+
+  it('continues to reconstruct historically technician-validated action areas as confirmed', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        manualContext: {
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: '2026-08-06T10:00:00.000Z',
+          actionAreaSelection: {
+            history: [],
+            current: {
+              id: 'zone-a',
+              selectionType: 'detected_zone',
+              selectedCandidateId: 'candidate-a',
+              geometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+              },
+              surfaceSquareMetres: 600,
+              parcelSurfaceSquareMetres: 1000,
+              classification: 'SU',
+              category: 'SUSC',
+              planningZone: 'LEDONO',
+              planningZones: ['LEDONO'],
+              source: 'siotuga',
+              confidence: 'high',
+              selectedBy: 'architect-a',
+              selectedAt: '2026-08-06T10:00:00.000Z',
+              verification: 'technician_validated',
+            },
+          },
+        },
+      },
+    })
+
+    expect(context.actionArea).toMatchObject({ verification: 'confirmed' })
+    expect(context.landClass).toMatchObject({
+      value: 'urbano_no_consolidado',
+      verification: 'confirmed',
+    })
+  })
 })

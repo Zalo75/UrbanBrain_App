@@ -224,4 +224,113 @@ describe('ContextDetectionEngine tenant boundary', () => {
     })
     expect(mocks.values.mock.calls[0][0].summary.qualification).toBeUndefined()
   })
+
+  it('does not turn a detected work-area choice into a technician classification selection', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+    })
+    const selectedZone: TerritorialResolution = {
+      ...resolution,
+      municipality: 'Culleredo',
+      municipalityCode: '15031',
+      planning: {
+        status: 'partial',
+        instrument: 'PXOU',
+        classification: {
+          code: 'SU',
+          categoryCode: 'SUSC',
+          label: 'Suelo urbano',
+          sourceFeatureIds: ['candidate-a'],
+        },
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [{
+            kind: 'official_classification',
+            id: 'candidate-a',
+            classification: {
+              code: 'SU',
+              categoryCode: 'SUSC',
+              label: 'Suelo urbano',
+              sourceFeatureIds: ['candidate-a'],
+            },
+            areas: [{ type: 'zone', name: 'LEDONO', sourceFeatureIds: ['candidate-a'] }],
+            source: 'siotuga',
+            evidence: [],
+            confidence: 'high',
+            evidenceBasis: 'parcel_geometry',
+            instrumentTraceability: 'verified',
+            normalizationStatus: 'mapped',
+            parcelCoverage: {
+              parcelAreaSquareMetres: 1000,
+              intersectionAreaSquareMetres: 600,
+              parcelPercentage: 60,
+              method: 'polygon_intersection',
+              intersectionGeometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+              },
+            },
+          }],
+          discrepancies: [],
+          reviewReasons: [],
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+        evidence: [],
+        warnings: [],
+      },
+      continuity: {
+        usingPreviousOfficialContext: false,
+        sameParcelAsPrevious: true,
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-08-06T10:00:00.000Z',
+          actionAreaSelection: {
+            history: [],
+            current: {
+              id: 'zone-a',
+              selectionType: 'detected_zone',
+              selectedCandidateId: 'candidate-a',
+              geometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+              },
+              surfaceSquareMetres: 600,
+              parcelSurfaceSquareMetres: 1000,
+              classification: 'SU',
+              category: 'SUSC',
+              planningZone: 'LEDONO',
+              planningZones: ['LEDONO'],
+              source: 'siotuga',
+              confidence: 'high',
+              selectedBy: 'architect-a',
+              selectedAt: '2026-08-06T10:00:00.000Z',
+              verification: 'unverified',
+            },
+          },
+        },
+      },
+    }
+
+    await new ContextDetectionEngine(vi.fn(async () => selectedZone)).persistAuthorizedDetection(
+      'expediente-org-a',
+      'usuario-org-a',
+      selectedZone
+    )
+
+    const summary = mocks.values.mock.calls[0][0].summary
+    expect(summary.classificationDetermination).toMatchObject({
+      automatic: { value: 'urbano_no_consolidado', origin: 'automatic' },
+    })
+    expect(summary.classificationDetermination.technician).toBeUndefined()
+    expect(summary.urbanisticFacts.classification).toMatchObject({
+      status: 'manual_review_required',
+      origin: 'spatial_intersection',
+    })
+  })
 })

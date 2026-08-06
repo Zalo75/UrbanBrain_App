@@ -44,7 +44,11 @@ import { createExpediente, detectContextAction } from './actions'
 import { initialCreateExpedienteState } from './creationState'
 import { storePreflightDetection } from './preflightDetectionCache'
 import { summarizeSmartCaseDetection } from './smartCaseDetection'
-import type { TerritorialResolution } from '@/domain/territorial-resolver/types'
+import type {
+  TerritorialResolution,
+  OfficialClassificationCandidate,
+  DerivedUnmappedComplementCandidate
+} from '@/domain/territorial-resolver/types'
 
 const result: TerritorialResolution = {
   status: 'confirmed', confidence: 'high', inputMethod: 'cadastral_reference',
@@ -361,6 +365,167 @@ describe('createExpediente smart preflight', () => {
               reason: 'Comprobado en el visor oficial por el técnico.',
             }),
           }),
+        }),
+      })
+    )
+  })
+  it('persists a map-centric ActionAreaSelection reading directly from the candidate parcelCoverage', async () => {
+    const candidate: OfficialClassificationCandidate = {
+      kind: 'official_classification',
+      id: 'candidate-snr',
+      classification: {
+        code: 'SNR',
+        categoryCode: 'SNRSC',
+        label: 'Suelo de Núcleo Rural',
+        sourceFeatureIds: ['feature-snr'],
+      },
+      areas: [{ type: 'zone' as const, name: 'CASCAS', sourceFeatureIds: ['feature-snr'] }],
+      source: 'siotuga' as const,
+      evidence: [],
+      confidence: 'high' as const,
+      evidenceBasis: 'parcel_geometry' as const,
+      instrumentTraceability: 'verified' as const,
+      normalizationStatus: 'mapped' as const,
+      parcelCoverage: {
+        parcelAreaSquareMetres: 1000,
+        intersectionAreaSquareMetres: 600,
+        parcelPercentage: 60,
+        method: 'polygon_intersection',
+        intersectionGeometry: { type: 'MultiPolygon', coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]] as any, crs: 'EPSG:4326' },
+      }
+    }
+    const reviewResult: TerritorialResolution = {
+      ...result,
+      planning: {
+        ...result.planning,
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [candidate],
+          discrepancies: [],
+          reviewReasons: [],
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'La capa requiere revisión.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          }
+        },
+      },
+    }
+    const detectionId = storePreflightDetection(
+      'user-a',
+      summarizeSmartCaseDetection(reviewResult)
+    )
+    const manual = form(detectionId)
+    manual.set('actionAreaMode', 'detected_zone')
+    manual.set('classificationCandidateId', candidate.id)
+
+    await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
+      'NEXT_REDIRECT'
+    )
+
+    expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({
+        continuity: expect.objectContaining({
+          manualContext: expect.objectContaining({
+            actionAreaSelection: expect.objectContaining({
+              current: expect.objectContaining({
+                selectionType: 'detected_zone',
+                selectedCandidateId: 'candidate-snr',
+                classification: 'SNR',
+                category: 'SNRSC',
+                planningZone: 'CASCAS',
+                geometry: candidate.parcelCoverage?.intersectionGeometry,
+                surfaceSquareMetres: 600,
+                parcelSurfaceSquareMetres: 1000,
+                verification: 'unverified',
+              })
+            }),
+            verification: 'unverified',
+          })
+        }),
+      })
+    )
+  })
+
+  it('persists a map-centric ActionAreaSelection for derived candidates without official classification', async () => {
+    const candidate: DerivedUnmappedComplementCandidate = {
+      kind: 'derived_unmapped_complement',
+      id: 'candidate-complement',
+      source: 'derived_geometry_complement',
+      evidence: [],
+      confidence: 'unknown',
+      evidenceBasis: 'parcel_geometry',
+      instrumentTraceability: 'pending',
+      normalizationStatus: 'unmapped',
+      areas: [],
+      parcelCoverage: {
+        parcelAreaSquareMetres: 1000,
+        intersectionAreaSquareMetres: 400,
+        parcelPercentage: 40,
+        method: 'polygon_intersection',
+        intersectionGeometry: { type: 'MultiPolygon', coordinates: [[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]] as any, crs: 'EPSG:4326' },
+      }
+    }
+    const reviewResult: TerritorialResolution = {
+      ...result,
+      planning: {
+        ...result.planning,
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [candidate],
+          discrepancies: [],
+          reviewReasons: [],
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'La capa requiere revisión.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          }
+        },
+      },
+    }
+    const detectionId = storePreflightDetection(
+      'user-a',
+      summarizeSmartCaseDetection(reviewResult)
+    )
+    const manual = form(detectionId)
+    manual.set('actionAreaMode', 'detected_zone')
+    manual.set('classificationCandidateId', candidate.id)
+
+    await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
+      'NEXT_REDIRECT'
+    )
+
+    expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({
+        continuity: expect.objectContaining({
+          manualContext: expect.objectContaining({
+            actionAreaSelection: expect.objectContaining({
+              current: expect.objectContaining({
+                selectionType: 'detected_zone',
+                selectedCandidateId: 'candidate-complement',
+                classification: undefined,
+                category: undefined,
+                planningZone: undefined,
+                geometry: candidate.parcelCoverage.intersectionGeometry,
+                surfaceSquareMetres: 400,
+                parcelSurfaceSquareMetres: 1000,
+              })
+            })
+          })
         }),
       })
     )
