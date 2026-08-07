@@ -15,13 +15,14 @@ import {
 } from '@/application/parcel-context/applicabilityEngine';
 import {
   buildNormativeSearchScope,
-  canSearchConcreteParameters,
+  canSearchNormativeInformation,
   type NormativeSearchScope,
 } from '@/application/parcel-context/normativeSearchScope';
 import { resolveSupplementaryNormativeScope } from '@/application/parcel-context/supplementaryNormativeScope';
 import {
   buildAnswerContract,
   buildMunicipalSafetyPrompt,
+  buildReviewSafetyPrompt,
   buildSafeAbstention,
   buildStructuredParcelFactAnswer,
   validateGeneratedAnswer,
@@ -195,6 +196,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       const applicability: ApplicabilityResult = {
         status: structuredFactAnswer.hasConflict ? 'CONFLICTIVO' : 'DETERMINADO',
         applicable: [],
+        review: [],
         rejected: [],
         warnings: [],
         missingData: [],
@@ -213,7 +215,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       return NextResponse.json({ answer, sources: [], safety: contract });
     }
 
-    if (questionScope === 'regime' && !canSearchConcreteParameters(normativeScope)) {
+    if (questionScope === 'regime' && !canSearchNormativeInformation(normativeScope)) {
       const applicability = evaluateApplicability(parcelContext, [], true);
       applicability.missingData.push(`alcance normativo previo: ${normativeScope.reason}`);
       const answer = buildSafeAbstention(applicability, parcelContext, message);
@@ -464,6 +466,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               ? 'PARCIAL'
               : 'DETERMINADO',
         applicable: answerCandidates,
+        review: [],
         rejected: [],
         warnings: parcelContext.pendingValidation,
         missingData: concreteParameterRequested
@@ -513,7 +516,9 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       answerCandidates = layeredRetrievalApplicability.applicable;
     } else {
       applicability = layeredRegimeApplicability;
-      answerCandidates = applicability.applicable;
+      answerCandidates = applicability.applicable.length > 0
+        ? applicability.applicable
+        : applicability.review;
     }
     retrievalApplicability = layeredRetrievalApplicability;
 
@@ -521,10 +526,14 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       applicability.status === 'CONFLICTIVO' ||
       applicability.status === 'NO_DETERMINADO' ||
       !applicability.canAnswerConcreteParameters;
+    const hasReviewableRegimeEvidence =
+      questionScope === 'regime' &&
+      applicability.status === 'PARCIAL' &&
+      applicability.review.length > 0;
     const mustAbstain =
       answerCandidates.length === 0 ||
       retrievalApplicability.status === 'CONFLICTIVO' ||
-      (questionScope === 'regime' && regimeUnavailable);
+      (questionScope === 'regime' && regimeUnavailable && !hasReviewableRegimeEvidence);
 
     if (mustAbstain) {
       const answer = buildSafeAbstention(applicability, parcelContext, message);
@@ -576,12 +585,14 @@ FUNDAMENTO NORMATIVO
 FUENTES
 [Lista de las fuentes utilizadas en formato: - CTE DB-XX, Capítulo X, apartado Y, página Z. Fuente oficial: URL]`;
     } else {
-      systemPrompt = buildMunicipalSafetyPrompt(
-        parcelContext,
-        applicability,
-        answerCandidates,
-        questionScope
-      );
+      systemPrompt = hasReviewableRegimeEvidence
+        ? buildReviewSafetyPrompt(parcelContext, answerCandidates, questionScope)
+        : buildMunicipalSafetyPrompt(
+            parcelContext,
+            applicability,
+            answerCandidates,
+            questionScope
+          );
     }
 
     // Logging for CTE V2 Response Mode
@@ -637,7 +648,8 @@ ${usedV2 ? v2Citas : 'N/A'}
       answerCandidates,
       applicability,
       questionScope,
-      parcelContext
+      parcelContext,
+      hasReviewableRegimeEvidence
     );
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';

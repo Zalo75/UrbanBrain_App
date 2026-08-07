@@ -254,8 +254,8 @@ describe('evaluateApplicability', () => {
     )
 
     expect(result.applicable).toHaveLength(0)
-    expect(result.rejected[0].reason).toMatch(/potencialmente relevante.*no acredita su aplicaci\u00f3n/i)
-    expect(result.rejected[0].reason).not.toMatch(/otro \u00e1mbito/i)
+    expect(result.review).toHaveLength(1)
+    expect(result.rejected).toHaveLength(0)
   })
 
   it('rechaza un \u00e1mbito documental expl\u00edcitamente distinto', () => {

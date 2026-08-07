@@ -144,11 +144,15 @@ export function classifyParcelQuestionScope(question: string): ParcelQuestionSco
   const requiresRegime = requiresDeterminedParcelRegime(question)
   if (!requiresRegime) return 'independent'
 
+  const isDocumentaryQuery = /\b(?:qu[eé]\s+(?:normativa|documentos?|fuentes?|regulaci[oó]n)\s+(?:has\s+(?:localizado|encontrado|utilizado)|aparece)|mu[eé]strame\s+la\s+normativa\s+relacionada)\b/i.test(
+    question
+  )
+
   const includesIndependentScope = /\b(?:afecciones?|carreteras?|aguas?|costas?|patrimonio|red\s+natura|planeamiento\s+vigente|documentos?|referencias?\s+catastrales?|catastro|coordenadas?|normativa\s+general|informaci[oó]n\s+territorial|contexto\s+administrativo|tr[aá]mites?\s+administrativos?)\b/i.test(
     question
   )
 
-  return includesIndependentScope ? 'mixed' : 'regime'
+  return (includesIndependentScope || isDocumentaryQuery) ? 'mixed' : 'regime'
 }
 
 export function evaluateApplicability(
@@ -159,6 +163,7 @@ export function evaluateApplicability(
   const result: ApplicabilityResult = {
     status: 'NO_DETERMINADO',
     applicable: [],
+    review: [],
     rejected: [],
     warnings: [],
     missingData: [],
@@ -324,10 +329,7 @@ export function evaluateApplicability(
       extractOrdinances(candidate).length === 0 &&
       !matchesExpected(candidate, expectedQualification ?? expectedArea!)
     ) {
-      result.rejected.push({
-        candidate,
-        reason: `El fragmento contiene una regulaci\u00f3n potencialmente relevante, pero no acredita su aplicaci\u00f3n a ${expectedQualification ? `la ordenanza o calificaci\u00f3n ${expectedQualification}` : `el \u00e1mbito ${expectedArea}`}.`,
-      })
+      result.review.push(candidate)
       continue
     }
 
@@ -340,10 +342,7 @@ export function evaluateApplicability(
         (expectedArea && hasCompatiblePlanningArea(candidate, expectedArea))
       )
     ) {
-      result.rejected.push({
-        candidate,
-        reason: 'No existe relación demostrable entre el parámetro recuperado y la ordenanza o ámbito de la parcela.',
-      })
+      result.review.push(candidate)
       continue
     }
 

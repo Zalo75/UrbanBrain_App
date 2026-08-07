@@ -514,6 +514,55 @@ FRAGMENTOS AUTORIZADOS Y APLICABLES
 ${sourceText}`
 }
 
+export function buildReviewSafetyPrompt(
+  context: NormalizedParcelContext,
+  sources: NormativeCandidate[],
+  questionScope: ParcelQuestionScope = 'independent'
+) {
+  const sourceText = sources
+    .map((source, index) => {
+      const hierarchy = source.hierarchy ?? 'municipal'
+      return [
+        `[Fuente ${index + 1}]`,
+        `Nivel normativo: ${hierarchy}`,
+        `Municipio: ${source.municipalityName ?? 'no identificado'}`,
+        `Documento: ${source.documentName ?? 'no identificado'}`,
+        `Apartado: ${source.title ?? 'no identificado'}`,
+        `Página: ${source.page ?? 'no identificada'}`,
+        `URL: ${source.sourceUrl ?? 'no disponible'}`,
+        `Fragmento:\n${source.content}`,
+      ].join('\n')
+    })
+    .join('\n\n')
+
+  const expectedZone = context.qualification?.value || context.planningArea?.value || 'el ámbito'
+
+  return `Eres UrbanBrain, asistente urbanístico. Tu tarea es extraer la información solicitada de los fragmentos recuperados para su revisión por parte de un técnico. No debes afirmar que los datos aplican a la parcela, ya que no se ha podido acreditar la relación entre la normativa y ${expectedZone}.
+
+REGLAS OBLIGATORIAS
+1. Nunca afirmes "La ocupación máxima de esta parcela es X", "Para esta parcela aplica X" ni uses verbos afirmativos sobre la parcela.
+2. Nunca uses "Me abstengo" o "No puedo determinar".
+3. Limítate a formular los datos como contenido de la normativa recuperada.
+4. Incluye documento, artículo/apartado y página en cada extracción.
+5. Cita las fuentes usando [Fuente N].
+6. La sección FUENTES debe incluir: "Documento, artículo/página, enlace oficial." o "Documento identificado; enlace oficial no disponible" si no hay URL.
+
+FORMATO DE RESPUESTA REQUERIDO:
+
+INFORMACIÓN LOCALIZADA
+La normativa recuperada contiene las siguientes determinaciones relacionadas con la consulta:
+- [dato o disposición], según [documento, artículo, página] [Fuente 1].
+
+VERIFICACIÓN NECESARIA
+La relación de estas determinaciones con ${expectedZone} o con la ordenanza aplicable todavía no está acreditada.
+
+FUENTES
+- [Fuente 1]: Documento, artículo/página, enlace oficial.
+
+FRAGMENTOS PARA REVISIÓN
+${sourceText}`
+}
+
 function citedNumbers(answer: string) {
   return unique([...answer.matchAll(/\[Fuente\s+(\d+)\]/gi)].map((match) => Number(match[1])))
 }
@@ -582,7 +631,8 @@ export function validateGeneratedAnswer(
   sources: NormativeCandidate[],
   applicability: ApplicabilityResult,
   questionScope: ParcelQuestionScope = 'regime',
-  context?: NormalizedParcelContext
+  context?: NormalizedParcelContext,
+  isReviewMode = false
 ): AnswerValidationResult {
   const reasons: string[] = []
   const citations = citedNumbers(answer)
@@ -600,10 +650,17 @@ export function validateGeneratedAnswer(
     reasons.push('La respuesta cita una fuente inexistente.')
   }
 
-  if (questionScope === 'regime' && !applicability.canAnswerConcreteParameters) {
-    const answerNumbers = numericTokens(answer)
-    if (answerNumbers.length > 0) {
-      reasons.push('La respuesta contiene cifras sin un régimen de parcela determinado.')
+  if (questionScope === 'regime' && !applicability.canAnswerConcreteParameters && !isReviewMode) {
+    const onlyMissingTechnicalConfirmation =
+      applicability.missingData.length === 1 &&
+      applicability.missingData[0] === 'confirmación técnica del régimen urbanístico aplicable' &&
+      applicability.conflicts.length === 0;
+
+    if (!onlyMissingTechnicalConfirmation) {
+      const answerNumbers = numericTokens(answer)
+      if (answerNumbers.length > 0) {
+        reasons.push('La respuesta contiene cifras sin un régimen de parcela determinado.')
+      }
     }
   }
 
@@ -621,7 +678,8 @@ export function validateGeneratedAnswer(
       questionScope === 'mixed' &&
       !applicability.canAnswerConcreteParameters &&
       requiresDeterminedParcelRegime(claim) &&
-      !regimeAbstention
+      !regimeAbstention &&
+      !isReviewMode
     ) {
       reasons.push('La respuesta mixta afirma un parámetro de parcela sin régimen determinado.')
     }

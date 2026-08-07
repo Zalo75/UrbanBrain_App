@@ -7,9 +7,9 @@ const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   select: vi.fn().mockReturnValue({
     from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue(Object.assign(Promise.resolve([]), {
         limit: vi.fn().mockResolvedValue([]),
-      }),
+      })),
     }),
   }),
   values: vi.fn(),
@@ -571,6 +571,30 @@ describe('POST /api/chat parcel context boundary', () => {
       error: null,
     })
 
+    mocks.completionCreate.mockImplementation((req: any) => {
+      const systemPrompt = req.messages[0].content
+      if (systemPrompt.includes('Tu tarea es extraer la información solicitada')) {
+        return Promise.resolve({
+          choices: [{
+            message: {
+              content: `INFORMACIÓN LOCALIZADA
+La normativa recuperada contiene las siguientes determinaciones relacionadas con la consulta:
+- disposiciones sobre retranqueos, según documento [Fuente 1].
+
+VERIFICACIÓN NECESARIA
+La relación de estas determinaciones con el ámbito CASCAS o con la ordenanza aplicable todavía no está acreditada.
+
+FUENTES
+- [Fuente 1]: 0060no011.pdf, no identificada, enlace oficial no disponible.`
+            }
+          }],
+        })
+      }
+      return Promise.resolve({
+        choices: [{ message: { content: 'El documento vigente se identifica en la fuente [Fuente 1].' } }],
+      })
+    })
+
     const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -581,7 +605,7 @@ describe('POST /api/chat parcel context boundary', () => {
     }))
     const payload = await response.json()
 
-    expect(payload.safety.decision).toBe('abstain')
+    expect(payload.safety.decision).toBe('answer')
     expect(payload.answer).toContain('disposiciones sobre retranqueos')
     expect(payload.answer).toContain('\u00e1mbito CASCAS')
     expect(payload.answer).not.toContain('No se ha recuperado evidencia documental suficiente')

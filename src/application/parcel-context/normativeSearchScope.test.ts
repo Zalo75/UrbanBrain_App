@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import {
   buildNormativeSearchScope,
-  canSearchConcreteParameters,
+  canSearchNormativeInformation,
 } from './normativeSearchScope'
 
 function context(
@@ -99,7 +99,7 @@ describe('buildNormativeSearchScope', () => {
       planningZone: 'LEDOÑO',
       confidence: 'unknown',
     })
-    expect(canSearchConcreteParameters(scope)).toBe(false)
+    expect(canSearchNormativeInformation(scope)).toBe(false)
   })
 
   it('limita por ordenanza y documentos generales cuando la selección está validada por técnico', () => {
@@ -133,7 +133,7 @@ describe('buildNormativeSearchScope', () => {
       ordinance: 'Ordenanza R4',
       documentNames: ['0060no011.pdf'],
     })
-    expect(canSearchConcreteParameters(scope)).toBe(true)
+    expect(canSearchNormativeInformation(scope)).toBe(true)
   })
 
   it('acepta un documento vinculado específicamente al ámbito sin exigir que el ámbito aparezca en cada chunk', () => {
@@ -152,7 +152,7 @@ describe('buildNormativeSearchScope', () => {
     })
 
     expect(scope.documentNames).toEqual(['apt-1.pdf'])
-    expect(canSearchConcreteParameters(scope)).toBe(false)
+    expect(canSearchNormativeInformation(scope)).toBe(true)
   })
 
   it.each([
@@ -166,7 +166,7 @@ describe('buildNormativeSearchScope', () => {
     })
 
     expect(scope.confidence).toBe('unknown')
-    expect(canSearchConcreteParameters(scope)).toBe(false)
+    expect(canSearchNormativeInformation(scope)).toBe(false)
   })
 
   it('no usa una ordenanza manual sin validación técnica', () => {
@@ -185,6 +185,6 @@ describe('buildNormativeSearchScope', () => {
     })
 
     expect(scope.ordinance).toBeUndefined()
-    expect(canSearchConcreteParameters(scope)).toBe(false)
+    expect(canSearchNormativeInformation(scope)).toBe(false)
   })
 })

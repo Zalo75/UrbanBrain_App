@@ -107,6 +107,7 @@ export interface NormativeCandidate {
 export interface ApplicabilityResult {
   status: ApplicabilityStatus
   applicable: NormativeCandidate[]
+  review: NormativeCandidate[]
   rejected: Array<{ candidate: NormativeCandidate; reason: string }>
   warnings: string[]
   missingData: string[]

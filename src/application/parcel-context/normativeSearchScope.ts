@@ -12,8 +12,11 @@ export interface NormativeSearchScope {
   documentNames?: string[]
   ordinance?: string
   planningZone?: string
+  classification?: string
+  category?: string
   actionAreaId?: string
   actionAreaSelectionType?: string
+  actionAreaValidated: boolean
   source: 'automatic' | 'technician_validated'
   confidence: 'confirmed' | 'probable' | 'unknown'
   reason: string
@@ -127,12 +130,17 @@ export function buildNormativeSearchScope({
   const actionAreaValidated =
     !context.actionArea || context.actionArea.verification === 'confirmed'
   const actionAreaScope = { actionAreaId, actionAreaSelectionType }
+  const classification = context.urbanisticFacts?.classification.value?.code
+  const category = context.urbanisticFacts?.category?.value?.code
 
   if (!municipioCodigo) {
     return {
       municipioCodigo,
       instrumentId,
       ...actionAreaScope,
+      actionAreaValidated,
+      classification,
+      category,
       source: technicianValidated ? 'technician_validated' : 'automatic',
       confidence: 'unknown',
       reason: 'No existe un código INE municipal oficial para limitar el corpus.',
@@ -145,12 +153,16 @@ export function buildNormativeSearchScope({
       instrumentId,
       documentIds: documentIds.length > 0 ? documentIds : undefined,
       documentNames: documentNames.length > 0 ? documentNames : undefined,
-      planningZone,
+      ordinance: context.qualification?.value.trim(),
+      planningZone: context.planningArea?.value.trim() || context.qualification?.value.trim(),
       ...actionAreaScope,
+      actionAreaValidated,
+      classification,
+      category,
       source: 'automatic',
-      confidence: 'unknown',
+      confidence: automaticScopeConfidence(context),
       reason:
-        'El área de actuación seleccionada sigue pendiente de validación técnica y no puede habilitar parámetros urbanísticos concretos.',
+        'Se ha localizado la siguiente regulación en las fuentes citadas. La vinculación de esta regulación con la Zona de trabajo todavía no está técnicamente validada; verifica las fuentes antes de emplear el dato en una decisión profesional.',
     }
   }
 
@@ -161,7 +173,11 @@ export function buildNormativeSearchScope({
       ...actionAreaScope,
       documentIds: documentIds.length > 0 ? documentIds : undefined,
       documentNames: documentNames.length > 0 ? documentNames : undefined,
-      planningZone,
+      ordinance: undefined,
+      planningZone: context.planningArea?.value.trim(),
+      actionAreaValidated,
+      classification,
+      category,
       source: 'automatic',
       confidence: 'unknown',
       reason:
@@ -178,6 +194,9 @@ export function buildNormativeSearchScope({
       documentNames: documentNames.length > 0 ? documentNames : undefined,
       ordinance,
       planningZone,
+      actionAreaValidated,
+      classification,
+      category,
       source: technicianValidated ? 'technician_validated' : 'automatic',
       confidence: technicianValidated
         ? 'confirmed'
@@ -189,6 +208,7 @@ export function buildNormativeSearchScope({
   }
 
   if (documentNames.length > 0) {
+    const hasSearchDescriptor = Boolean(planningZone || classification || category)
     return {
       municipioCodigo,
       instrumentId,
@@ -196,9 +216,14 @@ export function buildNormativeSearchScope({
       documentIds,
       documentNames,
       planningZone,
+      actionAreaValidated,
+      classification,
+      category,
       source: 'automatic',
       confidence: automaticScopeConfidence(context),
-      reason: planningZone
+      reason: hasSearchDescriptor && actionAreaValidated
+        ? ''
+        : planningZone
         ? `La ordenanza aplicable al ámbito ${planningZone} está pendiente de confirmación técnica.`
         : 'La ordenanza aplicable está pendiente de confirmación técnica.',
     }
@@ -208,19 +233,32 @@ export function buildNormativeSearchScope({
     municipioCodigo,
     instrumentId,
     ...actionAreaScope,
-    planningZone,
+    ordinance: context.qualification?.value.trim(),
+    planningZone: planningZone || context.qualification?.value.trim(),
+    actionAreaValidated,
+    classification,
+    category,
     source: technicianValidated ? 'technician_validated' : 'automatic',
     confidence: 'unknown',
-    reason: planningZone
-      ? `El ámbito ${planningZone} no está vinculado todavía a una ordenanza o documento concreto del corpus.`
+    reason: planningZone || context.qualification?.value.trim()
+      ? `El ámbito o calificación no está validado y requiere confirmación técnica.`
       : 'No existe una relación trazable entre la parcela y una ordenanza o documento concreto del corpus.',
   }
 }
 
-export function canSearchConcreteParameters(scope: NormativeSearchScope) {
-  return Boolean(
-      scope.municipioCodigo &&
-      scope.confidence !== 'unknown' &&
-      scope.ordinance
+export function canSearchNormativeInformation(scope: NormativeSearchScope) {
+  const hasDescriptor = Boolean(
+    scope.ordinance || scope.planningZone || scope.classification || scope.category
   )
+  const hasDocumentNames = (scope.documentNames?.length ?? 0) > 0
+
+  return Boolean(
+    scope.municipioCodigo &&
+    hasDescriptor &&
+    hasDocumentNames
+  )
+}
+
+export function canAssertParcelApplicableParameters(scope: NormativeSearchScope) {
+  return canSearchNormativeInformation(scope) && scope.actionAreaValidated
 }

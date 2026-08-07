@@ -626,6 +626,8 @@ export function buildNormalizedParcelContext(
   const resolvedQualification = effectiveOrdDet?.value ?? legacyQualification
   const qualification = resolvedQualification ?? undefined
 
+
+
   if (qualification) {
     const isManual = effectiveOrdDet?.origin === 'technician_selection'
     const source = (isManual ? 'manual' :
@@ -944,9 +946,16 @@ export function buildNormalizedParcelContext(
           actionArea.selectedAt
         )
       }
-      context.planningArea = actionArea.planningZone
+      const fallbackPlanningZone =
+        actionArea.planningZone ||
+        (actionArea.category && context.urbanisticFacts?.category?.value?.code === actionArea.category
+          ? context.urbanisticFacts.category.value.label
+          : undefined) ||
+        input.expediente.urbanPlanningZone;
+
+      context.planningArea = fallbackPlanningZone
         ? field(
-          actionArea.planningZone,
+          fallbackPlanningZone,
           'manual',
           actionAreaConfidence,
           actionAreaVerification,
