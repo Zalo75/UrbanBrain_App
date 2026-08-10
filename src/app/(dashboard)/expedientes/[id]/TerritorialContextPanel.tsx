@@ -568,6 +568,10 @@ export function TerritorialContextPanel({
                                   <input type="hidden" name="actionAreaEdited" value="1" />
                                   <input type="hidden" name="actionAreaCandidateId" value={activeCandidateId} />
                                   <input type="hidden" name="actionAreaValidated" value="on" />
+                                  <input type="hidden" name="refCatastral" value={context.cadastralReference ?? initialInput.cadastralReference ?? ''} />
+                                  <input type="hidden" name="address" value={context.address ?? initialInput.address ?? ''} />
+                                  {Number.isFinite(context.coordinates?.lat ?? initialInput.lat) ? <input type="hidden" name="lat" value={context.coordinates?.lat ?? initialInput.lat ?? ''} /> : null}
+                                  {Number.isFinite(context.coordinates?.lng ?? initialInput.lng) ? <input type="hidden" name="lng" value={context.coordinates?.lng ?? initialInput.lng ?? ''} /> : null}
                                   <Button type="submit" name="actionAreaMode" value="detected_zone" disabled={pending}>
                                     Fijar como Zona de Trabajo
                                   </Button>

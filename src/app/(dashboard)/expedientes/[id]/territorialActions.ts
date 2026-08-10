@@ -93,8 +93,10 @@ export async function resolveTerritorialContextAction(
     return { status: 'error', message: 'Latitud y longitud deben introducirse juntas.' };
   }
 
-  const lat = rawLat ? Number(rawLat) : null;
-  const lng = rawLng ? Number(rawLng) : null;
+  const parsedLat = rawLat ? Number(rawLat) : null;
+  const parsedLng = rawLng ? Number(rawLng) : null;
+  const lat = parsedLat !== null && Number.isFinite(parsedLat) ? parsedLat : null;
+  const lng = parsedLng !== null && Number.isFinite(parsedLng) ? parsedLng : null;
   if (
     (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) ||
     (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180))
@@ -109,26 +111,18 @@ export async function resolveTerritorialContextAction(
   const revokeManualOrdinance = formData.get('manualOrdinanceRevoke') === 'on';
   const manualObservations = limitedText(formData, 'manualObservations', 1000);
   const actionAreaEdited = formData.get('actionAreaEdited') === '1';
-  const hasManualData = Boolean(
-    cadastralReference ||
-      address ||
-      lat !== null ||
-      manualMunicipality ||
-      manualClassification ||
-      manualCategory ||
-      manualArea ||
-      manualOrdinance ||
-      revokeManualOrdinance ||
-      manualObservations ||
-      actionAreaEdited
-  );
 
-  if (
-    !cadastralReference &&
-    lat === null &&
-    !address &&
-    !(intent === 'manual' && hasManualData)
-  ) {
+
+  const hasLocationIdentity = Boolean(cadastralReference) || (lat !== null && lng !== null);
+
+  if (intent === 'manual' && !hasLocationIdentity) {
+    return {
+      status: 'error',
+      message: 'No se puede guardar un contexto manual sin identificar la parcela mediante una referencia catastral o un par completo de coordenadas finitas.',
+    };
+  }
+
+  if (!cadastralReference && lat === null && !address) {
     return {
       status: 'error',
       message: 'Introduzca una referencia catastral, unas coordenadas o una dirección.',

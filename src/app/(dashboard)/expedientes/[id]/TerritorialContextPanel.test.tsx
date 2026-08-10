@@ -8,7 +8,14 @@ vi.mock('./territorialActions', () => ({
   resolveTerritorialContextAction: vi.fn(async () => ({ status: 'success', message: 'ok' })),
 }))
 vi.mock('@/components/maps/ParcelMap', () => ({
-  ParcelMap: () => <div data-testid="parcel-map">Visor cartográfico</div>,
+  ParcelMap: ({ candidates, onCandidateSelect }: { candidates?: { id: string }[], onCandidateSelect: (id: string) => void }) => (
+    <div data-testid="parcel-map">
+      Visor cartográfico
+      {candidates?.map((c) => (
+        <button key={c.id} onClick={() => onCandidateSelect(c.id)}>Seleccionar {c.id}</button>
+      ))}
+    </div>
+  ),
 }))
 
 import { TerritorialContextPanel } from './TerritorialContextPanel'
@@ -437,5 +444,62 @@ describe('TerritorialContextPanel', () => {
     expect(screen.getByText('Revisión manual de afecciones')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Añadir afección' }))
     expect(screen.getByLabelText('Afección nueva')).toBeTruthy()
+  })
+
+  it('el formulario Fijar como Zona de Trabajo transmite la identidad de la parcela de forma oculta', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-a"
+        initialInput={{
+          cadastralReference: '000000000000000000AA',
+          address: 'Calle Falsa 123',
+          lat: 43.1,
+          lng: -8.1
+        }}
+        context={{
+          ...contextWithPlanning,
+          classificationResolution: {
+            candidates: [
+              {
+                id: 'cand-1',
+                source: 'siotuga',
+                classification: 'SNR',
+                category: 'SNRC',
+                areas: [],
+                affects: { detected: [], warnings: [], sourceChecks: [], analysisGeometry: 'parcel', canRuleOutUndetectedAffects: false },
+                confidence: 'high',
+                selectedAt: '2026-01-01',
+                selectedBy: 'user',
+                verification: 'technician_validated',
+                planningZones: [],
+                selectionType: 'detected_zone'
+              }
+            ],
+            confidence: 'high',
+            nextAction: 'manual_selection',
+            resolvedAt: '2026-01-01',
+            discrepancies: []
+          }
+        }}
+      />
+    )
+
+    // Select the candidate using the mocked map button
+    const selectButton = screen.getByRole('button', { name: 'Seleccionar cand-1' })
+    fireEvent.click(selectButton)
+
+    // The form should be rendered
+    const fixZoneButton = screen.getByRole('button', { name: 'Fijar como Zona de Trabajo' })
+    const form = fixZoneButton.closest('form')
+    expect(form).not.toBeNull()
+
+    // Validate hidden inputs are present and have correct values
+    const getHiddenInput = (name: string) => form!.querySelector(`input[name="${name}"]`) as HTMLInputElement
+    expect(getHiddenInput('intent').value).toBe('manual')
+    expect(getHiddenInput('actionAreaCandidateId').value).toBe('cand-1')
+    expect(getHiddenInput('refCatastral').value).toBe('7709702NH4970N0001SZ') // from contextWithPlanning
+    expect(getHiddenInput('address').value).toBe('Calle Falsa 123') // from initialInput
+    expect(getHiddenInput('lat').value).toBe('43.1')
+    expect(getHiddenInput('lng').value).toBe('-8.1')
   })
 })

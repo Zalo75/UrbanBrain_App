@@ -102,16 +102,38 @@ describe('territorial continuity', () => {
     }
   )
 
-  it('no aplica el contexto anterior a una referencia distinta', () => {
+  it('no hereda el contexto oficial si la referencia catastral es diferente', () => {
     const result = attachContinuity(
       failed('timeout'),
       { cadastralReference: '9999999NH4999S' },
-      official()
+      official('1234567NH4913S')
     )
 
     expect(result.continuity?.usingPreviousOfficialContext).toBe(false)
     expect(result.continuity?.effectiveOfficialContext).toBeUndefined()
     expect(result.continuity?.lastOfficialContext).toBeDefined()
+  })
+
+  it('conserva el contexto oficial si coinciden las coordenadas (mismo par completo) aunque falte referencia', () => {
+    const result = attachContinuity(
+      failed('timeout'),
+      { coordinates: { lat: 43.28, lng: -8.26 } },
+      official() // official() tiene lat: 43.28, lng: -8.26
+    )
+
+    expect(result.continuity?.usingPreviousOfficialContext).toBe(true)
+    expect(result.continuity?.sameParcelAsPrevious).toBe(true)
+  })
+
+  it('no hereda el contexto oficial si las coordenadas son de una parcela distinta', () => {
+    const result = attachContinuity(
+      failed('timeout'),
+      { coordinates: { lat: 43.1, lng: -8.1 } }, // Distinto a 43.28, -8.26
+      official()
+    )
+
+    expect(result.continuity?.usingPreviousOfficialContext).toBe(false)
+    expect(result.continuity?.sameParcelAsPrevious).toBe(false)
   })
 
   it('un reintento exitoso vuelve a usar el contexto oficial actual', () => {

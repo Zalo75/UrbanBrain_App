@@ -24,6 +24,11 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   },
 }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
+vi.mock('@/infrastructure/territorial-resolver/IdegAffectAdapter', () => ({
+  IdegAffectAdapter: class {
+    findAffects = vi.fn().mockResolvedValue([])
+  }
+}))
 vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
   loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
 }))
@@ -222,6 +227,7 @@ describe('resolveTerritorialContextAction', () => {
     }))
     const form = new FormData()
     form.set('intent', 'manual')
+    form.set('refCatastral', '1234567NH4913S')
     form.set('manualMunicipality', 'Betanzos')
     form.set('manualClassification', 'Suelo urbano')
     form.set('manualOrdinance', 'Ordenanza 2')
@@ -265,6 +271,7 @@ describe('resolveTerritorialContextAction', () => {
     }))
     const form = new FormData()
     form.set('intent', 'manual')
+    form.set('refCatastral', '1234567NH4913S')
     form.set('manualObservations', 'Pendiente de visita al emplazamiento')
     form.set('provenance', 'catastro')
     form.set('verification', 'confirmed')
@@ -315,6 +322,7 @@ describe('resolveTerritorialContextAction', () => {
     })
     const form = new FormData()
     form.set('intent', 'manual')
+    form.set('refCatastral', '1234567NH4913S')
     form.set('manualMunicipality', 'Betanzos')
     form.set('technicianValidated', 'on')
 
@@ -327,5 +335,229 @@ describe('resolveTerritorialContextAction', () => {
     expect(result.status).toBe('error')
     expect(result.message).toContain('permisos')
     expect(mocks.recordManualContext).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un guardado manual si no se proporciona identidad de parcela (refCatastral o coordenadas completas)', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('manualMunicipality', 'Betanzos')
+    // No set refCatastral, lat, lng
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('No se puede guardar un contexto manual sin identificar la parcela')
+
+    // Confirma que no llama al motor/repositorio
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+    expect(mocks.recordManualContext).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un guardado manual si lat/lng no son numéricos finitos ("abc")', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', 'abc')
+    form.set('lng', 'def')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('No se puede guardar un contexto manual sin identificar la parcela')
+
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+    expect(mocks.recordManualContext).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un guardado manual si solo se proporciona una coordenada', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', '43.34')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('Latitud y longitud deben introducirse juntas')
+    expect(mocks.recordManualContext).not.toHaveBeenCalled()
+  })
+
+  it('acepta un guardado manual con coordenadas 0,0 válidas (no se rechaza por truthiness)', async () => {
+    mocks.recordManualContext.mockImplementation(async (_id, _user, _input, manualContext) => ({
+      ...resolution,
+      status: 'unresolved',
+      evidence: [],
+      continuity: { usingPreviousOfficialContext: false, sameParcelAsPrevious: false, manualContext },
+    }))
+
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', '0')
+    form.set('lng', '0')
+    form.set('manualMunicipality', 'Null Island')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.recordManualContext).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({ coordinates: { lat: 0, lng: 0 } }),
+      expect.any(Object)
+    )
+  })
+
+  it('rechaza un guardado manual si lat es Infinity y lng es válida', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', 'Infinity')
+    form.set('lng', '-8.26')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('No se puede guardar un contexto manual sin identificar la parcela')
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un guardado manual si lng es -Infinity y lat es válida', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', '43.34')
+    form.set('lng', '-Infinity')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('No se puede guardar un contexto manual sin identificar la parcela')
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+  })
+
+  it('rechaza un guardado manual si refCatastral son solo espacios y no hay coordenadas', async () => {
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('refCatastral', '   ')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('error')
+    expect(result.message).toContain('No se puede guardar un contexto manual sin identificar la parcela')
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+  })
+
+  it('acepta un guardado manual solo con lat y lng finitos (sin refCatastral)', async () => {
+    mocks.recordManualContext.mockImplementation(async (_id, _user, _input, manualContext) => ({
+      ...resolution,
+      status: 'unresolved',
+      evidence: [],
+      continuity: { usingPreviousOfficialContext: false, sameParcelAsPrevious: false, manualContext },
+    }))
+
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('lat', '43.34')
+    form.set('lng', '-8.26')
+    form.set('manualMunicipality', 'Sada')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.recordManualContext).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({ coordinates: { lat: 43.34, lng: -8.26 } }),
+      expect.any(Object)
+    )
+  })
+
+  it('al enviar "Fijar como Zona de Trabajo" transmite actionAreaCandidateId y la identidad correctamente', async () => {
+    mocks.recordManualContext.mockImplementation(async (_id, _user, _input, manualContext) => ({
+      ...resolution,
+      status: 'unresolved',
+      evidence: [],
+      continuity: { usingPreviousOfficialContext: false, sameParcelAsPrevious: false, manualContext },
+    }))
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      latestDetectionRaw: {
+        ...resolution,
+        planning: {
+          status: 'partial',
+          evidence: [],
+          warnings: [],
+          classificationResolution: {
+            candidates: [
+              {
+                id: 'cand-1',
+                areas: [],
+                parcelCoverage: { intersectionGeometry: 'poly', surfaceSquareMetres: 100 }
+              }
+            ]
+          }
+        }
+      },
+      detected: {}
+    })
+
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('actionAreaMode', 'detected_zone')
+    form.set('actionAreaEdited', '1')
+    form.set('actionAreaCandidateId', 'cand-1')
+    form.set('actionAreaValidated', 'on')
+    form.set('refCatastral', '1234567NH4913S')
+    form.set('lat', '43.1')
+    form.set('lng', '-8.1')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form
+    )
+
+    expect(result.status).toBe('success')
+    expect(mocks.recordManualContext).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({ cadastralReference: '1234567NH4913S', coordinates: { lat: 43.1, lng: -8.1 } }),
+      expect.objectContaining({
+        actionAreaSelection: expect.objectContaining({
+          current: expect.objectContaining({
+            selectedCandidateId: 'cand-1',
+            verification: 'technician_validated'
+          })
+        })
+      })
+    )
   })
 })
