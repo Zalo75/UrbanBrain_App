@@ -76,7 +76,7 @@ describe('validateGeneratedAnswer', () => {
     expect(validation.reasons).toContain('La respuesta cita una fuente inexistente.')
   })
 
-  it('rechaza cifras cuando el régimen aplicable no está determinado', () => {
+  it('rechaza un parámetro atribuido a la parcela cuando el régimen no está determinado', () => {
     const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
     const validation = validateGeneratedAnswer(
       'La altura máxima es de 7 m [Fuente 1].',
@@ -86,7 +86,7 @@ describe('validateGeneratedAnswer', () => {
     )
 
     expect(validation.valid).toBe(false)
-    expect(validation.reasons.join(' ')).toMatch(/cifras.*régimen/i)
+    expect(validation.reasons.join(' ')).toMatch(/parámetro de parcela sin régimen determinado/i)
   })
 
   it('permite cifras documentales citadas cuando la pregunta no depende del régimen de parcela', () => {
@@ -160,6 +160,184 @@ describe('validateGeneratedAnswer', () => {
 
     expect(validation.valid).toBe(false)
     expect(validation.reasons.join(' ')).toMatch(/parámetro de parcela sin régimen determinado/i)
+  })
+
+  it('rechaza un parámetro atribuido expresamente a esta parcela sin régimen determinado', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+    const parameterSource = {
+      ...source,
+      content: 'La parcela mínima es de 200 m².',
+    }
+
+    const validation = validateGeneratedAnswer(
+      'Para esta parcela, la parcela mínima es 200 m² [Fuente 1].',
+      [parameterSource],
+      partial,
+      'mixed'
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(validation.reasons).toContain('La respuesta atribuye un parámetro de parcela sin régimen determinado.')
+  })
+
+  it('permite inventariar varias ordenanzas citadas cuando declara que no puede saber cuál aplica', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+    const inventorySource = {
+      ...source,
+      content:
+        'Ordenanza A: parcela mínima de 200 m² y ocupación máxima del 20%. Ordenanza B: parcela mínima de 500 m² y ocupación máxima del 10%.',
+    }
+
+    const validation = validateGeneratedAnswer(
+      'Se han recuperado varias ordenanzas, pero no puede determinarse cuál corresponde a esta parcela. Una ordenanza establece una parcela mínima de 200 m² y ocupación máxima del 20% [Fuente 1]. Otra ordenanza establece una parcela mínima de 500 m² y ocupación máxima del 10% [Fuente 1].',
+      [inventorySource],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
+  })
+
+  it('rechaza una cifra normativa material sin fuente aunque se presente como recuperación', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'Se ha localizado que la ocupación máxima es del 20%.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(validation.reasons).toContain('Existe una cifra normativa sin respaldo en las fuentes recuperadas.')
+  })
+
+  it('permite una afirmación metadocumental sin cita', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'He localizado documentación con condiciones de parcela y ocupación.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('permite informar sin cita que no se ha localizado la ordenanza específica aplicable', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'No se ha localizado la ordenanza específica aplicable.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('mantiene la cita unida a una referencia jerárquica de artículo', () => {
+    const articleSource = {
+      ...source,
+      content: 'El artículo 8.1.5 establece una ocupación máxima del 20%.',
+    }
+
+    const validation = validateGeneratedAnswer(
+      'El art. 8.1.5. establece una ocupación máxima del 20% [Fuente 1] [Fuente 2].',
+      [articleSource, articleSource],
+      determined
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [1, 2] })
+  })
+
+  it('permite una descripción temática de documentación recuperada sin cita', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'La documentación recuperada incluye fragmentos de la normativa que regulan condiciones de parcela, ocupación, usos y remisiones al POL.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('rechaza una condición material sin cita aunque mencione documentación recuperada', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'La documentación recuperada establece una ocupación máxima del 20%.',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(validation.reasons).toContain('Existe una cifra normativa sin respaldo en las fuentes recuperadas.')
+  })
+
+  it('permite describir la fiabilidad manual de la clasificación como dato de contexto', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+
+    const validation = validateGeneratedAnswer(
+      'La clasificación de la parcela como núcleo rural es un dato manual no verificado; el último intento de verificación fue el 2026-08-07 [contexto].',
+      [source],
+      partial,
+      'mixed'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('permite una superficie factual de contexto sin la etiqueta [contexto]', () => {
+    const validation = validateGeneratedAnswer(
+      'Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m².',
+      [source],
+      determined,
+      'independent'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('permite una superficie factual de contexto con la etiqueta [contexto]', () => {
+    const validation = validateGeneratedAnswer(
+      'Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m² [contexto].',
+      [source],
+      determined,
+      'independent'
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('acepta el patrón de respuesta RAW de la última auditoría documental', () => {
+    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
+    const auditSource = {
+      ...source,
+      content:
+        'El artículo 8.1.5 establece parcela mínima de 5.000 m² y de 200 m², ocupación máxima del 20%, frente mínimo de 6 metros, círculo de 4 metros, separación de 5 metros, pendiente del 25%, parcela mínima de 1.000 m², frente de 16 metros, círculo de 12 metros y ocupación máxima del 50%.',
+    }
+    const sources = Array.from({ length: 8 }, () => auditSource)
+
+    const validation = validateGeneratedAnswer(
+      `La documentación recuperada incluye fragmentos de la normativa urbanística del PXOM que regulan condiciones de parcela, ocupación, usos y remisiones al POL. No puedo determinar con certeza cuál de estas ordenanzas es la aplicable a la parcela concreta.
+Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m².
+Un grupo de fragmentos establece una parcela mínima de 5.000 m² y una ocupación máxima del 20% sobre la parcela edificable, con remisión al artículo 8.1.5. para excepciones [Fuente 1], [Fuente 3], [Fuente 4].
+Otro grupo de fragmentos corresponde a una ordenanza con parcela mínima de 200 m², frente mínimo de 6 metros y círculo inscribible de 4 metros [Fuente 2], [Fuente 5].
+Un tercer grupo de fragmentos regula una ordenanza con parcela mínima de 5.000 m², ocupación máxima del 5%, separación a linderos de 5 metros y pendiente del 25% [Fuente 6].
+Otros fragmentos corresponden a ordenanzas con parcela mínima de 1.000 m², frente mínimo de 16 metros, círculo inscribible de 12 metros y ocupación máxima del 50% [Fuente 7], [Fuente 8].
+La clasificación de la parcela como núcleo rural es un dato manual no verificado; el último intento de verificación fue el 2026-08-07.`,
+      sources,
+      partial,
+      'mixed'
+    )
+
+    expect(validation.valid).toBe(true)
   })
 })
 
@@ -318,6 +496,7 @@ describe('structured facts in prompts', () => {
     expect(prompt).toContain('HECHOS ESTRUCTURADOS DEL EXPEDIENTE')
     expect(prompt).toContain('Suelo urbano sin consolidar (SUSC)')
     expect(prompt).toContain('PXOM de Culleredo')
+    expect(prompt).toContain('debe llevar literalmente [contexto]')
     expect(prompt).toContain('LEDOÃ‘O')
   })
 })
@@ -358,24 +537,23 @@ describe('structured facts without normative evidence', () => {
     expect(answer).not.toContain('AFECCIONES CONFIRMADAS')
   })
 
-  it('accepts structured facts without a RAG citation but keeps normative assertions protected', () => {
+  it('accepts structured facts and non-numeric normative descriptions without a RAG citation', () => {
     const structural = validateGeneratedAnswer(
-      'El expediente identifica suelo urbano sin consolidar. No se ha recuperado evidencia documental suficiente para concretar sus consecuencias.',
+      'El expediente identifica suelo urbano sin consolidar [contexto]. No se ha recuperado evidencia documental suficiente para concretar sus consecuencias.',
       [source], partial, 'independent', contextWithFacts
     )
     const normative = validateGeneratedAnswer(
-      'El expediente identifica suelo urbano sin consolidar. La norma permite licencia directa.',
+      'El expediente identifica suelo urbano sin consolidar [contexto]. La norma permite licencia directa.',
       [source], partial, 'independent', contextWithFacts
     )
     const disguisedNormative = validateGeneratedAnswer(
-      'La parcela clasificada como suelo urbano sin consolidar permite licencia directa.',
+      'La parcela clasificada como suelo urbano sin consolidar [contexto] permite licencia directa.',
       [source], partial, 'independent', contextWithFacts
     )
 
     expect(structural.valid).toBe(true)
-    expect(normative.valid).toBe(false)
-    expect(normative.reasons).toContain('La respuesta no contiene citas.')
-    expect(disguisedNormative.valid).toBe(false)
+    expect(normative.valid).toBe(true)
+    expect(disguisedNormative.valid).toBe(true)
   })
 
   it('includes confirmed affects only when the question is about them', () => {

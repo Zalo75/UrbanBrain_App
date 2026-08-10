@@ -226,7 +226,11 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).not.toMatch(/edificabilidad\s*[:=]\s*\d/i)
   })
 
-  it('responde una consulta documental aunque la clasificación de la parcela esté pendiente', async () => {
+  it.each([
+    ['¿Qué normativa has localizado para esta parcela?', true],
+    ['¿Qué documentos normativos se aplican aquí?', true],
+    ['Resume el planeamiento aplicable.', false],
+  ])('usa la ruta documental adecuada para %s', async (message, expectsScopedRetrieval) => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: { id: 'expediente-org-a', orgId: 'org-a' },
       detected: {
@@ -239,7 +243,27 @@ describe('POST /api/chat parcel context boundary', () => {
         locationConfidence: 'high',
         planningApplicabilityStatus: 'conflict',
         planningCanAnswerConcreteParameters: false,
+        planningArea: 'CASCAS',
         planningConflicts: ['La clasificación requiere revisión profesional.'],
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{
+            id: '22221',
+            name: 'Normas subsidiarias',
+            kind: 'NNSS',
+            status: 'current',
+            sourceUrl: 'https://example.invalid/22221',
+          }],
+          documents: [{
+            id: '0060no011.pdf',
+            instrumentId: '22221',
+            title: 'Normas urbanísticas',
+            sourceUrl: 'https://example.invalid/0060no011.pdf',
+            binding: 'general',
+            documentType: 'normative_text',
+          }],
+        },
       },
       userMessages: [],
       constraints: [],
@@ -261,15 +285,38 @@ describe('POST /api/chat parcel context boundary', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expedienteId: 'expediente-org-a',
-        message: 'Resume el documento de planeamiento recuperado.',
+        message,
       }),
     }))
     const payload = await response.json()
 
     expect(response.status).toBe(200)
     expect(mocks.completionCreate).toHaveBeenCalled()
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      expectsScopedRetrieval ? 'match_normativa_chunks_scoped' : 'match_normativa_chunks',
+      expect.objectContaining(
+        expectsScopedRetrieval
+          ? {
+              filter_municipio_codigo: '15009',
+              filter_document_names: ['0060no011.pdf'],
+            }
+          : { filter_municipio_codigo: '15009' }
+      )
+    )
     expect(payload.safety.decision).toBe('answer')
+    expect(payload.safety.applicability).toBe('DETERMINADO')
     expect(payload.answer).not.toMatch(/pendiente de clasificación|no puedo determinar/i)
+    expect(payload.answer).not.toMatch(/ocupación|edificabilidad|retranque|parcela mínima|frente mínimo|plantas|usos/i)
+
+    const finalRequest = mocks.completionCreate.mock.calls
+      .map(([request]) => request)
+      .find((request) => request.messages?.[0]?.content?.includes('FRAGMENTOS AUTORIZADOS'))
+    if (expectsScopedRetrieval) {
+      expect(finalRequest.messages[0].content).toContain('MODO DOCUMENTAL ESTRICTO')
+      expect(finalRequest.messages[0].content).toContain('No calcules, afirmes ni enumeres ocupación')
+    } else {
+      expect(finalRequest.messages[0].content).not.toContain('MODO DOCUMENTAL ESTRICTO')
+    }
   })
 
   it('responde la parte disponible de una consulta mixta y se abstiene sólo del parámetro urbanístico', async () => {
@@ -365,7 +412,10 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
-  it('filtra por ordenanza antes de la búsqueda vectorial cuando la selección fue validada', async () => {
+  it.each([
+    '¿Cuál es el retranqueo aplicable?',
+    '¿Cuál es la ocupación máxima permitida?',
+  ])('mantiene la recuperación paramétrica acotada para %s', async (message) => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: { id: 'expediente-org-a', orgId: 'org-a' },
       detected: {
@@ -433,7 +483,7 @@ describe('POST /api/chat parcel context boundary', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expedienteId: 'expediente-org-a',
-        message: '¿Cuál es el retranqueo aplicable?',
+        message,
       }),
     }))
     const payload = await response.json()
@@ -486,7 +536,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).not.toContain('AFECCIONES CONFIRMADAS')
   })
 
-  it('preserva hechos estructurados si el LLM falla la validación de citas', async () => {
+  it('conserva una respuesta no numérica aunque no incluya cita documental', async () => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: { id: 'expediente-org-a', orgId: 'org-a' },
       detected: {
@@ -509,11 +559,8 @@ describe('POST /api/chat parcel context boundary', () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.safety.decision).toBe('abstain')
-    expect(payload.answer).toContain('Culleredo')
-    expect(payload.answer).toContain('PXOM de Culleredo')
-    expect(payload.answer).toContain('Suelo urbano sin consolidar (SUSC)')
-    expect(payload.answer).not.toContain('Estado no determinado')
+    expect(payload.safety.decision).toBe('answer')
+    expect(payload.answer).toContain('La norma permite licencia directa.')
   })
 
   it('keeps Betanzos parameter abstention without labelling general chunks as another area', async () => {

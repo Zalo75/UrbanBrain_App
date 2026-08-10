@@ -12,6 +12,7 @@ import {
 import {
   classifyParcelQuestionScope,
   evaluateApplicability,
+  requiresDeterminedParcelRegime,
 } from '@/application/parcel-context/applicabilityEngine';
 import {
   buildNormativeSearchScope,
@@ -129,6 +130,10 @@ function mapVisibleSources(candidates: NormativeCandidate[]) {
   }));
 }
 
+function requestsParcelNormativeDocuments(question: string) {
+  return /\b(?:normativa|documentos?|fuentes?|regulaci[oó]n)\b/i.test(question)
+}
+
 async function handlePost(req: NextRequest, signal: AbortSignal) {
   let releaseChatSlot: (() => void) | undefined;
   try {
@@ -151,7 +156,6 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     if (message.trim().length > MAX_CHAT_MESSAGE_LENGTH) {
       return NextResponse.json({ error: `La consulta no puede superar ${MAX_CHAT_MESSAGE_LENGTH} caracteres.` }, { status: 413 });
     }
-
     const userId = access.userId;
     const slot = acquireChatSlot(userId);
     if (!slot.ok) {
@@ -175,14 +179,13 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const municipioCodigo =
       trustedMunicipioCodigo ?? '__urbanbrain_unconfirmed_municipality__';
     const questionScope = classifyParcelQuestionScope(message);
-    const concreteParameterRequested = questionScope !== 'independent';
+    const concreteParameterRequested = requiresDeterminedParcelRegime(message);
     const normativeScope = buildNormativeSearchScope({
       context: parcelContext,
       municipioCodigo: trustedMunicipioCodigo,
       detected: parcelInputs.detected,
       rawDetection: parcelInputs.latestDetectionRaw,
     });
-
     // Guardar mensaje del usuario
     await db.insert(chatMessages).values({
       expedienteId,
@@ -299,7 +302,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     // La RPC recibe primero el alcance aplicable y busca después dentro de él.
     const t0_v1 = performance.now();
-    const scopedRetrieval = questionScope === 'regime';
+    const needsDocumentScope =
+      questionScope !== 'independent' || requestsParcelNormativeDocuments(message);
+    const scopedRetrieval =
+      needsDocumentScope && canSearchNormativeInformation(normativeScope);
     const rpcName = scopedRetrieval
       ? 'match_normativa_chunks_scoped'
       : 'match_normativa_chunks';
@@ -595,6 +601,14 @@ FUENTES
           );
     }
 
+    if (requestsParcelNormativeDocuments(message)) {
+      systemPrompt += `
+
+MODO DOCUMENTAL ESTRICTO
+La pregunta solicita únicamente la documentación o normativa localizada. Enumera exclusivamente las fuentes recuperadas y, solo cuando el fragmento lo permita, describe prudentemente su contenido. Distingue entre documentación localizada y aplicabilidad concreta a la parcela.
+No calcules, afirmes ni enumeres ocupación, edificabilidad, altura, retranqueos, parcela mínima, frente mínimo, número de plantas, usos ni ningún otro parámetro urbanístico no solicitado. Cita con [Fuente N] toda afirmación normativa o documental.`;
+    }
+
     // Logging for CTE V2 Response Mode
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
       console.log(`\n========== CTE V2 RESPONSE MODE ==========
@@ -668,7 +682,6 @@ ${usedV2 ? v2Citas : 'N/A'}
       applicability = failedApplicability;
       sources = [];
     }
-
     const contract = buildAnswerContract(
       answer,
       parcelContext,
