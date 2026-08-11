@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
+import type { PlanningNormativeDocumentType } from '@/domain/planning-knowledge/types'
 import {
   buildNormativeSearchScope,
   canSearchNormativeInformation,
@@ -49,6 +50,7 @@ function rawPlanning(
     title: string
     sourceUrl: string
     binding: 'general' | 'area_specific' | 'unverified_for_detected_area'
+    documentType?: PlanningNormativeDocumentType
   }>
 ) {
   return {
@@ -87,6 +89,85 @@ function rawPlanning(
 }
 
 describe('buildNormativeSearchScope', () => {
+  it('limita documentNames a tipos normativos excluyendo expresamente documentos con vínculo pendiente/no verificado', () => {
+    const scope = buildNormativeSearchScope({
+      context: context('Municipio genérico', '15001', { area: 'Ámbito 1' }),
+      municipioCodigo: '15001',
+      rawDetection: rawPlanning('Municipio genérico', '15001', [
+        {
+          id: 'ordinance.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Ordenanza',
+          sourceUrl: 'https://example.invalid/ordinance.pdf',
+          binding: 'general',
+          documentType: 'ordinance',
+        },
+        {
+          id: 'normative.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Normativa',
+          sourceUrl: 'https://example.invalid/normative.pdf',
+          binding: 'general',
+          documentType: 'normative_text',
+        },
+        {
+          id: 'sheet.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Ficha',
+          sourceUrl: 'https://example.invalid/sheet.pdf',
+          binding: 'general',
+          documentType: 'sheet',
+        },
+        {
+          id: 'pending-normative.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Normativa pendiente de vínculo espacial',
+          sourceUrl: 'https://example.invalid/pending-normative.pdf',
+          binding: 'unverified_for_detected_area',
+          documentType: 'normative_text',
+        },
+        {
+          id: 'legacy.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Documento legacy',
+          sourceUrl: 'https://example.invalid/legacy.pdf',
+          binding: 'general',
+        },
+        {
+          id: 'catalogue.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Catálogo',
+          sourceUrl: 'https://example.invalid/catalogue.pdf',
+          binding: 'general',
+          documentType: 'catalogue',
+        },
+        {
+          id: 'other.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Memoria',
+          sourceUrl: 'https://example.invalid/other.pdf',
+          binding: 'general',
+          documentType: 'other',
+        },
+        {
+          id: 'normative.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Normativa duplicada',
+          sourceUrl: 'https://example.invalid/normative-copy.pdf',
+          binding: 'general',
+          documentType: 'normative_text',
+        },
+      ]),
+    })
+
+    expect(scope.documentNames).toEqual([
+      'ordinance.pdf',
+      'normative.pdf',
+      'sheet.pdf',
+      'legacy.pdf',
+    ])
+  })
+
   it('no convierte el ámbito LEDOÑO de Culleredo en una relación documental inventada', () => {
     const scope = buildNormativeSearchScope({
       context: context('Culleredo', '15031', { area: 'LEDOÑO' }),
@@ -147,6 +228,7 @@ describe('buildNormativeSearchScope', () => {
           title: 'Ficha APT-1',
           sourceUrl: 'https://example.invalid/apt-1.pdf',
           binding: 'area_specific',
+          documentType: 'sheet',
         },
       ]),
     })

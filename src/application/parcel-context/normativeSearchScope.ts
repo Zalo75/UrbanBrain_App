@@ -81,6 +81,16 @@ function documentsForInstrument(
     : documents
 }
 
+const NORMATIVE_DOCUMENT_TYPES = new Set([
+  'ordinance',
+  'normative_text',
+  'sheet',
+])
+
+function isSearchableNormativeDocument(document: PlanningDocumentReference) {
+  return !document.documentType || NORMATIVE_DOCUMENT_TYPES.has(document.documentType)
+}
+
 function automaticScopeConfidence(context: NormalizedParcelContext) {
   return context.qualification?.verification === 'confirmed' ||
     context.planningArea?.verification === 'confirmed'
@@ -121,9 +131,9 @@ export function buildNormativeSearchScope({
   // La PKB ya ha vinculado estos documentos al identificador estable del
   // instrumento seleccionado. Delimitan el universo de búsqueda, pero no
   // prueban por sí solos un parámetro urbanístico concreto.
-  const scopedDocuments = applicableDocuments
-  const documentNames = unique(scopedDocuments.map(corpusDocumentName))
-  const documentIds = unique(scopedDocuments.map((document) => document.id))
+  const searchableDocuments = applicableDocuments.filter(isSearchableNormativeDocument)
+  const documentNames = unique(searchableDocuments.map(corpusDocumentName))
+  const documentIds = unique(searchableDocuments.map((document) => document.id))
   const planningZone = context.planningArea?.value.trim()
   const actionAreaId = context.actionArea?.value.id
   const actionAreaSelectionType = context.actionArea?.value.selectionType
