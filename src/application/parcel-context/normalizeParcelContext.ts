@@ -22,6 +22,7 @@ import type {
 import { getEffectiveDetermination } from '@/domain/territorial-resolver/determinations'
 import type { ContextDeterminationState } from '@/domain/territorial-resolver/types'
 import type { TerritorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
+import { hasManualInterventionBeyondActionArea } from '@/application/territorial-resolver/actionAreaSelection'
 
 export interface ParcelExpedienteInput {
   refCatastral?: string | null
@@ -105,6 +106,7 @@ export interface TerritorialDetectionSummary {
   } | null
   manualContext?: ManualTerritorialContext | null
   actionAreaSelection?: ActionAreaSelectionState | null
+  actionAreaAutomaticallyConfirmed?: boolean | null
   resolvedAt?: string | null
   fieldConfirmations?: TerritorialFieldConfirmations | null
   reliability?: {
@@ -304,8 +306,32 @@ export function buildNormalizedParcelContext(
   input: BuildParcelContextInput
 ): NormalizedParcelContext {
   const { detected, constraints = [] } = input
+  const detectedActionArea =
+    detected?.actionAreaSelection?.current ?? detected?.manualContext?.actionAreaSelection?.current
+  const detectedActionAreaName =
+    detectedActionArea?.planningZone?.trim() || detected?.planningArea?.trim()
+  const automaticActionAreaLegacyCompatible = Boolean(
+    (!input.expediente.landClass ||
+      !detected?.landClass ||
+      landClassesAreCompatible(input.expediente.landClass, detected.landClass)) &&
+    (!input.expediente.urbanPlanningZone?.trim() ||
+      (detectedActionAreaName &&
+        normalizeComparable(input.expediente.urbanPlanningZone) ===
+          normalizeComparable(detectedActionAreaName)))
+  )
+  const actionAreaAutomaticallyConfirmed = Boolean(
+    detected?.actionAreaAutomaticallyConfirmed === true &&
+    detected.classificationConfidenceLevel === 'confirmed' &&
+    detected.planningApplicabilityStatus === 'determined' &&
+    detected.landClass &&
+    detected.planningArea?.trim() &&
+    automaticActionAreaLegacyCompatible &&
+    !hasManualInterventionBeyondActionArea(detected.manualContext)
+  )
   const manualWithoutMatchingOfficial = Boolean(
-    detected?.manualContext && !detected.reliability?.usingPreviousOfficialContext
+    detected?.manualContext &&
+      !actionAreaAutomaticallyConfirmed &&
+      !detected.reliability?.usingPreviousOfficialContext
   )
   const expediente: ParcelExpedienteInput = manualWithoutMatchingOfficial
     ? { contextoValidadoPorTecnico: false }
@@ -625,12 +651,19 @@ export function buildNormalizedParcelContext(
   const effectiveOrdDet = getEffectiveDetermination(ordDet)
   const resolvedQualification = effectiveOrdDet?.value ?? legacyQualification
   const qualification = resolvedQualification ?? undefined
-
-
+  const qualificationMirrorsConfirmedAutomaticArea = Boolean(
+    actionAreaAutomaticallyConfirmed &&
+    expediente.urbanPlanningZone?.trim() &&
+    detectedActionAreaName &&
+    normalizeComparable(expediente.urbanPlanningZone) ===
+      normalizeComparable(detectedActionAreaName)
+  )
 
   if (qualification) {
     const isManual = effectiveOrdDet?.origin === 'technician_selection'
-    const source = (isManual ? 'manual' :
+    const source = (qualificationMirrorsConfirmedAutomaticArea
+      ? (detected?.planningSource ?? 'siotuga')
+      : isManual ? 'manual' :
       (effectiveOrdDet?.source ?? (expediente.urbanPlanningZone
       ? 'expediente'
       : detected?.qualification
@@ -640,7 +673,7 @@ export function buildNormalizedParcelContext(
       qualification,
       source,
       source === 'siotuga' ? 0.9 : expedienteConfidence,
-      source === 'siotuga'
+      qualificationMirrorsConfirmedAutomaticArea || source === 'siotuga'
         ? 'confirmed'
         : source === 'expediente'
           ? expedienteVerification
@@ -902,22 +935,24 @@ export function buildNormalizedParcelContext(
       manual.recordedAt
     )
   }
-  if (manual?.verification === 'unverified') {
+  if (manual?.verification === 'unverified' && !actionAreaAutomaticallyConfirmed) {
     context.canAnswerConcreteParameters = false
     context.pendingValidation.push(
       'El contexto incluye datos manuales no verificados; no pueden habilitar parametros urbanisticos concretos.'
     )
   }
 
-  const actionArea = detected?.actionAreaSelection?.current ?? manual?.actionAreaSelection?.current
+  const actionArea = detectedActionArea
   if (actionArea) {
     const actionAreaVerification: ParcelContextVerification =
-      actionArea.verification === 'technician_validated' ? 'confirmed' : 'unverified'
+      actionArea.verification === 'technician_validated' || actionAreaAutomaticallyConfirmed
+        ? 'confirmed'
+        : 'unverified'
     const actionAreaConfidence =
       actionArea.confidence === 'high' ? 0.95 : actionArea.confidence === 'medium' ? 0.75 : 0.55
     context.actionArea = field(
       actionArea,
-      'manual',
+      actionAreaAutomaticallyConfirmed ? (detected?.planningSource ?? 'siotuga') : 'manual',
       actionAreaConfidence,
       actionAreaVerification,
       actionArea.selectedAt
@@ -925,8 +960,9 @@ export function buildNormalizedParcelContext(
     context.parcelSurfaceSquareMetres = actionArea.parcelSurfaceSquareMetres
 
     if (actionArea.selectionType === 'detected_zone') {
-      const selectedLandClass =
-        actionArea.classification === 'SU'
+      const selectedLandClass = actionAreaAutomaticallyConfirmed && detected?.landClass
+        ? detected.landClass
+        : actionArea.classification === 'SU'
           ? actionArea.category === 'SUSC' || actionArea.category === 'SUNC'
             ? 'urbano_no_consolidado'
             : actionArea.category === 'SUC'
@@ -940,7 +976,7 @@ export function buildNormalizedParcelContext(
       if (selectedLandClass) {
         context.landClass = field(
           selectedLandClass,
-          'manual',
+          actionAreaAutomaticallyConfirmed ? (detected?.planningSource ?? 'siotuga') : 'manual',
           actionAreaConfidence,
           actionAreaVerification,
           actionArea.selectedAt
@@ -956,13 +992,17 @@ export function buildNormalizedParcelContext(
       context.planningArea = fallbackPlanningZone
         ? field(
           fallbackPlanningZone,
-          'manual',
+          actionAreaAutomaticallyConfirmed ? (detected?.planningSource ?? 'siotuga') : 'manual',
           actionAreaConfidence,
           actionAreaVerification,
           actionArea.selectedAt
         )
         : undefined
-      if (context.urbanisticFacts && actionArea.classification) {
+      if (
+        context.urbanisticFacts &&
+        actionArea.classification &&
+        !actionAreaAutomaticallyConfirmed
+      ) {
         const factStatus = actionArea.verification === 'technician_validated'
           ? 'technician_validated' as const
           : 'manual_review_required' as const
@@ -1024,7 +1064,10 @@ export function buildNormalizedParcelContext(
         )
       }
     }
-    if (actionArea.verification !== 'technician_validated') {
+    if (
+      actionArea.verification !== 'technician_validated' &&
+      !actionAreaAutomaticallyConfirmed
+    ) {
       context.canAnswerConcreteParameters = false
       context.pendingValidation.push(
         'El área de actuación seleccionada está pendiente de validación técnica.'

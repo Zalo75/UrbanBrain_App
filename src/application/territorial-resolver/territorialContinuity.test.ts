@@ -54,6 +54,107 @@ function official(reference = '1234567NH4913S'): TerritorialResolution {
   }
 }
 
+function clearOfficial(reference = '1234567NH4913S'): TerritorialResolution {
+  const base = official(reference)
+  const intersectionGeometry = {
+    type: 'MultiPolygon' as const,
+    crs: 'EPSG:4326' as const,
+    coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+  }
+  return {
+    ...base,
+    planning: {
+      status: 'determined',
+      instrument: 'PXOM',
+      classification: {
+        code: 'SNR',
+        categoryCode: 'SNRC',
+        label: 'Suelo de núcleo rural',
+        categoryLabel: 'Núcleo rural común',
+        sourceFeatureIds: ['candidate-snr'],
+      },
+      classificationResolution: {
+        status: 'clear',
+        confidenceLevel: 'confirmed',
+        nextAction: 'auto_accept',
+        candidates: [{
+          kind: 'official_classification',
+          id: 'candidate-snr',
+          classification: {
+            code: 'SNR',
+            categoryCode: 'SNRC',
+            label: 'Suelo de núcleo rural',
+            categoryLabel: 'Núcleo rural común',
+            sourceFeatureIds: ['candidate-snr'],
+          },
+          areas: [],
+          source: 'siotuga',
+          evidence: [],
+          confidence: 'high',
+          evidenceBasis: 'parcel_geometry',
+          instrumentTraceability: 'verified',
+          normalizationStatus: 'mapped',
+          parcelCoverage: {
+            parcelAreaSquareMetres: 1000,
+            intersectionAreaSquareMetres: 1000,
+            parcelPercentage: 100,
+            method: 'polygon_intersection',
+            intersectionGeometry,
+          },
+        }],
+        discrepancies: [],
+        reviewReasons: [],
+        automaticSelection: {
+          origin: 'automatic',
+          candidateId: 'candidate-snr',
+          classificationCode: 'SNR',
+          categoryCode: 'SNRC',
+          areaNames: [],
+          technicianValidated: false,
+        },
+        sourceChecks: [],
+        officialLinks: [],
+        evidence: [],
+      },
+      canAnswerConcreteParameters: true,
+      evidence: [],
+      warnings: [],
+    },
+  }
+}
+
+function automaticDetectedZoneManualContext(): ManualTerritorialContext {
+  return {
+    provenance: 'manual',
+    verification: 'unverified',
+    recordedAt: '2026-08-10T12:00:00.000Z',
+    actionAreaSelection: {
+      history: [],
+      current: {
+        id: 'selection-snr',
+        selectionType: 'detected_zone',
+        selectedCandidateId: 'candidate-snr',
+        geometry: {
+          type: 'MultiPolygon',
+          crs: 'EPSG:4326',
+          coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+        },
+        surfaceSquareMetres: 1000,
+        parcelSurfaceSquareMetres: 1000,
+        classification: 'SNR',
+        category: 'SNRC',
+        planningZone: 'Núcleo rural común',
+        planningZones: ['Núcleo rural común'],
+        source: 'siotuga',
+        confidence: 'high',
+        selectedBy: 'architect-a',
+        selectedAt: '2026-08-10T12:00:00.000Z',
+        verification: 'unverified',
+      },
+    },
+  }
+}
+
 function failed(status: 'timeout' | 'unavailable' | 'malformed'): TerritorialResolution {
   return {
     status: 'unresolved',
@@ -151,6 +252,79 @@ describe('territorial continuity', () => {
     expect(retried.continuity?.usingPreviousOfficialContext).toBe(false)
     expect(retried.continuity?.effectiveOfficialContext).toBeUndefined()
     expect(retried.resolvedAt).toBe('2026-07-14T11:00:00.000Z')
+  })
+
+  it('does not inherit an exact automatic detected zone as unverified manual context on recalculation', () => {
+    const previous = clearOfficial()
+    previous.continuity = {
+      usingPreviousOfficialContext: false,
+      sameParcelAsPrevious: true,
+      manualContext: automaticDetectedZoneManualContext(),
+    }
+
+    const recalculated = attachContinuity(
+      { ...clearOfficial(), resolvedAt: '2026-08-11T11:00:00.000Z' },
+      { cadastralReference: '1234567NH4913S' },
+      previous
+    )
+
+    expect(recalculated.continuity?.manualContext).toBeUndefined()
+    expect(recalculated.planning.classificationResolution?.status).toBe('clear')
+    expect(recalculated.planning.canAnswerConcreteParameters).toBe(true)
+  })
+
+  it.each([
+    {
+      name: 'the selected candidate differs',
+      alter: (current: TerritorialResolution, manual: ManualTerritorialContext) => {
+        manual.actionAreaSelection!.current!.selectedCandidateId = 'other-candidate'
+        return current
+      },
+    },
+    {
+      name: 'the recalculated resolution requires review',
+      alter: (current: TerritorialResolution) => {
+        current.planning.classificationResolution!.status = 'review_required'
+        current.planning.classificationResolution!.nextAction = 'review_official_sources'
+        return current
+      },
+    },
+    {
+      name: 'the current planning source check is only partial',
+      alter: (current: TerritorialResolution) => {
+        current.planning.sourceChecks = [{
+          source: 'siotuga',
+          status: 'partial',
+          checkedAt: '2026-08-11T11:00:00.000Z',
+          message: 'El recálculo no completó la comprobación del planeamiento.',
+        }]
+        return current
+      },
+    },
+    {
+      name: 'another manual determination remains active',
+      alter: (current: TerritorialResolution, manual: ManualTerritorialContext) => {
+        manual.classification = 'rustico_no_urbanizable'
+        return current
+      },
+    },
+  ])('keeps inherited technical review when $name', ({ alter }) => {
+    const previous = clearOfficial()
+    const manual = automaticDetectedZoneManualContext()
+    previous.continuity = {
+      usingPreviousOfficialContext: false,
+      sameParcelAsPrevious: true,
+      manualContext: manual,
+    }
+    const current = alter(clearOfficial(), manual)
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous
+    )
+
+    expect(recalculated.continuity?.manualContext).toBe(manual)
   })
 
   it('conserva afecciones positivas previas si IDEG falla pero Catastro funciona', () => {

@@ -5,6 +5,7 @@ import type {
   TerritorialCoordinates,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types'
+import { isPureAutomaticDetectedZoneContext } from './actionAreaSelection'
 
 const TRANSIENT_STATUSES = new Set(['timeout', 'unavailable', 'malformed', 'partial'])
 
@@ -148,6 +149,17 @@ export function attachContinuity(
   }
 
   let manualContext = manualContextArg ?? (sameParcel ? previousRawResult?.continuity?.manualContext : undefined)
+  const currentPlanningHasTransientFailure = current.planning.sourceChecks?.some(
+    (check) => TRANSIENT_STATUSES.has(check.status)
+  ) ?? false
+  if (
+    manualContextArg === undefined &&
+    useCurrent &&
+    !currentPlanningHasTransientFailure &&
+    isPureAutomaticDetectedZoneContext(current, manualContext)
+  ) {
+    manualContext = undefined
+  }
 
   current.continuity = {
     lastOfficialContext: previous,

@@ -606,7 +606,52 @@ describe('ExpedienteForm', () => {
     }
   }
 
-  it('auto-fills classification when a zone is selected on the map', async () => {
+  function clearSingleZoneDetection() {
+    const clearCandidate = {
+      ...candidateA,
+      parcelCoverage: {
+        parcelAreaSquareMetres: 1000,
+        intersectionAreaSquareMetres: 1000,
+        parcelPercentage: 100,
+        method: 'polygon_intersection' as const,
+        intersectionGeometry: {
+          type: 'MultiPolygon' as const,
+          crs: 'EPSG:4326' as const,
+          coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
+        },
+      },
+    }
+    return {
+      detectionId: '00000000-0000-4000-8000-000000000201' as `${string}-${string}-${string}-${string}-${string}`,
+      detection: {
+        detected: { cadastralReference: '3995302NH5939N0001HQ', municipalityId: 'culleredo' },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+        classificationResolution: {
+          status: 'clear' as const,
+          confidenceLevel: 'confirmed' as const,
+          nextAction: 'auto_accept' as const,
+          candidates: [clearCandidate],
+          discrepancies: [],
+          reviewReasons: [],
+          automaticSelection: {
+            origin: 'automatic' as const,
+            candidateId: clearCandidate.id,
+            classificationCode: 'SU',
+            categoryCode: 'SUC',
+            areaNames: ['Ámbito A'],
+            technicianValidated: false,
+          },
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+      },
+    }
+  }
+
+  it('fills a proposed zone but keeps it visibly pending when the resolution requires review', async () => {
     vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
     render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
     fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
@@ -625,8 +670,12 @@ describe('ExpedienteForm', () => {
       expect(landClass.value).toBe('urbano_consolidado')
     })
     expect((screen.getByLabelText(/Ámbito o zona/i) as HTMLInputElement).value).toBe('Ámbito A')
-    // Badge visible
-    expect(screen.getByTestId('auto-detected-badge')).toBeTruthy()
+    expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Fijar como Zona de Trabajo/i }))
+    expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
+    expect(screen.getByText(/Modificado manualmente/i)).toBeTruthy()
+    const reason = screen.getByLabelText(/Motivo de la selección manual/i)
+    expect(reason.getAttribute('required')).not.toBeNull()
   })
 
   it('shows manual-override badge when user edits classification after zone selection', async () => {
@@ -643,6 +692,7 @@ describe('ExpedienteForm', () => {
     await waitFor(() => {
       expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
     })
+    fireEvent.click(screen.getByRole('button', { name: /Fijar como Zona de Trabajo/i }))
 
     // User manually changes the classification
     fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'rustico_no_urbanizable' } })
@@ -650,7 +700,7 @@ describe('ExpedienteForm', () => {
     // Auto badge disappears; manual badge appears
     expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
     expect(screen.getByText(/Modificado manualmente/i)).toBeTruthy()
-    expect(screen.getByTestId('reset-auto-classification')).toBeTruthy()
+    expect(screen.queryByTestId('reset-auto-classification')).toBeNull()
   })
 
   it('does NOT overwrite a manual override when the user clicks another zone on the map', async () => {
@@ -666,6 +716,8 @@ describe('ExpedienteForm', () => {
     await waitFor(() => {
       expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
     })
+    fireEvent.click(screen.getByRole('button', { name: /Fijar como Zona de Trabajo/i }))
+    expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
 
     // Manual override
     fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'urbanizable' } })
@@ -680,7 +732,7 @@ describe('ExpedienteForm', () => {
   })
 
   it('restores auto classification when the reset button is clicked', async () => {
-    vi.mocked(detectContextAction).mockResolvedValue(multiZoneDetection())
+    vi.mocked(detectContextAction).mockResolvedValue(clearSingleZoneDetection())
     render(<ExpedienteForm provinces={provinces} municipalities={municipalities} />)
     fireEvent.change(screen.getByLabelText(/Referencia catastral/i), { target: { value: '3995302NH5939N0001HQ' } })
     fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
@@ -692,6 +744,8 @@ describe('ExpedienteForm', () => {
     await waitFor(() => {
       expect((screen.getByLabelText(/Clasificación del suelo/i) as HTMLSelectElement).value).toBe('urbano_consolidado')
     })
+    fireEvent.click(screen.getByRole('button', { name: /Fijar como Zona de Trabajo/i }))
+    expect(screen.getByTestId('auto-detected-badge')).toBeTruthy()
 
     // Manual override
     fireEvent.change(screen.getByLabelText(/Clasificación del suelo/i), { target: { value: 'urbanizable' } })

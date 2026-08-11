@@ -14,6 +14,7 @@ import { AvailableZonesSummary } from '@/components/territorial/AvailableZonesSu
 import { GeometricAuditAccordion } from '@/components/territorial/GeometricAuditAccordion'
 import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap'
+import { clearAutomaticClassificationCandidate } from '@/application/territorial-resolver/actionAreaSelection'
 import type { Municipality, Province } from '@/shared/territory'
 import type { ClassificationCandidate } from '@/domain/territorial-resolver/types'
 
@@ -26,6 +27,7 @@ import { initialCreateExpedienteState, type CreateExpedienteState } from './crea
 import {
   LAND_CLASS_OPTIONS,
   landClassFromCandidate,
+  planningZoneNameFromCandidate,
   municipalitiesForProvince,
   type DetectionProgressItem,
   type SmartCaseDetection,
@@ -176,6 +178,9 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   )
   const selectedMunicipalityData = municipalities.find((municipality) => municipality.id === selectedMunicipality)
   const planningOptions = planningOptionsByMunicipality[selectedMunicipality] ?? []
+  const automaticClassificationCandidate = clearAutomaticClassificationCandidate(
+    detection?.classificationResolution
+  )
   const detectedMapCoordinates = useMemo(() => {
     if (
       detectionInvalidated ||
@@ -199,35 +204,6 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       })
     return () => { active = false }
   }, [selectedMunicipality])
-
-  // Sync landClass/urbanPlanningZone with the explored candidate,
-  // unless the user has manually overridden those fields.
-  useEffect(() => {
-    if (classificationManuallyOverridden) return
-    if (!exploredCandidateId || !detection?.classificationResolution) {
-      // Returning to whole-parcel state: restore suggested-candidate values or clear
-      if (!exploredCandidateId && detection?.classificationResolution) {
-        const suggestedCandidateId =
-          detection.classificationResolution.automaticSelection?.candidateId ??
-          detection.classificationResolution.proposal?.candidateId
-        const suggested = detection.classificationResolution.candidates.find(
-          (c) => c.id === suggestedCandidateId
-        )
-        if (suggested) {
-          setLandClass(landClassFromCandidate(suggested) ?? '')
-          setUrbanPlanningZone(suggested.areas.length === 1 ? suggested.areas[0].name : '')
-        }
-      }
-      return
-    }
-    const candidate = detection.classificationResolution.candidates.find(
-      (c) => c.id === exploredCandidateId
-    )
-    if (!candidate) return
-    setLandClass(landClassFromCandidate(candidate) ?? '')
-    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exploredCandidateId, classificationManuallyOverridden])
 
   useEffect(() => {
     if (!isCreating) submitLock.current = false
@@ -365,8 +341,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       )
       setLandClass(values.landClass ?? landClassFromCandidate(suggestedCandidate) ?? '')
       setUrbanPlanningZone(
-        values.urbanPlanningZone ??
-          (suggestedCandidate?.areas.length === 1 ? suggestedCandidate.areas[0].name : '')
+        values.urbanPlanningZone ?? planningZoneNameFromCandidate(suggestedCandidate)
       )
       // En el rediseño, no autoseleccionamos ninguna zona al arrancar, forzamos selección explícita
       setSelectedClassificationCandidateId('')
@@ -381,15 +356,27 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     }
   }
 
+  function exploreClassificationCandidate(candidateId: string) {
+    setExploredCandidateId(candidateId)
+    if (classificationManuallyOverridden) return
+    const candidate = detection?.classificationResolution?.candidates.find(
+      (item) => item.id === candidateId
+    )
+    if (!candidate) return
+    setLandClass(landClassFromCandidate(candidate) ?? '')
+    setUrbanPlanningZone(planningZoneNameFromCandidate(candidate))
+  }
+
   function selectClassificationCandidate(candidate: ClassificationCandidate) {
     const candidateLandClass = landClassFromCandidate(candidate)
     setSelectedClassificationCandidateId(candidate.id)
     setExploredCandidateId(candidate.id)
     setLandClass(candidateLandClass ?? '')
-    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
+    setUrbanPlanningZone(planningZoneNameFromCandidate(candidate))
     setClassificationSelectionReason('')
-    // Fixing a zone is an explicit system-driven action; clear any prior manual override
-    setClassificationManuallyOverridden(false)
+    setClassificationManuallyOverridden(
+      automaticClassificationCandidate?.id !== candidate.id
+    )
     if (!candidateLandClass) {
       toast.info(
         'El código oficial se conserva como evidencia, pero no tiene una equivalencia automática segura. Seleccione manualmente el valor operativo.'
@@ -398,14 +385,14 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   }
 
   function resetToAutoClassification() {
-    if (!exploredCandidateId || !detection?.classificationResolution) return
-    const candidate = detection.classificationResolution.candidates.find(
-      (c) => c.id === exploredCandidateId
-    )
-    if (!candidate) return
+    if (
+      !exploredCandidateId ||
+      automaticClassificationCandidate?.id !== exploredCandidateId
+    ) return
     setClassificationManuallyOverridden(false)
-    setLandClass(landClassFromCandidate(candidate) ?? '')
-    setUrbanPlanningZone(candidate.areas.length === 1 ? candidate.areas[0].name : '')
+    setSelectedClassificationCandidateId(automaticClassificationCandidate.id)
+    setLandClass(landClassFromCandidate(automaticClassificationCandidate) ?? '')
+    setUrbanPlanningZone(planningZoneNameFromCandidate(automaticClassificationCandidate))
   }
 
   return (
@@ -496,9 +483,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                 coordinates={detectedMapCoordinates}
                 candidates={detectionInvalidated ? undefined : detection.classificationResolution.candidates}
                 selectedCandidateId={exploredCandidateId || undefined}
-                onCandidateSelect={(candidateId: string) => {
-                  setExploredCandidateId(candidateId)
-                }}
+                onCandidateSelect={exploreClassificationCandidate}
               />
             }
             activeZoneSlot={
@@ -550,7 +535,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             availableZonesSlot={
               <AvailableZonesSummary
                 candidates={detection.classificationResolution.candidates.filter(c => c.id !== exploredCandidateId)}
-                onSelect={(id) => setExploredCandidateId(id)}
+                onSelect={exploreClassificationCandidate}
               />
             }
             auditSlot={
@@ -622,21 +607,23 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                     <Wand2 className="h-3 w-3" />
                     Modificado manualmente
                   </span>
-                  <button
-                    type="button"
-                    onClick={resetToAutoClassification}
-                    className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
-                    data-testid="reset-auto-classification"
-                  >
-                    Volver a la detección automática
-                  </button>
+                  {automaticClassificationCandidate?.id === exploredCandidateId && (
+                    <button
+                      type="button"
+                      onClick={resetToAutoClassification}
+                      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                      data-testid="reset-auto-classification"
+                    >
+                      Volver a la detección automática
+                    </button>
+                  )}
                 </div>
-              ) : (
+              ) : selectedClassificationCandidateId === exploredCandidateId ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" data-testid="auto-detected-badge">
                   <Sparkles className="h-3 w-3" />
-                  Detectado automáticamente
+                  Zona de trabajo
                 </span>
-              )
+              ) : null
             )}
           </div>
           <select
@@ -668,7 +655,6 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
             placeholder="Seleccione o introduzca el ámbito aplicable"
           />
           {detection?.classificationResolution &&
-            detection.classificationResolution.status !== 'clear' &&
             landClass && classificationManuallyOverridden && (
               <div className="grid gap-2">
                 <Label htmlFor="classificationSelectionReason" className="text-sm font-medium">

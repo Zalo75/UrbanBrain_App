@@ -17,6 +17,7 @@ import {
   territorialFieldConfirmations,
   type TerritorialFieldConfirmation,
 } from '@/application/territorial-resolver/fieldConfirmations'
+import { planningZoneNamesFromCandidate } from '@/application/territorial-resolver/actionAreaSelection'
 
 export const LAND_CLASS_OPTIONS = [
   { value: 'urbano_consolidado', label: 'Urbano consolidado' },
@@ -134,6 +135,10 @@ export function landClassFromCandidate(candidate?: ClassificationCandidate) {
   return landClassFromClassification(candidate?.classification)
 }
 
+export function planningZoneNameFromCandidate(candidate?: ClassificationCandidate): string {
+  return planningZoneNamesFromCandidate(candidate).join(', ')
+}
+
 /** Maps an official resolver response to values that the creation form can safely reuse. */
 export function summarizeSmartCaseDetection(result: TerritorialResolution): PreflightDetection {
   const checks = sourceChecks(result)
@@ -178,8 +183,13 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
       planeamiento: result.planning.instrument,
       landClass,
       urbanPlanningZone:
-        result.planning.status !== 'conflict' && result.planning.areas?.length === 1
-          ? result.planning.areas[0].name
+        classificationResolution?.automaticSelection?.candidateId
+          ? planningZoneNameFromCandidate(
+              classificationResolution.candidates.find(
+                (candidate) =>
+                  candidate.id === classificationResolution.automaticSelection?.candidateId
+              )
+            ) || undefined
           : undefined,
       locationSource:
         result.inputMethod === 'cadastral_reference'

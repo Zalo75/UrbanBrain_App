@@ -336,6 +336,81 @@ describe('buildNormalizedParcelContext', () => {
     )
   })
 
+  it('does not trust an automatic-area flag when another manual decision contradicts it', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        landClass: 'nucleo_rural',
+        urbanPlanningZone: 'Núcleo rural común',
+      },
+      detected: {
+        landClass: 'nucleo_rural',
+        planningArea: 'Núcleo rural común',
+        planningSource: 'siotuga',
+        planningCanAnswerConcreteParameters: true,
+        actionAreaAutomaticallyConfirmed: true,
+        actionAreaSelection: {
+          history: [],
+          current: {
+            id: 'zone-a',
+            selectionType: 'detected_zone',
+            selectedCandidateId: 'candidate-a',
+            geometry: {
+              type: 'MultiPolygon',
+              crs: 'EPSG:4326',
+              coordinates: [[[[-8.2, 43.2], [-8.19, 43.2], [-8.2, 43.21], [-8.2, 43.2]]]],
+            },
+            surfaceSquareMetres: 1000,
+            parcelSurfaceSquareMetres: 1000,
+            classification: 'SNR',
+            category: 'SNRC',
+            planningZone: 'Núcleo rural común',
+            planningZones: ['Núcleo rural común'],
+            source: 'siotuga',
+            confidence: 'high',
+            selectedBy: 'architect-a',
+            selectedAt: '2026-08-11T10:00:00.000Z',
+            verification: 'unverified',
+          },
+        },
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-08-11T10:00:00.000Z',
+          classification: 'rustico_no_urbanizable',
+        },
+      },
+    })
+
+    expect(context.canAnswerConcreteParameters).toBe(false)
+    expect(context.pendingValidation).toContain(
+      'El contexto incluye datos manuales no verificados; no pueden habilitar parametros urbanisticos concretos.'
+    )
+    expect(context.actionArea).toMatchObject({ verification: 'unverified' })
+  })
+
+  it('does not infer the strict automatic-area signal from generic confirmed planning fields', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        landClass: 'nucleo_rural',
+        urbanPlanningZone: 'Núcleo rural común',
+      },
+      detected: {
+        landClass: 'nucleo_rural',
+        planningArea: 'Núcleo rural común',
+        planningSource: 'siotuga',
+        planningApplicabilityStatus: 'determined',
+        planningCanAnswerConcreteParameters: true,
+        classificationConfidenceLevel: 'confirmed',
+      },
+    })
+
+    expect(context.qualification).toMatchObject({
+      value: 'Núcleo rural común',
+      source: 'expediente',
+      verification: 'unverified',
+    })
+  })
+
   it('continues to reconstruct historically technician-validated action areas as confirmed', () => {
     const context = buildNormalizedParcelContext({
       expediente: {},

@@ -47,7 +47,8 @@ import { summarizeSmartCaseDetection } from './smartCaseDetection'
 import type {
   TerritorialResolution,
   OfficialClassificationCandidate,
-  DerivedUnmappedComplementCandidate
+  DerivedUnmappedComplementCandidate,
+  ParcelGeometry,
 } from '@/domain/territorial-resolver/types'
 
 const result: TerritorialResolution = {
@@ -58,6 +59,12 @@ const result: TerritorialResolution = {
   planning: { status: 'determined', instrument: 'Plan general trazable', classification: { code: 'SU', label: 'Suelo urbano', sourceFeatureIds: ['class-1'] }, evidence: [], warnings: [] },
   affects: { analysisGeometry: 'parcel', detected: [], canRuleOutUndetectedAffects: false, warnings: [] },
   resolvedAt: '2026-07-20T00:00:00.000Z',
+}
+
+const intersectionGeometry: ParcelGeometry = {
+  type: 'MultiPolygon',
+  coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
+  crs: 'EPSG:4326',
 }
 
 function form(detectionId: string) {
@@ -294,6 +301,86 @@ describe('createExpediente smart preflight', () => {
     errorSpy.mockRestore()
   })
 
+  it('keeps an exact detected zone as the clear automatic selection without manual context', async () => {
+    const candidate: OfficialClassificationCandidate = {
+      kind: 'official_classification',
+      id: 'exact-snr-common',
+      classification: {
+        code: 'SNR',
+        categoryCode: 'SNRC',
+        label: 'Suelo de núcleo rural',
+        categoryLabel: 'Núcleo rural común',
+        sourceFeatureIds: ['exact-snr-common'],
+      },
+      areas: [],
+      source: 'siotuga',
+      evidence: [],
+      confidence: 'high',
+      evidenceBasis: 'parcel_geometry',
+      instrumentTraceability: 'verified',
+      normalizationStatus: 'mapped',
+      parcelCoverage: {
+        parcelAreaSquareMetres: 1000,
+        intersectionAreaSquareMetres: 1000,
+        parcelPercentage: 100,
+        method: 'polygon_intersection',
+        intersectionGeometry: {
+          type: 'MultiPolygon',
+          crs: 'EPSG:4326',
+          coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
+        },
+      },
+    }
+    const clearResult: TerritorialResolution = {
+      ...result,
+      planning: {
+        ...result.planning,
+        canAnswerConcreteParameters: true,
+        classification: candidate.classification,
+        classificationResolution: {
+          status: 'clear',
+          confidenceLevel: 'confirmed',
+          nextAction: 'auto_accept',
+          candidates: [candidate],
+          discrepancies: [],
+          reviewReasons: [],
+          automaticSelection: {
+            origin: 'automatic',
+            candidateId: candidate.id,
+            classificationCode: 'SNR',
+            categoryCode: 'SNRC',
+            areaNames: [],
+            technicianValidated: false,
+          },
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+      },
+    }
+    const detectionId = storePreflightDetection(
+      'user-a',
+      summarizeSmartCaseDetection(clearResult)
+    )
+    const submitted = form(detectionId)
+    submitted.set('actionAreaMode', 'detected_zone')
+    submitted.set('classificationCandidateId', candidate.id)
+    submitted.set('landClass', 'nucleo_rural')
+    submitted.set('urbanPlanningZone', 'Núcleo rural común')
+
+    await expect(createExpediente(initialCreateExpedienteState, submitted)).rejects.toThrow(
+      'NEXT_REDIRECT'
+    )
+
+    const persisted = mocks.persistAuthorizedDetection.mock.calls[0][2] as TerritorialResolution
+    expect(persisted.continuity?.manualContext).toBeUndefined()
+    expect(persisted.planning.classificationResolution?.finalSelection).toEqual(
+      persisted.planning.classificationResolution?.automaticSelection
+    )
+    expect(persisted.planning.classificationResolution?.finalSelection?.origin).toBe('automatic')
+    expect(persisted.planning.canAnswerConcreteParameters).toBe(true)
+  })
+
   it('persists a reviewed manual selection separately from the automatic evidence', async () => {
     const candidate = {
       id: 'official-layer:SU|SUC',
@@ -391,7 +478,7 @@ describe('createExpediente smart preflight', () => {
         intersectionAreaSquareMetres: 600,
         parcelPercentage: 60,
         method: 'polygon_intersection',
-        intersectionGeometry: { type: 'MultiPolygon', coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]] as any, crs: 'EPSG:4326' },
+        intersectionGeometry,
       }
     }
     const reviewResult: TerritorialResolution = {
@@ -423,6 +510,8 @@ describe('createExpediente smart preflight', () => {
     const manual = form(detectionId)
     manual.set('actionAreaMode', 'detected_zone')
     manual.set('classificationCandidateId', candidate.id)
+    manual.set('landClass', 'nucleo_rural')
+    manual.set('classificationSelectionReason', 'Selección pendiente de revisión técnica.')
 
     await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
       'NEXT_REDIRECT'
@@ -441,6 +530,7 @@ describe('createExpediente smart preflight', () => {
                 classification: 'SNR',
                 category: 'SNRSC',
                 planningZone: 'CASCAS',
+                planningZones: ['CASCAS'],
                 geometry: candidate.parcelCoverage?.intersectionGeometry,
                 surfaceSquareMetres: 600,
                 parcelSurfaceSquareMetres: 1000,
@@ -450,6 +540,90 @@ describe('createExpediente smart preflight', () => {
             verification: 'unverified',
           })
         }),
+      })
+    )
+  })
+
+  it('persists planningZone from categoryLabel when candidate.areas is empty', async () => {
+    const candidate: OfficialClassificationCandidate = {
+      kind: 'official_classification',
+      id: 'candidate-empty-areas',
+      classification: {
+        code: 'SNR',
+        categoryCode: 'SNRSC',
+        label: 'Suelo de Núcleo Rural',
+        categoryLabel: 'Núcleo rural común',
+        sourceFeatureIds: ['feature-snr'],
+      },
+      areas: [],
+      source: 'siotuga' as const,
+      evidence: [],
+      confidence: 'high' as const,
+      evidenceBasis: 'parcel_geometry' as const,
+      instrumentTraceability: 'verified' as const,
+      normalizationStatus: 'mapped' as const,
+      parcelCoverage: {
+        parcelAreaSquareMetres: 1000,
+        intersectionAreaSquareMetres: 600,
+        parcelPercentage: 60,
+        method: 'polygon_intersection',
+        intersectionGeometry,
+      }
+    }
+    const reviewResult: TerritorialResolution = {
+      ...result,
+      planning: {
+        ...result.planning,
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          candidates: [candidate],
+          discrepancies: [],
+          reviewReasons: [],
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'La capa requiere revisión.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          }
+        },
+      },
+    }
+    const detectionId = storePreflightDetection(
+      'user-a',
+      summarizeSmartCaseDetection(reviewResult)
+    )
+    const manual = form(detectionId)
+    manual.set('actionAreaMode', 'detected_zone')
+    manual.set('classificationCandidateId', candidate.id);
+    manual.set('urbanPlanningZone', 'Núcleo rural común');
+    manual.set('landClass', 'nucleo_rural')
+    manual.set('classificationSelectionReason', 'Selección pendiente de revisión técnica.')
+
+    await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
+      'NEXT_REDIRECT'
+    )
+
+    expect(mocks.persistAuthorizedDetection).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      expect.objectContaining({
+        continuity: expect.objectContaining({
+          manualContext: expect.objectContaining({
+            actionAreaSelection: expect.objectContaining({
+              current: expect.objectContaining({
+                selectionType: 'detected_zone',
+                selectedCandidateId: 'candidate-empty-areas',
+                planningZone: 'Núcleo rural común',
+                planningZones: ['Núcleo rural común'],
+                verification: 'unverified',
+              })
+            })
+          })
+        })
       })
     )
   })
@@ -470,7 +644,10 @@ describe('createExpediente smart preflight', () => {
         intersectionAreaSquareMetres: 400,
         parcelPercentage: 40,
         method: 'polygon_intersection',
-        intersectionGeometry: { type: 'MultiPolygon', coordinates: [[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]] as any, crs: 'EPSG:4326' },
+        intersectionGeometry: {
+          ...intersectionGeometry,
+          coordinates: [[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]],
+        },
       }
     }
     const reviewResult: TerritorialResolution = {
@@ -502,6 +679,8 @@ describe('createExpediente smart preflight', () => {
     const manual = form(detectionId)
     manual.set('actionAreaMode', 'detected_zone')
     manual.set('classificationCandidateId', candidate.id)
+    manual.delete('landClass')
+    manual.delete('urbanPlanningZone')
 
     await expect(createExpediente(initialCreateExpedienteState, manual)).rejects.toThrow(
       'NEXT_REDIRECT'
@@ -520,6 +699,7 @@ describe('createExpediente smart preflight', () => {
                 classification: undefined,
                 category: undefined,
                 planningZone: undefined,
+                planningZones: [],
                 geometry: candidate.parcelCoverage.intersectionGeometry,
                 surfaceSquareMetres: 400,
                 parcelSurfaceSquareMetres: 1000,

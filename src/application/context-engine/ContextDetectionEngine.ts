@@ -37,7 +37,12 @@ import {
 } from '@/application/territorial-resolver/manualTerritorialContext'
 import { assessClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
 import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
-import { applyActionAreaToUrbanisticFacts } from '@/application/territorial-resolver/actionAreaSelection'
+import {
+  applyActionAreaToUrbanisticFacts,
+  clearAutomaticClassificationCandidate,
+  isPureAutomaticDetectedZoneContext,
+  planningZoneNamesFromCandidate,
+} from '@/application/territorial-resolver/actionAreaSelection'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
 
@@ -73,6 +78,24 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
   )
   const manual = result.continuity?.manualContext
   const actionArea = manual?.actionAreaSelection?.current
+  const automaticClassificationCandidate = clearAutomaticClassificationCandidate(
+    result.planning.classificationResolution,
+    result.planning.classification,
+    result.planning.urbanisticFacts
+  )
+  const pureAutomaticActionArea = isPureAutomaticDetectedZoneContext(result, manual)
+  const actionAreaAutomaticallyConfirmed = Boolean(
+    automaticClassificationCandidate &&
+    result.planning.status === 'determined' &&
+    (result.planning.conflicts?.length ?? 0) === 0 &&
+    (!manual || pureAutomaticActionArea)
+  )
+  const automaticPlanningZones = planningZoneNamesFromCandidate(
+    automaticClassificationCandidate
+  )
+  const automaticPlanningArea = automaticPlanningZones.length === 1
+    ? automaticPlanningZones[0]
+    : undefined
   const actionAreaCandidate = actionArea?.selectedCandidateId
     ? effective?.planning.classificationResolution?.candidates.find(
         (candidate) => candidate.id === actionArea.selectedCandidateId
@@ -131,7 +154,7 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
   const hasIncompleteSource = checks.some((check) =>
     ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
   )
-  const reliabilityMode = manual
+  const reliabilityMode = manual && !actionAreaAutomaticallyConfirmed
     ? manual.verification === 'technician_validated'
       ? 'technician_validated_manual'
       : 'manual_unverified'
@@ -187,6 +210,8 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
       actionArea?.selectionType === 'detected_zone'
         ? actionArea.verification === 'technician_validated'
           ? 'determined'
+          : actionAreaAutomaticallyConfirmed
+            ? effective?.planning.status ?? 'not_determined'
           : 'partial'
         : effective?.planning.status ?? 'not_determined',
     planningCanAnswerConcreteParameters:
@@ -213,6 +238,7 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
       actionArea?.selectionType === 'detected_zone'
         ? actionArea.planningZone
         : manual?.area ??
+      automaticPlanningArea ??
       (effective?.planning.status !== 'conflict' && effective?.planning.areas?.length === 1
         ? effective.planning.areas[0].name
         : undefined),
@@ -222,8 +248,11 @@ function detectionSummary(result: TerritorialResolution): TerritorialDetectionSu
     classificationDetermination: classDet,
     categoryDetermination: manual?.categoryDetermination,
     ordinanceDetermination: manual?.ordinanceDetermination,
-    manualContext: manual,
-    actionAreaSelection: manual?.actionAreaSelection,
+    manualContext: actionAreaAutomaticallyConfirmed ? undefined : manual,
+    actionAreaSelection: actionAreaAutomaticallyConfirmed
+      ? undefined
+      : manual?.actionAreaSelection,
+    actionAreaAutomaticallyConfirmed,
     reliability: {
       mode: reliabilityMode,
       latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,

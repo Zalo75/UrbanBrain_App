@@ -19,6 +19,7 @@ vi.mock('@/infrastructure/db/client', () => ({
 
 import { ContextDetectionEngine } from './ContextDetectionEngine'
 import type { TerritorialResolution } from '@/domain/territorial-resolver/types'
+import { buildNormalizedParcelContext } from '@/application/parcel-context/normalizeParcelContext'
 
 const resolution: TerritorialResolution = {
   status: 'confirmed',
@@ -332,5 +333,258 @@ describe('ContextDetectionEngine tenant boundary', () => {
       status: 'manual_review_required',
       origin: 'spatial_intersection',
     })
+  })
+
+  it('keeps a pure exact detected zone automatic through the persisted chat snapshot', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-exact', orgId: 'org-a' },
+    })
+    const exactResolution: TerritorialResolution = {
+      ...resolution,
+      municipality: 'Culleredo',
+      municipalityCode: '15031',
+      planning: {
+        status: 'determined',
+        instrument: 'PXOM de prueba',
+        classification: {
+          code: 'SNR',
+          categoryCode: 'SNRC',
+          label: 'Suelo de núcleo rural',
+          categoryLabel: 'Núcleo rural común',
+          sourceFeatureIds: ['exact-snr-common'],
+        },
+        classificationResolution: {
+          status: 'clear',
+          confidenceLevel: 'confirmed',
+          nextAction: 'auto_accept',
+          candidates: [{
+            kind: 'official_classification',
+            id: 'exact-snr-common',
+            classification: {
+              code: 'SNR',
+              categoryCode: 'SNRC',
+              label: 'Suelo de núcleo rural',
+              categoryLabel: 'Núcleo rural común',
+              sourceFeatureIds: ['exact-snr-common'],
+            },
+            areas: [],
+            source: 'siotuga',
+            evidence: [],
+            confidence: 'high',
+            evidenceBasis: 'parcel_geometry',
+            instrumentTraceability: 'verified',
+            normalizationStatus: 'mapped',
+            parcelCoverage: {
+              parcelAreaSquareMetres: 1000,
+              intersectionAreaSquareMetres: 1000,
+              parcelPercentage: 100,
+              method: 'polygon_intersection',
+              intersectionGeometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.25, 43.35], [-8.24, 43.35], [-8.24, 43.36], [-8.25, 43.35]]]],
+              },
+            },
+          }],
+          discrepancies: [],
+          reviewReasons: [],
+          automaticSelection: {
+            origin: 'automatic',
+            candidateId: 'exact-snr-common',
+            classificationCode: 'SNR',
+            categoryCode: 'SNRC',
+            areaNames: [],
+            technicianValidated: false,
+          },
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+        },
+        canAnswerConcreteParameters: true,
+        applicableInstruments: [{
+          id: '28089',
+          name: 'PXOM de prueba',
+          kind: 'PXOM',
+          status: 'current',
+          sourceUrl: 'https://official.test/planning.pdf',
+        }],
+        evidence: [{
+          source: 'siotuga',
+          sourceUrl: 'https://official.test/planning.pdf',
+          retrievedAt: resolution.resolvedAt,
+          method: 'fixture',
+        }],
+        warnings: [],
+      },
+      continuity: {
+        usingPreviousOfficialContext: false,
+        sameParcelAsPrevious: true,
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-08-11T10:00:00.000Z',
+          actionAreaSelection: {
+            history: [],
+            current: {
+              id: 'selection-exact',
+              selectionType: 'detected_zone',
+              selectedCandidateId: 'exact-snr-common',
+              geometry: {
+                type: 'MultiPolygon',
+                crs: 'EPSG:4326',
+                coordinates: [[[[-8.25, 43.35], [-8.24, 43.35], [-8.24, 43.36], [-8.25, 43.35]]]],
+              },
+              surfaceSquareMetres: 1000,
+              parcelSurfaceSquareMetres: 1000,
+              classification: 'SNR',
+              category: 'SNRC',
+              planningZone: 'Núcleo rural común',
+              planningZones: ['Núcleo rural común'],
+              source: 'siotuga',
+              confidence: 'high',
+              selectedBy: 'architect-a',
+              selectedAt: '2026-08-11T10:00:00.000Z',
+              verification: 'unverified',
+            },
+          },
+        },
+      },
+    }
+
+    await new ContextDetectionEngine(vi.fn(async () => exactResolution)).persistAuthorizedDetection(
+      'expediente-exact',
+      'usuario-org-a',
+      exactResolution
+    )
+
+    const summary = mocks.values.mock.calls[0][0].summary
+    expect(summary).toMatchObject({
+      actionAreaAutomaticallyConfirmed: true,
+      planningApplicabilityStatus: 'determined',
+      planningCanAnswerConcreteParameters: true,
+      reliability: { mode: 'current_official' },
+      planningArea: 'Núcleo rural común',
+    })
+    expect(summary.manualContext).toBeUndefined()
+    expect(summary.actionAreaSelection).toBeUndefined()
+    expect(summary.urbanisticFacts.classification.status).toBe('automatic_confirmed')
+    expect(summary.urbanisticFacts.category.status).toBe('automatic_confirmed')
+
+    const normalized = buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: exactResolution.cadastralReference,
+        municipio: 'culleredo',
+        landClass: 'nucleo_rural',
+        urbanPlanningZone: 'Núcleo rural común',
+        planeamiento: 'PXOM de prueba',
+      },
+      detected: summary,
+    })
+    expect(normalized.canAnswerConcreteParameters).toBe(true)
+    expect(normalized.landClass).toMatchObject({
+      value: 'nucleo_rural',
+      source: 'siotuga',
+      verification: 'confirmed',
+    })
+    expect(normalized.planningArea).toMatchObject({
+      value: 'Núcleo rural común',
+      source: 'siotuga',
+      verification: 'confirmed',
+    })
+    expect(normalized.pendingValidation).not.toContain(
+      'El área de actuación seleccionada está pendiente de validación técnica.'
+    )
+    expect(normalized.actionArea).toBeUndefined()
+
+    const currentOnly = { ...exactResolution, continuity: undefined }
+    await new ContextDetectionEngine(vi.fn(async () => currentOnly)).persistAuthorizedDetection(
+      'expediente-exact',
+      'usuario-org-a',
+      currentOnly
+    )
+    const currentSummary = mocks.values.mock.calls[1][0].summary
+    expect(currentSummary).toMatchObject({
+      actionAreaAutomaticallyConfirmed: true,
+      planningArea: 'Núcleo rural común',
+      classificationConfidenceLevel: 'confirmed',
+      planningCanAnswerConcreteParameters: true,
+    })
+    expect(buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: currentOnly.cadastralReference,
+        municipio: 'culleredo',
+        landClass: 'nucleo_rural',
+        urbanPlanningZone: 'Núcleo rural común',
+        planeamiento: 'PXOM de prueba',
+      },
+      detected: currentSummary,
+    }).canAnswerConcreteParameters).toBe(true)
+
+    const partialResolution: TerritorialResolution = {
+      ...exactResolution,
+      planning: { ...exactResolution.planning, status: 'partial' },
+    }
+    await new ContextDetectionEngine(vi.fn(async () => partialResolution)).persistAuthorizedDetection(
+      'expediente-exact',
+      'usuario-org-a',
+      partialResolution
+    )
+    const partialSummary = mocks.values.mock.calls[2][0].summary
+    expect(partialSummary).toMatchObject({
+      actionAreaAutomaticallyConfirmed: false,
+      planningApplicabilityStatus: 'partial',
+      manualContext: expect.objectContaining({ verification: 'unverified' }),
+    })
+
+    const partialRecalculation: TerritorialResolution = {
+      ...currentOnly,
+      planning: {
+        ...currentOnly.planning,
+        status: 'partial',
+        sourceChecks: [{
+          source: 'siotuga',
+          status: 'partial',
+          checkedAt: '2026-08-11T12:00:00.000Z',
+          message: 'El recálculo no completó la comprobación del planeamiento.',
+        }],
+      },
+    }
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: {
+        id: 'expediente-exact',
+        ownerId: 'owner-a',
+        refCatastral: exactResolution.cadastralReference,
+        address: null,
+        lat: null,
+        lng: null,
+        municipio: 'culleredo',
+      },
+      latestDetectionRaw: exactResolution,
+    })
+    const recalculated = await new ContextDetectionEngine(
+      vi.fn(async () => partialRecalculation)
+    ).detectContext('expediente-exact', 'usuario-org-a')
+    const recalculatedSummary = mocks.values.mock.calls[3][0].summary
+
+    expect(recalculated?.continuity).toMatchObject({
+      usingPreviousOfficialContext: true,
+      manualContext: expect.objectContaining({ verification: 'unverified' }),
+    })
+    expect(recalculatedSummary).toMatchObject({
+      actionAreaAutomaticallyConfirmed: false,
+      planningApplicabilityStatus: 'partial',
+      manualContext: expect.objectContaining({ verification: 'unverified' }),
+      reliability: { usingPreviousOfficialContext: true },
+    })
+    expect(buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: exactResolution.cadastralReference,
+        municipio: 'culleredo',
+        landClass: 'nucleo_rural',
+        urbanPlanningZone: 'Núcleo rural común',
+        planeamiento: 'PXOM de prueba',
+      },
+      detected: recalculatedSummary,
+    }).canAnswerConcreteParameters).toBe(false)
   })
 })

@@ -6,11 +6,13 @@ import { and, eq } from 'drizzle-orm'
 
 import { hasOrganizationPermission } from '@/application/authorization/organizationRoles'
 import { ContextDetectionEngine } from '@/application/context-engine/ContextDetectionEngine'
+import { clearAutomaticClassificationCandidate } from '@/application/territorial-resolver/actionAreaSelection'
 import { normalizeCadastralReference } from '@/application/territorial-resolver/resolveParcelLocation'
 import { authProvider } from '@/infrastructure/auth'
 import { db } from '@/infrastructure/db/client'
 import { expedientes, municipalPlanning, organizationMembers } from '@/infrastructure/db/schema'
 import { getMunicipalityById, getProvinceById } from '@/shared/territory'
+import type { ActionAreaSelectionState } from '@/domain/territorial-resolver/types'
 
 import { getInitialContextAcceptance } from './creationContext'
 import type { CreateExpedienteState } from './creationState'
@@ -20,6 +22,8 @@ import {
   summarizeSmartCaseDetection,
   type PreflightDetection,
   validateSmartCaseSubmission,
+  landClassFromCandidate,
+  planningZoneNameFromCandidate,
 } from './smartCaseDetection'
 
 type Membership = { orgId: string; role: 'owner' | 'admin' | 'member' | 'viewer' }
@@ -298,12 +302,34 @@ export async function createExpediente(
   }
   const automaticLandClass = preflight?.detected.landClass ?? null
   const automaticZone = preflight?.detected.urbanPlanningZone ?? ''
+  const actionAreaMode = formText(formData, 'actionAreaMode')
+  const baseManualContext = preflight?.result.continuity?.manualContext
+  const automaticCandidate = clearAutomaticClassificationCandidate(
+    classificationResolution,
+    preflight?.result.planning.classification,
+    preflight?.result.planning.urbanisticFacts
+  )
+  const exactAutomaticDetectedZone = Boolean(
+    actionAreaMode === 'detected_zone' &&
+      selectedCandidate &&
+      automaticCandidate?.id === selectedCandidate.id &&
+      preflight?.result.planning.status === 'determined' &&
+      (preflight.result.planning.conflicts?.length ?? 0) === 0 &&
+      landClass !== null &&
+      landClass === landClassFromCandidate(automaticCandidate) &&
+      urbanPlanningZone === planningZoneNameFromCandidate(automaticCandidate) &&
+      !classificationSelectionReason &&
+      !baseManualContext
+  )
   const manualClassificationSelection = Boolean(
     classificationResolution &&
-      ((landClass && landClass !== automaticLandClass) ||
-        (urbanPlanningZone && urbanPlanningZone !== automaticZone) ||
-        classificationResolution.status !== 'clear')
+      (selectedCandidate
+        ? !exactAutomaticDetectedZone
+        : (landClass && landClass !== automaticLandClass) ||
+          (urbanPlanningZone && urbanPlanningZone !== automaticZone) ||
+          classificationResolution.status !== 'clear')
   )
+
   if (
     manualClassificationSelection &&
     (landClass || urbanPlanningZone) &&
@@ -355,9 +381,12 @@ export async function createExpediente(
     try {
       if (preflight) {
         const now = new Date().toISOString()
-        const actionAreaMode = formText(formData, 'actionAreaMode')
-        let actionAreaSelection: any = undefined
-        if (actionAreaMode === 'detected_zone' && selectedCandidate) {
+        let actionAreaSelection: ActionAreaSelectionState | undefined
+        if (
+          actionAreaMode === 'detected_zone' &&
+          selectedCandidate &&
+          !exactAutomaticDetectedZone
+        ) {
           const parcelCoverage = selectedCandidate.parcelCoverage
           const areaSqM = parcelCoverage?.intersectionAreaSquareMetres
           const geom = parcelCoverage?.intersectionGeometry
@@ -374,8 +403,10 @@ export async function createExpediente(
               parcelSurfaceSquareMetres: candidateParcelSurface,
               classification: selectedCandidate.kind === 'official_classification' ? selectedCandidate.classification.code : undefined,
               category: selectedCandidate.kind === 'official_classification' ? selectedCandidate.classification.categoryCode : undefined,
-              planningZone: selectedCandidate.areas.length === 1 ? selectedCandidate.areas[0].name : undefined,
-              planningZones: selectedCandidate.areas.map((a: { name: string }) => a.name),
+              planningZone: planningZoneNameFromCandidate(selectedCandidate) || undefined,
+              planningZones: selectedCandidate.areas.length > 0
+                ? selectedCandidate.areas.map((a: { name: string }) => a.name)
+                : [planningZoneNameFromCandidate(selectedCandidate)].filter(Boolean),
               source: selectedCandidate.source,
               confidence: selectedCandidate.confidence,
               selectedBy: userId,
@@ -404,12 +435,11 @@ export async function createExpediente(
           }
         }
 
-        const baseManualContext = preflight.result.continuity?.manualContext
         const manualContext = actionAreaSelection || baseManualContext
           ? {
               ...(baseManualContext ?? {
                 provenance: 'manual' as const,
-                verification: actionAreaSelection?.current.verification === 'technician_validated' ? 'technician_validated' as const : 'unverified' as const,
+                verification: actionAreaSelection?.current?.verification === 'technician_validated' ? 'technician_validated' as const : 'unverified' as const,
                 recordedAt: now
               }),
               ...(actionAreaSelection ? { actionAreaSelection } : {})

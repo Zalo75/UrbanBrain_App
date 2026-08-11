@@ -6,6 +6,7 @@ import { allMunicipalities } from '@/shared/territory'
 import {
   landClassFromClassification,
   municipalitiesForProvince,
+  planningZoneNameFromCandidate,
   summarizeSmartCaseDetection,
   validateSmartCaseSubmission,
 } from './smartCaseDetection'
@@ -222,5 +223,74 @@ describe('smart case detection', () => {
       label: 'Clasificación no normalizada',
       sourceFeatureIds: ['feature-1'],
     })).toBeUndefined()
+  })
+
+  it('uses categoryLabel for an automatic legacy candidate but not for a review proposal', () => {
+    const candidate = {
+      kind: 'official_classification' as const,
+      id: 'legacy-snr-common',
+      classification: {
+        code: 'SNR',
+        categoryCode: 'SNRC',
+        label: 'Suelo de núcleo rural',
+        categoryLabel: 'Núcleo rural común',
+        sourceFeatureIds: ['legacy-snr-common'],
+      },
+      areas: [],
+      source: 'siotuga' as const,
+      evidence: [],
+      confidence: 'high' as const,
+      evidenceBasis: 'parcel_geometry' as const,
+      instrumentTraceability: 'verified' as const,
+      normalizationStatus: 'mapped' as const,
+    }
+    const baseClassificationResolution = {
+      candidates: [candidate],
+      discrepancies: [],
+      reviewReasons: [],
+      sourceChecks: [],
+      officialLinks: [],
+      evidence: [],
+    }
+    const automatic = summarizeSmartCaseDetection(resolution({
+      planning: {
+        ...resolution().planning,
+        classification: candidate.classification,
+        classificationResolution: {
+          ...baseClassificationResolution,
+          status: 'clear',
+          nextAction: 'auto_accept',
+          automaticSelection: {
+            origin: 'automatic',
+            candidateId: candidate.id,
+            classificationCode: 'SNR',
+            categoryCode: 'SNRC',
+            areaNames: [],
+            technicianValidated: false,
+          },
+        },
+      },
+    }))
+    const proposed = summarizeSmartCaseDetection(resolution({
+      planning: {
+        ...resolution().planning,
+        classification: undefined,
+        classificationResolution: {
+          ...baseClassificationResolution,
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          proposal: {
+            candidateId: candidate.id,
+            explanation: 'Revisión necesaria.',
+            confidence: 'medium',
+            requiresProfessionalReview: true,
+          },
+        },
+      },
+    }))
+
+    expect(planningZoneNameFromCandidate(candidate)).toBe('Núcleo rural común')
+    expect(automatic.detected.urbanPlanningZone).toBe('Núcleo rural común')
+    expect(proposed.detected.urbanPlanningZone).toBeUndefined()
   })
 })
