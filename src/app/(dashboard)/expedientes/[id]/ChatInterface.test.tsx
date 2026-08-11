@@ -188,6 +188,12 @@ async function renderSourceDetail(overrides: Record<string, unknown> = {}) {
   fireEvent.click(await screen.findByRole('link', { name: '[Fuente 1]' }))
 }
 
+function stubClipboard(clipboard: unknown) {
+  const mockedNavigator = Object.create(navigator)
+  Object.defineProperty(mockedNavigator, 'clipboard', { configurable: true, value: clipboard })
+  vi.stubGlobal('navigator', mockedNavigator)
+}
+
 describe('ChatInterface citations', () => {
   beforeEach(() => {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
@@ -510,5 +516,123 @@ describe('ChatInterface citations', () => {
     expect(await screen.findByText('Fragmento no disponible.')).toBeTruthy()
     expect(screen.queryByText('null')).toBeNull()
     expect(screen.queryByText('undefined')).toBeNull()
+  })
+
+  it('copies the complete fragment and then a citation with only normalized metadata', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubClipboard({ writeText })
+    await renderSourceDetail({
+      fragmento_completo: '  Texto completo.  ',
+      fragmento_corto: 'Texto corto.',
+      nombre_pdf: '  Normas.pdf  ',
+      titulo_detectado: '  Artículo 5  ',
+      pagina_detectada: 'Página 4',
+      original_path: 'https://example.test/norma.pdf',
+    })
+
+    const fragmentButton = await screen.findByRole('button', { name: 'Copiar fragmento' })
+    const citationButton = screen.getByRole('button', { name: 'Copiar con cita' })
+    expect(fragmentButton.getAttribute('type')).toBe('button')
+    expect(citationButton.getAttribute('type')).toBe('button')
+
+    fireEvent.click(fragmentButton)
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Fragmento copiado.')
+    expect(writeText).toHaveBeenLastCalledWith('Texto completo.')
+
+    fireEvent.click(citationButton)
+    expect(await screen.findByText('Cita copiada.')).toHaveProperty('textContent', 'Cita copiada.')
+    expect(writeText).toHaveBeenLastCalledWith(
+      '«Texto completo.»\n\nFuente: Normas.pdf\nReferencia detectada: Artículo 5\nPágina: 4\nOrigen oficial: https://example.test/norma.pdf'
+    )
+  })
+
+  it('falls back to the short fragment when copying', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubClipboard({ writeText })
+    await renderSourceDetail({ fragmento_completo: ' null ', fragmento_corto: '  Texto corto.  ' })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copiar fragmento' }))
+    await screen.findByText('Fragmento copiado.')
+    expect(writeText).toHaveBeenCalledWith('Texto corto.')
+  })
+
+  it.each([
+    ['Clipboard API ausente', undefined],
+    ['writeText ausente', {}],
+  ])('shows accessible feedback when %s', async (_case, clipboard) => {
+    stubClipboard(clipboard)
+    await renderSourceDetail()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copiar fragmento' }))
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toBe('No se pudo copiar porque el portapapeles no está disponible.')
+    expect(status.getAttribute('aria-live')).toBe('polite')
+  })
+
+  it('handles a rejected clipboard write without an unhandled promise', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('Permission denied'))
+    stubClipboard({ writeText })
+    await renderSourceDetail()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Copiar fragmento' }))
+    expect((await screen.findByRole('status')).textContent).toMatch(/No se pudo copiar/)
+    expect(writeText).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables both copy buttons and does not write when no fragment exists', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubClipboard({ writeText })
+    await renderSourceDetail({ fragmento_completo: ' null ', fragmento_corto: ' undefined ' })
+
+    const fragmentButton = await screen.findByRole('button', { name: 'Copiar fragmento' })
+    const citationButton = screen.getByRole('button', { name: 'Copiar con cita' })
+    expect((fragmentButton as HTMLButtonElement).disabled).toBe(true)
+    expect((citationButton as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findByRole('status')).textContent).toBe('No hay un fragmento disponible para copiar.')
+
+    fireEvent.click(fragmentButton)
+    fireEvent.click(citationButton)
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it('copies only the active source', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubClipboard({ writeText })
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Primera [Fuente 1] y segunda [Fuente 2].',
+        sources: [
+          source(1, 'https://example.test/one.pdf', 1, { fragmento_completo: 'Fuente activa uno.' }),
+          source(2, 'https://example.test/two.pdf', 2, { fragmento_completo: 'Fuente activa dos.' }),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    const citations = await screen.findAllByRole('link')
+    fireEvent.click(citations[1])
+    fireEvent.click(await screen.findByRole('button', { name: 'Copiar fragmento' }))
+    await screen.findByText('Fragmento copiado.')
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(writeText).toHaveBeenCalledWith('Fuente activa dos.')
+  })
+
+  it('replaces error feedback with success on consecutive attempts', async () => {
+    const writeText = vi.fn()
+      .mockRejectedValueOnce(new Error('Denied'))
+      .mockResolvedValueOnce(undefined)
+    stubClipboard({ writeText })
+    await renderSourceDetail()
+
+    const fragmentButton = await screen.findByRole('button', { name: 'Copiar fragmento' })
+    fireEvent.click(fragmentButton)
+    expect((await screen.findByRole('status')).textContent).toMatch(/No se pudo copiar/)
+
+    fireEvent.click(fragmentButton)
+    expect((await screen.findByText('Fragmento copiado.')).textContent).toBe('Fragmento copiado.')
+    expect(screen.queryByText(/Comprueba los permisos/)).toBeNull()
+    expect(writeText).toHaveBeenCalledTimes(2)
   })
 })

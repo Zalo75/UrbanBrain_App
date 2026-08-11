@@ -3,13 +3,19 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, FileText, AlertCircle, ArrowDown, ExternalLink, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { Send, FileText, AlertCircle, ArrowDown, Copy, ExternalLink, ArrowLeft, AlertTriangle } from 'lucide-react';
 import {
   buildPdfPageUrl,
   buildPdfUrl,
   buildSafeHttpUrl,
   parseCitations,
 } from './chatCitations';
+import {
+  buildSourceCitationText,
+  getCopyableSourceFragment,
+  normalizeDetectedReference,
+  normalizeFragment,
+} from './sourceClipboard';
 
 const BOTTOM_THRESHOLD_PX = 48;
 
@@ -42,26 +48,10 @@ interface ChatInterfaceProps {
   expedienteId: string;
 }
 
-function normalizeFragment(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-
-  const normalized = value.trim();
-  if (!normalized) return null;
-
-  const technicalMarker = normalized.toLocaleLowerCase('es-ES');
-  return technicalMarker === 'null' || technicalMarker === 'undefined' ? null : normalized;
-}
-
-function normalizeDetectedReference(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-
-  const normalized = value.trim();
-  if (!normalized) return null;
-
-  const technicalMarker = normalized.toLocaleLowerCase('es-ES');
-  if (['n/a', 'na', 'ninguno', 'sin determinar', '-'].includes(technicalMarker)) return null;
-
-  return normalized;
+interface CopyFeedback {
+  source: Source;
+  kind: 'success' | 'error';
+  message: string;
 }
 
 function normalizePositiveInteger(value: unknown): number | null {
@@ -136,6 +126,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeSource, setActiveSource] = useState<Source | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -417,8 +408,50 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
             const isSiotuga = safeOriginalUrl?.includes('siotuga.xunta.gal/siotuga/inventario');
             const hasUrl = safeOriginalUrl !== null;
             const sourceFragment = source.fragmento_completo ?? source.fragmento_corto;
+            const copyableFragment = getCopyableSourceFragment(source);
+            const citationText = buildSourceCitationText(source);
+            const copyUnavailableId = `copy-unavailable-${source.source_index}`;
 
+            const copyText = async (text: string | null, successMessage: string) => {
+              setCopyFeedback(null);
+              if (!text) {
+                setCopyFeedback({
+                  source,
+                  kind: 'error',
+                  message: 'No hay un fragmento disponible para copiar.',
+                });
+                return;
+              }
 
+              try {
+                const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+                if (!clipboard || typeof clipboard.writeText !== 'function') {
+                  setCopyFeedback({
+                    source,
+                    kind: 'error',
+                    message: 'No se pudo copiar porque el portapapeles no está disponible.',
+                  });
+                  return;
+                }
+
+                await clipboard.writeText(text);
+                setCopyFeedback({ source, kind: 'success', message: successMessage });
+              } catch {
+                setCopyFeedback({
+                  source,
+                  kind: 'error',
+                  message: 'No se pudo copiar. Comprueba los permisos del portapapeles e inténtalo de nuevo.',
+                });
+              }
+            };
+
+            const handleCopy = async () => {
+              await copyText(copyableFragment, 'Fragmento copiado.');
+            };
+
+            const handleCopyWithCitation = async () => {
+              await copyText(citationText, 'Cita copiada.');
+            };
 
             return (
               <div className="flex flex-col h-full bg-background rounded-md border p-4 text-sm shadow-sm">
@@ -483,7 +516,46 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                 )}
 
                 <div className="flex flex-col gap-2 shrink-0">
-
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 text-xs"
+                      onClick={handleCopy}
+                      disabled={!copyableFragment}
+                      aria-describedby={!copyableFragment ? copyUnavailableId : undefined}
+                    >
+                      <Copy className="w-3.5 h-3.5 mr-1.5" />
+                      Copiar fragmento
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 text-xs"
+                      onClick={handleCopyWithCitation}
+                      disabled={!copyableFragment}
+                      aria-describedby={!copyableFragment ? copyUnavailableId : undefined}
+                    >
+                      <Copy className="w-3.5 h-3.5 mr-1.5" />
+                      Copiar con cita
+                    </Button>
+                  </div>
+                  {!copyableFragment && (
+                    <p id={copyUnavailableId} role="status" aria-live="polite" className="text-destructive text-xs">
+                      No hay un fragmento disponible para copiar.
+                    </p>
+                  )}
+                  {copyFeedback?.source === source && (
+                    <p
+                      role="status"
+                      aria-live="polite"
+                      className={copyFeedback.kind === 'error' ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'}
+                    >
+                      {copyFeedback.message}
+                    </p>
+                  )}
                   <div className="flex gap-2">
                     {hasUrl ? (
                       <Button variant="default" size="sm" className="flex-1 text-xs" onClick={() => {
