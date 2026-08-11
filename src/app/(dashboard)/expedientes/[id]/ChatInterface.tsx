@@ -3,7 +3,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, FileText, AlertCircle, ArrowDown, ExternalLink, ArrowLeft } from 'lucide-react';
+import { Send, FileText, AlertCircle, ArrowDown, ExternalLink, ArrowLeft, AlertTriangle } from 'lucide-react';
 import {
   buildPdfPageUrl,
   buildPdfUrl,
@@ -29,6 +29,7 @@ interface Source {
   original_path?: string | null;
   pagina_detectada?: string | number | null;
   fragmento_corto?: string | null;
+  fragmento_completo?: string | null;
 }
 
 interface ChatHistoryEntry {
@@ -39,6 +40,28 @@ interface ChatHistoryEntry {
 
 interface ChatInterfaceProps {
   expedienteId: string;
+}
+
+function normalizeFragment(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim();
+  if (!normalized) return null;
+
+  const technicalMarker = normalized.toLocaleLowerCase('es-ES');
+  return technicalMarker === 'null' || technicalMarker === 'undefined' ? null : normalized;
+}
+
+function normalizeDetectedReference(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim();
+  if (!normalized) return null;
+
+  const technicalMarker = normalized.toLocaleLowerCase('es-ES');
+  if (['n/a', 'na', 'ninguno', 'sin determinar', '-'].includes(technicalMarker)) return null;
+
+  return normalized;
 }
 
 function normalizePositiveInteger(value: unknown): number | null {
@@ -70,7 +93,7 @@ function normalizeSources(value: unknown): Source[] {
       chunk_id: typeof raw.chunk_id === 'string' || typeof raw.chunk_id === 'number' ? String(raw.chunk_id) : '',
       municipio_nombre: typeof raw.municipio_nombre === 'string' ? raw.municipio_nombre : 'No identificado',
       nombre_pdf: typeof raw.nombre_pdf === 'string' ? raw.nombre_pdf : 'Documento',
-      titulo_detectado: typeof raw.titulo_detectado === 'string' ? raw.titulo_detectado : null,
+      titulo_detectado: normalizeDetectedReference(raw.titulo_detectado),
       similarity: typeof raw.similarity === 'number' ? raw.similarity : null,
       source_index: sourceIndex,
       original_path: typeof raw.original_path === 'string' ? raw.original_path : null,
@@ -78,7 +101,8 @@ function normalizeSources(value: unknown): Source[] {
         typeof raw.pagina_detectada === 'string' || typeof raw.pagina_detectada === 'number'
           ? raw.pagina_detectada
           : null,
-      fragmento_corto: typeof raw.fragmento_corto === 'string' ? raw.fragmento_corto : null,
+      fragmento_corto: normalizeFragment(raw.fragmento_corto),
+      fragmento_completo: normalizeFragment(raw.fragmento_completo),
     });
   }
 
@@ -102,7 +126,6 @@ function normalizeHistory(value: unknown): Message[] {
     }];
   });
 }
-
 
 export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const inFlightRef = useRef(false);
@@ -393,6 +416,8 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
             const documentUrl = pdfPageUrl ?? pdfUrl;
             const isSiotuga = safeOriginalUrl?.includes('siotuga.xunta.gal/siotuga/inventario');
             const hasUrl = safeOriginalUrl !== null;
+            const sourceFragment = source.fragmento_completo ?? source.fragmento_corto;
+
 
 
             return (
@@ -406,13 +431,21 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                     {(source.municipio_nombre && source.municipio_nombre !== 'No identificado') && (
                       <p><span className="font-medium">Municipio/Ámbito:</span> {source.municipio_nombre}</p>
                     )}
-
+                    {source.titulo_detectado && (
+                      <p><span className="font-medium">Referencia detectada:</span> {source.titulo_detectado}</p>
+                    )}
                     {source.pagina_detectada && (
                       <p><span className="font-medium">Página:</span> {source.pagina_detectada}</p>
                     )}
                   </div>
                 </div>
 
+                <div className="border-yellow-500/30 bg-yellow-500/10 text-yellow-900 dark:text-yellow-100 rounded-md border p-3 mb-4 text-xs font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>
+                    Texto extraído automáticamente. Puede contener errores de lectura o formato. Verifique siempre el documento original.
+                  </span>
+                </div>
 
                 {documentUrl ? (() => {
 
@@ -430,7 +463,9 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                         title={`Visor PDF ${source.nombre_pdf}`}
                       />
                       <div className="text-xs text-muted-foreground line-clamp-3">
-                        Texto recuperado: &ldquo;{source.fragmento_corto}&rdquo;
+                        {sourceFragment
+                          ? <>Texto recuperado: &ldquo;{sourceFragment}&rdquo;</>
+                          : 'Fragmento no disponible.'}
                       </div>
                     </div>
                   );
@@ -439,11 +474,11 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                     <p className="text-muted-foreground mb-3 text-xs">
                       Esta fuente enlaza una ficha o documento externo. No se dispone de un PDF con página exacta.
                     </p>
-                    {source.fragmento_corto}
+                    {sourceFragment ?? 'Fragmento no disponible.'}
                   </div>
                 ) : (
                   <div className="flex-1 overflow-y-auto mb-4 border rounded-md p-3 text-sm whitespace-pre-wrap">
-                    {source.fragmento_corto}
+                    {sourceFragment ?? 'Fragmento no disponible.'}
                   </div>
                 )}
 

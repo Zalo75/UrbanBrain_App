@@ -153,7 +153,12 @@ describe('ChatInterface autoscroll', () => {
   })
 })
 
-function source(sourceIndex: number, originalPath: string, page: string | number = 1) {
+function source(
+  sourceIndex: number,
+  originalPath: string,
+  page: string | number = 1,
+  overrides: Record<string, unknown> = {}
+) {
   return {
     chunk_id: `chunk-${sourceIndex}`,
     municipio_nombre: 'A Coruña',
@@ -162,11 +167,25 @@ function source(sourceIndex: number, originalPath: string, page: string | number
     original_path: originalPath,
     pagina_detectada: page,
     fragmento_corto: `Fragmento ${sourceIndex}`,
+    ...overrides,
   }
 }
 
 function historyResponse(history: unknown[]) {
   return { ok: true, json: async () => ({ history }) }
+}
+
+async function renderSourceDetail(overrides: Record<string, unknown> = {}) {
+  vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+    {
+      role: 'assistant',
+      content: 'Consulta [Fuente 1].',
+      sources: [source(1, 'https://example.test/norma.pdf', 3, overrides)],
+    },
+  ])))
+
+  render(<ChatInterface expedienteId="exp-a" />)
+  fireEvent.click(await screen.findByRole('link', { name: '[Fuente 1]' }))
 }
 
 describe('ChatInterface citations', () => {
@@ -415,5 +434,81 @@ describe('ChatInterface citations', () => {
     expect(await screen.findByText(/ficha o documento externo/i)).toBeTruthy()
     expect(screen.queryByTitle('Visor PDF Documento 1')).toBeNull()
     expect(screen.getByRole('button', { name: 'Abrir documento externo' })).toBeTruthy()
+  })
+
+  it('shows a trimmed complete fragment before the short fragment', async () => {
+    await renderSourceDetail({
+      fragmento_completo: '  Texto completo de la fuente.\n',
+      fragmento_corto: 'Texto abreviado.',
+    })
+
+    const recoveredText = await screen.findByText(/Texto recuperado:/)
+    expect(recoveredText.textContent).toBe('Texto recuperado: “Texto completo de la fuente.”')
+    expect(screen.queryByText(/Texto abreviado/)).toBeNull()
+  })
+
+  it.each([
+    ['ausente', {}],
+    ['nulo', { fragmento_completo: null }],
+    ['vacío', { fragmento_completo: '' }],
+    ['sólo espacios y saltos', { fragmento_completo: '  \n  ' }],
+  ])('falls back to the short fragment when the complete fragment is %s', async (_case, overrides) => {
+    await renderSourceDetail({ fragmento_corto: 'Fragmento corto normalizado.', ...overrides })
+
+    const recoveredText = await screen.findByText(/Texto recuperado:/)
+    expect(recoveredText.textContent).toBe('Texto recuperado: “Fragmento corto normalizado.”')
+  })
+
+  it.each(['null', 'undefined'])('does not expose the technical marker "%s" as a fragment', async (marker) => {
+    await renderSourceDetail({
+      fragmento_completo: `  ${marker}  `,
+      fragmento_corto: 'Fragmento corto seguro.',
+    })
+
+    const recoveredText = await screen.findByText(/Texto recuperado:/)
+    expect(recoveredText.textContent).toBe('Texto recuperado: “Fragmento corto seguro.”')
+    expect(screen.queryByText(marker)).toBeNull()
+  })
+
+  it.each([
+    'Artículo 12.3',
+    'artículo único',
+    'disposición adicional',
+    'normas urbanísticas',
+    'ordenanza general',
+  ])('shows the detected normative reference "%s" without semantic heuristics', async (reference) => {
+    await renderSourceDetail({ titulo_detectado: `  ${reference}  ` })
+
+    expect(await screen.findByText('Referencia detectada:')).toBeTruthy()
+    expect(screen.getByText(reference)).toBeTruthy()
+  })
+
+  it.each([
+    ['nulo', null],
+    ['vacío', ''],
+    ['espacios', '   '],
+    ['N/A', 'N/A'],
+    ['ninguno', 'ninguno'],
+    ['sin determinar', 'sin determinar'],
+    ['guion', '-'],
+  ])('hides the detected reference block for %s', async (_case, reference) => {
+    await renderSourceDetail({ titulo_detectado: reference })
+
+    expect(screen.queryByText('Referencia detectada:')).toBeNull()
+  })
+
+  it('shows a prudent automatic extraction warning in the source detail', async () => {
+    await renderSourceDetail()
+
+    expect(await screen.findByText(/Texto extraído automáticamente/)).toBeTruthy()
+    expect(screen.getByText(/Verifique siempre el documento original/)).toBeTruthy()
+  })
+
+  it('shows an honest fallback when neither fragment contains text', async () => {
+    await renderSourceDetail({ fragmento_completo: ' \n ', fragmento_corto: ' undefined ' })
+
+    expect(await screen.findByText('Fragmento no disponible.')).toBeTruthy()
+    expect(screen.queryByText('null')).toBeNull()
+    expect(screen.queryByText('undefined')).toBeNull()
   })
 })
