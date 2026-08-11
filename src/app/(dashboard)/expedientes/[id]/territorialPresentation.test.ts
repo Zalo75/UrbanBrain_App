@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
+import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import type { TerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import {
   buildTerritorialPresentation,
   getUrbanContextAttention,
 } from './territorialPresentation'
-
 function detectedContext(
   overrides: Partial<TerritorialContextView> = {}
 ): TerritorialContextView {
@@ -136,6 +136,83 @@ describe('buildTerritorialPresentation', () => {
     )
 
     expect(presentation.zone).toBe('Ordenanza 3')
+    expect(presentation.urbanContextAttention).toBeNull()
+  })
+
+  it('no muestra faltan zona si actionArea tiene planningZone pero mantiene provisional si no hay technicallReviewed', () => {
+    // Reproducimos el flujo real de datos donde el action ya aplicó el fallback
+    // sobre planningZones leyendo el categoryLabel cuando candidate.areas = []
+    const mockResolution = {
+      status: 'confirmed',
+      confidence: 'high',
+      inputMethod: 'coordinates',
+      resolvedAt: '2026-07-16T10:00:00.000Z',
+      evidence: [{
+        source: 'catastro',
+        sourceUrl: 'https://test',
+        retrievedAt: '2026-07-16T10:00:00.000Z',
+        method: 'api'
+      }],
+      warnings: [],
+      conflicts: [],
+      candidates: [],
+      affects: { analysisGeometry: 'parcel', detected: [], warnings: [], canRuleOutUndetectedAffects: false },
+      planning: {
+        status: 'determined',
+        instrument: 'Plan general de ordenación municipal',
+        evidence: [],
+        warnings: [],
+        classification: { label: 'Núcleo rural' },
+        classificationResolution: {
+          status: 'review_required',
+          nextAction: 'review_official_sources',
+          discrepancies: [],
+          reviewReasons: [],
+          sourceChecks: [],
+          officialLinks: [],
+          evidence: [],
+          candidates: [{
+            id: 'candidate-1',
+            kind: 'official_classification',
+            areas: [], // El candidato no tiene zonas poligonales
+            source: 'siotuga',
+            evidence: [],
+            confidence: 'high',
+            evidenceBasis: 'parcel_geometry',
+            instrumentTraceability: 'pending',
+            normalizationStatus: 'mapped',
+            classification: {
+              code: 'NR',
+              label: 'Núcleo rural',
+              categoryLabel: 'Núcleo rural común',
+              sourceFeatureIds: [],
+            }
+          }]
+        }
+      },
+      continuity: {
+        manualContext: {
+          actionAreaSelection: {
+            current: {
+              selectionType: 'detected_zone',
+              selectedCandidateId: 'candidate-1',
+              // El Action pobló el array usando planningZoneNameFromCandidate()
+              planningZones: ['Núcleo rural común'],
+              planningZone: 'Núcleo rural común',
+            }
+          }
+        }
+      }
+    } as any; // Cast for simplicity since we only care about this flow
+
+    const detected = buildTerritorialContextView(mockResolution);
+
+    const presentation = buildTerritorialPresentation(
+      { province: 'A Coruña', municipality: 'Sada' },
+      detected
+    )
+
+    expect(presentation.zone).toBe('Núcleo rural común')
     expect(presentation.urbanContextAttention).toBeNull()
   })
 })

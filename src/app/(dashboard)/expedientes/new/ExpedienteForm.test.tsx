@@ -173,6 +173,7 @@ describe('ExpedienteForm', () => {
     await screen.findByRole('alert')
     expect((screen.getByLabelText(/Nombre del proyecto/i) as HTMLInputElement).value).toBe('Expediente de prueba')
     expect((screen.getByLabelText(/Dirección aproximada/i) as HTMLInputElement).value).toBe('Dirección pendiente de revisar')
+    expect((screen.getByLabelText(/^Municipio/) as HTMLSelectElement).value).toBe('culleredo')
     expect(screen.getByLabelText(/Dirección aproximada/i).getAttribute('aria-invalid')).toBe('true')
     expect(screen.getByLabelText(/Referencia catastral/i).getAttribute('aria-invalid')).not.toBe('true')
   })

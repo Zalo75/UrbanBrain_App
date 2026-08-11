@@ -198,16 +198,20 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
       effective.planning.instrument?.trim() &&
       effective.planning.classification?.label.trim()
   );
+  const isTechnicianValidated =
+    manual?.verification === 'technician_validated' ||
+    actionArea?.verification === 'technician_validated';
+
   const status =
     result.conflicts.length ||
     (!classificationResolution && (effective?.planning.status ?? result.planning.status) === 'conflict')
       ? 'conflict'
-      : manual ||
+      : (manual && !isTechnicianValidated) ||
           result.continuity?.usingPreviousOfficialContext ||
-          incompleteSource ||
-          Boolean(classificationResolution && classificationResolution.status !== 'clear')
+          (!isTechnicianValidated && incompleteSource) ||
+          (!isTechnicianValidated && Boolean(classificationResolution && classificationResolution.status !== 'clear'))
         ? 'provisional'
-      : territorialContextComplete
+      : territorialContextComplete || isTechnicianValidated
         ? 'confirmed'
         : effective?.status === 'confirmed'
           ? 'provisional'
