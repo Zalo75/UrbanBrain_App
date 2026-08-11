@@ -24,6 +24,9 @@ interface Props {
   wmsLayer?: string
   parcelGeometry?: ParcelGeometry
   actionAreaGeometry?: ParcelGeometry
+  classificationCode?: string
+  categoryCode?: string
+  affects?: Array<{ category: string; name: string; confidence: string }>
 }
 
 export function PordPlanViewer(props: Props) {

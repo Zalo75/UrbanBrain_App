@@ -761,6 +761,9 @@ export function TerritorialContextPanel({
                       wmsLayer={context.municipalityCode === '15009' ? '_15009_NNSSPP_199606_AD_PORD_02CL_22221' : undefined}
                       parcelGeometry={context.parcelGeometry}
                       actionAreaGeometry={context.actionArea?.geometry}
+                      classificationCode={context.classification?.code}
+                      categoryCode={context.classification?.categoryCode}
+                      affects={context.affects}
                     />
                   </div>
                 </details>
