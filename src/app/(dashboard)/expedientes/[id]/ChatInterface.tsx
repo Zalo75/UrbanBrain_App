@@ -3,34 +3,106 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, FileText, AlertCircle, ArrowDown } from 'lucide-react';
+import { Send, FileText, AlertCircle, ArrowDown, ExternalLink, ArrowLeft } from 'lucide-react';
+import {
+  buildPdfPageUrl,
+  buildPdfUrl,
+  buildSafeHttpUrl,
+  parseCitations,
+} from './chatCitations';
 
 const BOTTOM_THRESHOLD_PX = 48;
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  sources: Source[];
 }
 
 interface Source {
   chunk_id: string;
   municipio_nombre: string;
   nombre_pdf: string;
-  titulo_detectado: string;
-  similarity: number;
+  titulo_detectado?: string | null;
+  similarity?: number | null;
   source_index: number;
-  original_path?: string;
-  pagina_detectada?: string;
-  fragmento_corto?: string;
+  original_path?: string | null;
+  pagina_detectada?: string | number | null;
+  fragmento_corto?: string | null;
 }
 
-interface ChatHistoryEntry extends Message {
-  sources?: Source[] | null;
+interface ChatHistoryEntry {
+  role?: unknown;
+  content?: unknown;
+  sources?: unknown;
 }
 
 interface ChatInterfaceProps {
   expedienteId: string;
 }
+
+function normalizePositiveInteger(value: unknown): number | null {
+  const normalized = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  if (!normalized) return null;
+
+  for (const character of normalized) {
+    if (character < '0' || character > '9') return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeSources(value: unknown): Source[] {
+  if (!Array.isArray(value)) return [];
+
+  const sources: Source[] = [];
+  const seenSourceIndexes = new Set<number>();
+
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const raw = candidate as Record<string, unknown>;
+    const sourceIndex = normalizePositiveInteger(raw.source_index);
+    if (sourceIndex === null || seenSourceIndexes.has(sourceIndex)) continue;
+
+    seenSourceIndexes.add(sourceIndex);
+    sources.push({
+      chunk_id: typeof raw.chunk_id === 'string' || typeof raw.chunk_id === 'number' ? String(raw.chunk_id) : '',
+      municipio_nombre: typeof raw.municipio_nombre === 'string' ? raw.municipio_nombre : 'No identificado',
+      nombre_pdf: typeof raw.nombre_pdf === 'string' ? raw.nombre_pdf : 'Documento',
+      titulo_detectado: typeof raw.titulo_detectado === 'string' ? raw.titulo_detectado : null,
+      similarity: typeof raw.similarity === 'number' ? raw.similarity : null,
+      source_index: sourceIndex,
+      original_path: typeof raw.original_path === 'string' ? raw.original_path : null,
+      pagina_detectada:
+        typeof raw.pagina_detectada === 'string' || typeof raw.pagina_detectada === 'number'
+          ? raw.pagina_detectada
+          : null,
+      fragmento_corto: typeof raw.fragmento_corto === 'string' ? raw.fragmento_corto : null,
+    });
+  }
+
+  return sources;
+}
+
+function normalizeHistory(value: unknown): Message[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry): Message[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const historyEntry = entry as ChatHistoryEntry;
+    if ((historyEntry.role !== 'user' && historyEntry.role !== 'assistant') || typeof historyEntry.content !== 'string') {
+      return [];
+    }
+
+    return [{
+      role: historyEntry.role,
+      content: historyEntry.content,
+      sources: normalizeSources(historyEntry.sources),
+    }];
+  });
+}
+
 
 export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const inFlightRef = useRef(false);
@@ -40,7 +112,8 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sources, setSources] = useState<Source[]>([]);
+  const [activeSource, setActiveSource] = useState<Source | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
@@ -76,22 +149,8 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
         }
         const data = await res.json();
 
-        if (data.history && data.history.length > 0) {
-          const history = data.history as ChatHistoryEntry[];
-          const loadedMessages = history.map((entry) => ({
-            role: entry.role,
-            content: entry.content,
-          }));
-          setMessages(loadedMessages);
-
-          // Recuperar fuentes del último mensaje del asistente si existen
-          const lastAssistantMsg = [...history]
-            .reverse()
-            .find((entry) => entry.role === 'assistant');
-          if (lastAssistantMsg && lastAssistantMsg.sources) {
-            setSources(lastAssistantMsg.sources);
-          }
-        }
+        setMessages(normalizeHistory(data.history));
+        setActiveSource(null);
       } catch {
         setError('No se ha podido cargar el historial del chat.');
       }
@@ -118,7 +177,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
     }
     inFlightRef.current = true;
     updateAutoScroll(true);
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage, sources: [] }]);
     setInput('');
     setLoading(true);
     setError(null);
@@ -144,8 +203,15 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
         throw new Error(data.error || 'Error al procesar la consulta');
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }]);
-      setSources(data.sources || []);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: typeof data.answer === 'string' ? data.answer : '',
+          sources: normalizeSources(data.sources),
+        },
+      ]);
+      setActiveSource(null);
     } catch (err: unknown) {
       setError(err instanceof DOMException && err.name === 'AbortError' ? 'La consulta ha tardado demasiado. Inténtelo de nuevo.' : err instanceof Error ? err.message : 'No se ha podido completar la consulta.');
     } finally {
@@ -154,6 +220,11 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
       setLoading(false);
     }
   };
+
+  const latestAssistantSources = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant')
+    ?.sources ?? [];
 
   return (
     <div className="bg-background flex h-full min-h-0 w-full flex-col overflow-hidden xl:flex-row">
@@ -174,7 +245,41 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
               className={`max-w-[85%] rounded-lg p-3 text-sm break-words ${msg.role === 'user' ? 'bg-primary text-primary-foreground ml-auto' : 'bg-muted'}`}
               style={{ whiteSpace: 'pre-wrap' }}
             >
-              {msg.content}
+              {parseCitations(msg.content).map((token, i) => {
+                if (token.type === 'text') {
+                  return <span key={i}>{token.value}</span>;
+                }
+                const source = msg.sources.find((item) => item.source_index === token.sourceIndex);
+                const pageUrl = source
+                  ? buildPdfPageUrl(source.original_path, source.pagina_detectada)
+                  : null;
+                const pdfUrl = source ? buildPdfUrl(source.original_path) : null;
+                const externalUrl = source ? buildSafeHttpUrl(source.original_path) : null;
+                const destinationUrl = pageUrl ?? pdfUrl ?? externalUrl;
+
+                if (!source) {
+                  return (
+                    <span key={i}>{token.originalText}</span>
+                  );
+                }
+
+                if (destinationUrl) {
+                  return (
+                    <a
+                      key={i}
+                      href={destinationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setActiveSource(source)}
+                      className="text-primary hover:underline font-semibold cursor-pointer"
+                    >
+                      {token.originalText}
+                    </a>
+                  );
+                }
+
+                return <span key={i}>{token.originalText}</span>;
+              })}
             </div>
           ))}
 
@@ -247,53 +352,139 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
           <span className="text-sm font-medium">Documentos de Referencia</span>
         </div>
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {sources.length === 0 ? (
+          {latestAssistantSources.length === 0 ? (
             <div className="text-muted-foreground flex h-full items-center justify-center text-center text-sm">
               Aquí se mostrarán los fragmentos del PGOU o documentos subidos relevantes para la
               consulta actual.
             </div>
-          ) : (
-            sources.map((source, idx) => (
-              <div key={idx} className="bg-background rounded-md border p-3 text-sm shadow-sm">
-                <div className="text-primary mb-1 font-semibold">
-                  [Fuente {source.source_index}]
-                </div>
-                <div className="text-muted-foreground mb-2 space-y-1 text-xs">
-                  <p>
-                    <span className="font-medium">Municipio:</span> {source.municipio_nombre}
-                  </p>
-                  <p>
-                    <span className="font-medium">Documento:</span> {source.nombre_pdf}
-                  </p>
-                  {source.pagina_detectada && (
-                    <p>
-                      <span className="font-medium">Página:</span> {source.pagina_detectada}
-                    </p>
-                  )}
-                  {source.titulo_detectado &&
-                    source.titulo_detectado.trim() !== ':' &&
-                    source.titulo_detectado.trim() !== '' && (
-                      <p>
-                        <span className="font-medium">Apartado:</span> {source.titulo_detectado}
+          ) : activeSource === null ? (
+            <>
+              <div className="text-muted-foreground text-center text-xs mb-2">
+                Pulsa una fuente de la respuesta para examinarla
+              </div>
+              {latestAssistantSources.map((source) => (
+                <button
+                  key={source.source_index}
+                  type="button"
+                  className="bg-background w-full rounded-md border p-3 text-left text-sm shadow-sm cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => setActiveSource(source)}
+                >
+                  <div className="text-primary mb-1 font-semibold">
+                    [Fuente {source.source_index}]
+                  </div>
+                  <div className="text-muted-foreground mb-2 space-y-1 text-xs">
+                    <p><span className="font-medium">Municipio:</span> {source.municipio_nombre}</p>
+                    <p><span className="font-medium">Documento:</span> {source.nombre_pdf}</p>
+                    {source.fragmento_corto && (
+                      <p className="text-foreground/80 border-muted-foreground/30 mt-2 border-l-2 pl-2 italic">
+                        &ldquo;{source.fragmento_corto}&rdquo;
                       </p>
                     )}
-                  {source.fragmento_corto && (
-                    <p className="text-foreground/80 border-muted-foreground/30 mt-2 border-l-2 pl-2 italic">
-                      &ldquo;{source.fragmento_corto}&rdquo;
+                  </div>
+                </button>
+              ))}
+            </>
+          ) : (() => {
+            const source = activeSource;
+            if (!source) return null;
+            const safeOriginalUrl = buildSafeHttpUrl(source.original_path);
+            const pdfUrl = buildPdfUrl(source.original_path);
+            const pdfPageUrl = buildPdfPageUrl(source.original_path, source.pagina_detectada);
+            const documentUrl = pdfPageUrl ?? pdfUrl;
+            const isSiotuga = safeOriginalUrl?.includes('siotuga.xunta.gal/siotuga/inventario');
+            const hasUrl = safeOriginalUrl !== null;
+
+
+            return (
+              <div className="flex flex-col h-full bg-background rounded-md border p-4 text-sm shadow-sm">
+                <div className="mb-4">
+                  <div className="text-primary font-semibold mb-2 text-lg">
+                    [Fuente {source.source_index}]
+                  </div>
+                  <div className="space-y-1">
+                    <p><span className="font-medium">Documento:</span> {source.nombre_pdf}</p>
+                    {(source.municipio_nombre && source.municipio_nombre !== 'No identificado') && (
+                      <p><span className="font-medium">Municipio/Ámbito:</span> {source.municipio_nombre}</p>
+                    )}
+
+                    {source.pagina_detectada && (
+                      <p><span className="font-medium">Página:</span> {source.pagina_detectada}</p>
+                    )}
+                  </div>
+                </div>
+
+
+                {documentUrl ? (() => {
+
+                  return (
+                    <div className="flex-1 flex flex-col min-h-0 mb-4 gap-2">
+                      {pdfPageUrl === null && (
+                        <div className="bg-muted text-muted-foreground p-2 text-xs rounded-md">
+                          Página no determinada. Mostrando el documento desde el inicio.
+                        </div>
+                      )}
+                      <iframe
+                        src={documentUrl}
+
+                        className="w-full flex-1 rounded-md border bg-white min-h-[300px]"
+                        title={`Visor PDF ${source.nombre_pdf}`}
+                      />
+                      <div className="text-xs text-muted-foreground line-clamp-3">
+                        Texto recuperado: &ldquo;{source.fragmento_corto}&rdquo;
+                      </div>
+                    </div>
+                  );
+                })() : safeOriginalUrl ? (
+                  <div className="flex-1 overflow-y-auto mb-4 border rounded-md p-3 text-sm whitespace-pre-wrap">
+                    <p className="text-muted-foreground mb-3 text-xs">
+                      Esta fuente enlaza una ficha o documento externo. No se dispone de un PDF con página exacta.
                     </p>
-                  )}
-                  {source.original_path && (
-                    <p
-                      className="text-muted-foreground/50 mt-2 truncate text-[10px]"
-                      title={source.original_path}
-                    >
-                      Ruta: {source.original_path}
-                    </p>
-                  )}
+                    {source.fragmento_corto}
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto mb-4 border rounded-md p-3 text-sm whitespace-pre-wrap">
+                    {source.fragmento_corto}
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 shrink-0">
+
+                  <div className="flex gap-2">
+                    {hasUrl ? (
+                      <Button variant="default" size="sm" className="flex-1 text-xs" onClick={() => {
+                        window.open(documentUrl ?? safeOriginalUrl, '_blank', 'noopener,noreferrer');
+                      }}>
+                        {isSiotuga ? (
+                          <>
+                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                            Abrir ficha de SIOTUGA
+                          </>
+                        ) : documentUrl ? (
+                          <>
+                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                            Abrir original
+                          </>
+                        ) : (
+                          <>
+                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                            Abrir documento externo
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button variant="secondary" size="sm" className="flex-1 text-xs" disabled>
+                        Enlace oficial no disponible
+                      </Button>
+                    )}
+                  </div>
+                  <Button variant="ghost" size="sm" className="w-full text-xs mt-2" onClick={() => setActiveSource(null)}>
+                    <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+                    Volver a fuentes
+                  </Button>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>

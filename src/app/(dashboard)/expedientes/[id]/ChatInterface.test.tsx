@@ -152,3 +152,268 @@ describe('ChatInterface autoscroll', () => {
     expect(screen.queryByRole('button', { name: 'Ir al último mensaje' })).toBeNull()
   })
 })
+
+function source(sourceIndex: number, originalPath: string, page: string | number = 1) {
+  return {
+    chunk_id: `chunk-${sourceIndex}`,
+    municipio_nombre: 'A Coruña',
+    nombre_pdf: `Documento ${sourceIndex}`,
+    source_index: sourceIndex,
+    original_path: originalPath,
+    pagina_detectada: page,
+    fragmento_corto: `Fragmento ${sourceIndex}`,
+  }
+}
+
+function historyResponse(history: unknown[]) {
+  return { ok: true, json: async () => ({ history }) }
+}
+
+describe('ChatInterface citations', () => {
+  beforeEach(() => {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps sources scoped to the historical message that contains the citation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Primera [Fuente 1].',
+        sources: [source(1, 'https://example.test/first.pdf', 3)],
+      },
+      {
+        role: 'assistant',
+        content: 'Segunda [Fuente 1].',
+        sources: [source(1, 'https://example.test/second.pdf', 8)],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: '[Fuente 1]' })).toHaveLength(2)
+    })
+    const citations = screen.getAllByRole('link', { name: '[Fuente 1]' })
+    expect(citations).toHaveLength(2)
+    expect(citations[0].getAttribute('href')).toBe('https://example.test/first.pdf#page=3')
+    expect(citations[1].getAttribute('href')).toBe('https://example.test/second.pdf#page=8')
+  })
+
+  it('keeps an earlier response unchanged when a new response has its own source', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown) =>
+        String(input).includes('/api/chat/history')
+          ? Promise.resolve(historyResponse([
+              {
+                role: 'assistant',
+                content: 'Anterior [Fuente 1].',
+                sources: [source(1, 'https://example.test/previous.pdf', 2)],
+              },
+            ]))
+          : Promise.resolve({
+              ok: true,
+              json: async () => ({
+                answer: 'Nueva [Fuente 1].',
+                sources: [source(1, 'https://example.test/new.pdf?edition=2#old', '9')],
+              }),
+            })
+      )
+    )
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    expect((await screen.findByRole('link', { name: '[Fuente 1]' })).getAttribute('href')).toBe(
+      'https://example.test/previous.pdf#page=2'
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('Escribe tu consulta normativa...'), {
+      target: { value: 'Nueva consulta' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar consulta' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: '[Fuente 1]' })).toHaveLength(2)
+    })
+    const citations = screen.getAllByRole('link', { name: '[Fuente 1]' })
+    expect(citations.map((citation) => citation.getAttribute('href'))).toEqual([
+      'https://example.test/previous.pdf#page=2',
+      'https://example.test/new.pdf?edition=2#page=9',
+    ])
+  })
+
+  it('normalizes response sources, retaining only the first duplicate source_index', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown) =>
+        String(input).includes('/api/chat/history')
+          ? Promise.resolve(historyResponse([]))
+          : Promise.resolve({
+              ok: true,
+              json: async () => ({
+                answer: 'Respuesta [Fuente 1].',
+                sources: [
+                  source(1, 'https://example.test/first.pdf', 4),
+                  source(1, 'https://example.test/duplicate.pdf', 7),
+                ],
+              }),
+            })
+      )
+    )
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    fireEvent.change(screen.getByPlaceholderText('Escribe tu consulta normativa...'), {
+      target: { value: 'Consulta' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar consulta' }))
+
+    expect((await screen.findByRole('link', { name: '[Fuente 1]' })).getAttribute('href')).toBe(
+      'https://example.test/first.pdf#page=4'
+    )
+  })
+
+  it('does not create misleading links for invalid citations or messages without sources', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Con fuente [Fuente 1].',
+        sources: [source(1, 'https://example.test/available.pdf', 5)],
+      },
+      {
+        role: 'assistant',
+        content: 'Sin fuente [Fuente 1] y [Fuente 2].',
+      },
+      {
+        role: 'assistant',
+        content: 'Índice inválido [Fuente 0].',
+        sources: [source(1, 'https://example.test/other.pdf', 6)],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const citations = await screen.findAllByRole('link', { name: '[Fuente 1]' })
+    expect(citations).toHaveLength(1)
+    expect(citations[0].getAttribute('href')).toBe('https://example.test/available.pdf#page=5')
+    expect(screen.getByText('[Fuente 2]')).toHaveProperty('tagName', 'SPAN')
+    expect(screen.getByText('Índice inválido [Fuente 0].')).toBeTruthy()
+  })
+
+  it('gives repeated citations to one source the same safe destination', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: '[Fuente 1] y de nuevo [Fuente 1].',
+        sources: [source(1, 'https://example.test/repeated.pdf?version=1#old', 11)],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const citations = await screen.findAllByRole('link', { name: '[Fuente 1]' })
+    expect(citations).toHaveLength(2)
+    expect(citations.map((citation) => citation.getAttribute('href'))).toEqual([
+      'https://example.test/repeated.pdf?version=1#page=11',
+      'https://example.test/repeated.pdf?version=1#page=11',
+    ])
+  })
+
+  it('leaves the panel empty when the latest assistant response has no sources', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Anterior [Fuente 1].',
+        sources: [source(1, 'https://example.test/previous.pdf', 2)],
+      },
+      { role: 'assistant', content: 'Respuesta reciente sin fuentes.' },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect(await screen.findByText('Respuesta reciente sin fuentes.')).toBeTruthy()
+    expect(screen.getByText(/se mostrarán los fragmentos/i)).toBeTruthy()
+    expect(screen.queryByText('Documento 1')).toBeNull()
+  })
+
+  it('opens an exact PDF citation without cancelling navigation and selects its source', async () => {
+    const open = vi.fn()
+    vi.stubGlobal('open', open)
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Consulta [Fuente 1].',
+        sources: [source(1, 'https://example.test/norma.pdf?edition=2#old', 4)],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const citation = await screen.findByRole('link', { name: '[Fuente 1]' })
+    expect(citation.getAttribute('href')).toBe('https://example.test/norma.pdf?edition=2#page=4')
+    expect(citation.getAttribute('target')).toBe('_blank')
+    expect(citation.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(citation.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(true)
+
+    const viewer = await screen.findByTitle('Visor PDF Documento 1')
+    expect(viewer.getAttribute('src')).toBe('https://example.test/norma.pdf?edition=2#page=4')
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir original' }))
+    expect(open).toHaveBeenCalledWith(
+      'https://example.test/norma.pdf?edition=2#page=4',
+      '_blank',
+      'noopener,noreferrer'
+    )
+  })
+
+  it('opens a PDF without a valid page from its beginning and makes source cards keyboard-accessible buttons', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Consulta [Fuente 1].',
+        sources: [source(1, 'https://example.test/norma.pdf?edition=2#old', 'Página 4')],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const citation = await screen.findByRole('link', { name: '[Fuente 1]' })
+    expect(citation.getAttribute('href')).toBe('https://example.test/norma.pdf?edition=2')
+    const card = screen.getByRole('button', { name: /Fuente 1/i })
+    expect(card.tagName).toBe('BUTTON')
+    fireEvent.keyDown(card, { key: 'Enter' })
+    fireEvent.click(card)
+    expect(await screen.findByText(/Página no determinada/i)).toBeTruthy()
+    expect(screen.getByTitle('Visor PDF Documento 1').getAttribute('src')).toBe(
+      'https://example.test/norma.pdf?edition=2'
+    )
+  })
+
+  it('opens an HTTP(S) non-PDF citation as an external document and leaves invalid destinations unlinked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Ficha [Fuente 1] e inválida [Fuente 2].',
+        sources: [
+          source(1, 'https://example.test/ficha.html', 6),
+          source(2, 'javascript:alert(1)', 3),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const externalCitation = await screen.findByRole('link', { name: '[Fuente 1]' })
+    expect(externalCitation.getAttribute('href')).toBe('https://example.test/ficha.html')
+    expect(screen.queryByRole('link', { name: '[Fuente 2]' })).toBeNull()
+    fireEvent.click(externalCitation)
+    expect(await screen.findByText(/ficha o documento externo/i)).toBeTruthy()
+    expect(screen.queryByTitle('Visor PDF Documento 1')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Abrir documento externo' })).toBeTruthy()
+  })
+})
