@@ -127,7 +127,13 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
   const [loading, setLoading] = useState(false);
   const [activeSource, setActiveSource] = useState<Source | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+  const sourcePanelRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (sourcePanelRef.current) {
+      sourcePanelRef.current.scrollTop = 0;
+    }
+  }, [activeSource]);
   const [error, setError] = useState<string | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
@@ -365,7 +371,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
           <FileText className="h-4 w-4" />
           <span className="text-sm font-medium">Documentos de Referencia</span>
         </div>
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div ref={sourcePanelRef} className="flex-1 space-y-4 overflow-y-auto p-4">
           {latestAssistantSources.length === 0 ? (
             <div className="text-muted-foreground flex h-full items-center justify-center text-center text-sm">
               Aquí se mostrarán los fragmentos del PGOU o documentos subidos relevantes para la

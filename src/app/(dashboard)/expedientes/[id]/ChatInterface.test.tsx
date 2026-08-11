@@ -194,6 +194,15 @@ function stubClipboard(clipboard: unknown) {
   vi.stubGlobal('navigator', mockedNavigator)
 }
 
+function getSourcePanelScrollContainer() {
+  const panelHeading = screen.getByText('Documentos de Referencia')
+  const scrollContainer = panelHeading.parentElement?.nextElementSibling
+  if (!(scrollContainer instanceof HTMLElement)) {
+    throw new Error('No se encontró el panel desplazable de fuentes')
+  }
+  return scrollContainer
+}
+
 describe('ChatInterface citations', () => {
   beforeEach(() => {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
@@ -394,6 +403,55 @@ describe('ChatInterface citations', () => {
       '_blank',
       'noopener,noreferrer'
     )
+  })
+
+  it('returns the source panel to the top when the active source changes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Primera [Fuente 1] y segunda [Fuente 2].',
+        sources: [
+          source(1, 'https://example.test/one.pdf', 2),
+          source(2, 'https://example.test/two.pdf', 7),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    fireEvent.click(await screen.findByRole('link', { name: '[Fuente 1]' }))
+
+    const firstViewer = await screen.findByTitle('Visor PDF Documento 1')
+    const sourcePanel = getSourcePanelScrollContainer()
+    expect(sourcePanel.className).toContain('overflow-y-auto')
+    expect(sourcePanel.contains(firstViewer)).toBe(true)
+
+    sourcePanel.scrollTop = 240
+    expect(sourcePanel.scrollTop).toBe(240)
+    fireEvent.click(screen.getByRole('link', { name: '[Fuente 2]' }))
+
+    const secondViewer = await screen.findByTitle('Visor PDF Documento 2')
+    expect(sourcePanel.contains(secondViewer)).toBe(true)
+    expect(screen.queryByTitle('Visor PDF Documento 1')).toBeNull()
+    await waitFor(() => {
+      expect(sourcePanel.scrollTop).toBe(0)
+    })
+  })
+
+  it('does not reset the source panel scroll for an action that keeps the active source', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubClipboard({ writeText })
+    await renderSourceDetail()
+
+    const viewer = await screen.findByTitle('Visor PDF Documento 1')
+    const sourcePanel = getSourcePanelScrollContainer()
+    expect(sourcePanel.contains(viewer)).toBe(true)
+
+    sourcePanel.scrollTop = 180
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar fragmento' }))
+
+    expect(await screen.findByText('Fragmento copiado.')).toBeTruthy()
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(sourcePanel.scrollTop).toBe(180)
   })
 
   it('opens a PDF without a valid page from its beginning and makes source cards keyboard-accessible buttons', async () => {
