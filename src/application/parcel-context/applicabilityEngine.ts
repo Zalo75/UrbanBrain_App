@@ -141,18 +141,22 @@ export function requiresDeterminedParcelRegime(question: string): boolean {
 }
 
 export function classifyParcelQuestionScope(question: string): ParcelQuestionScope {
-  const requiresRegime = requiresDeterminedParcelRegime(question)
-  if (!requiresRegime) return 'independent'
-
   const isDocumentaryQuery = /\b(?:qu[eé]\s+(?:normativa|documentos?|fuentes?|regulaci[oó]n)\s+(?:has\s+(?:localizado|encontrado|utilizado)|aparece)|mu[eé]strame\s+la\s+normativa\s+relacionada)\b/i.test(
     question
   )
+
+  if (isDocumentaryQuery) {
+    return 'mixed'
+  }
+
+  const requiresRegime = requiresDeterminedParcelRegime(question)
+  if (!requiresRegime) return 'independent'
 
   const includesIndependentScope = /\b(?:afecciones?|carreteras?|aguas?|costas?|patrimonio|red\s+natura|planeamiento\s+vigente|documentos?|referencias?\s+catastrales?|catastro|coordenadas?|normativa\s+general|informaci[oó]n\s+territorial|contexto\s+administrativo|tr[aá]mites?\s+administrativos?)\b/i.test(
     question
   )
 
-  return (includesIndependentScope || isDocumentaryQuery) ? 'mixed' : 'regime'
+  return includesIndependentScope ? 'mixed' : 'regime'
 }
 
 export function evaluateApplicability(

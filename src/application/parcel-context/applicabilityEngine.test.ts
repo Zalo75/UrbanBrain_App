@@ -58,6 +58,9 @@ describe('requiresDeterminedParcelRegime', () => {
     expect(requiresDeterminedParcelRegime('Explica el artículo 12 del planeamiento')).toBe(false)
     expect(requiresDeterminedParcelRegime('¿Cuántas plantas puedo construir en esta parcela?')).toBe(true)
     expect(requiresDeterminedParcelRegime('¿Qué ocupación máxima se permite en esta finca?')).toBe(true)
+    expect(requiresDeterminedParcelRegime('¿Qué normativa has localizado para esta parcela?')).toBe(false)
+    expect(requiresDeterminedParcelRegime('¿Qué documentos has encontrado?')).toBe(false)
+    expect(requiresDeterminedParcelRegime('Resume las afecciones de carreteras y aguas')).toBe(false)
   })
 })
 
@@ -76,6 +79,11 @@ describe('classifyParcelQuestionScope', () => {
   it('separa las consultas mixtas para responder su parte independiente', () => {
     expect(classifyParcelQuestionScope('Indica las afecciones y el retranqueo aplicable')).toBe('mixed')
     expect(classifyParcelQuestionScope('Resume el documento y dime cuántas plantas puedo construir')).toBe('mixed')
+  })
+
+  it('clasifica consultas documentales directas como mixtas', () => {
+    expect(classifyParcelQuestionScope('¿Qué normativa has localizado para esta parcela?')).toBe('mixed')
+    expect(classifyParcelQuestionScope('¿Qué documentos has encontrado?')).toBe('mixed')
   })
 })
 
