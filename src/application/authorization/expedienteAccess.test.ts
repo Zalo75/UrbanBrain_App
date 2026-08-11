@@ -126,4 +126,25 @@ describe('getExpedienteAccess', () => {
     expect(result).toEqual({ ok: false, reason: 'unauthenticated' })
     expect(mocks.select).not.toHaveBeenCalled()
   })
+
+  it('denies unauthenticated access even for a specifically known expediente id', async () => {
+    mocks.getUserId.mockResolvedValue(null)
+
+    const result = await getExpedienteAccess('f3f1a1b6-4b4d-47b8-baf8-603db6cbcf2b')
+
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' })
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
+
+  it('does not grant admin role to an unauthenticated user for any expediente', async () => {
+    mocks.getUserId.mockResolvedValue(null)
+
+    const result = await getExpedienteAccess('any-expediente-id')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toBe('unauthenticated')
+    }
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
 })
