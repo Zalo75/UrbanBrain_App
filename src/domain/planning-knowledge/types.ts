@@ -87,13 +87,20 @@ export interface PlanningRegimeIdentifier {
   sourceIds: string[]
 }
 
+export type PlanningNormativeDocumentType =
+  | 'normative_text'
+  | 'ordinance'
+  | 'sheet'
+  | 'catalogue'
+  | 'other'
+
 export interface PlanningNormativeDocument {
   id: string
   officialDocumentId: string
   instrumentId: string
   name: string
   officialUrl: string
-  documentType: 'normative_text' | 'ordinance' | 'sheet' | 'catalogue' | 'other'
+  documentType: PlanningNormativeDocumentType
   corpusDocumentNames: string[]
   validationStatus: PlanningKnowledgeValidationStatus
   sourceIds: string[]

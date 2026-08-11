@@ -134,6 +134,27 @@ describe('parseSiotugaDocumentInventory', () => {
     const result = parseSiotugaDocumentInventory(json, '123', 'source-1')
     expect(result).toHaveLength(1)
     expect(result[0]?.officialDocumentId).toBe('456')
+    expect(result[0]?.documentType).toBe('other')
+  })
+
+  it('preserves the canonical official document type for every inventory group', () => {
+    const json = JSON.stringify({
+      ...baseJson,
+      elementos: [
+        ['ORDENANZAS', '1'],
+        ['NORMATIVA', '2'],
+        ['FICHAS', '3'],
+        ['CATÁLOGO', '4'],
+        ['MEMORIA', '5'],
+      ].map(([description, id]) => ({
+        description,
+        componentes: [{ pathesperado: `${id}.pdf`, id }],
+      })),
+    })
+
+    expect(
+      parseSiotugaDocumentInventory(json, '123', 'source-1').map((document) => document.documentType)
+    ).toEqual(['ordinance', 'normative_text', 'sheet', 'catalogue', 'other'])
   })
 
   it('returns empty list and does not fail when elementos is null', () => {

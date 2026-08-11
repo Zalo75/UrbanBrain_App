@@ -56,6 +56,16 @@ describe('Planning Knowledge Base P1', () => {
     }
   })
 
+  it('preserves official document types in the generated PlanningDocumentReference catalog', () => {
+    const documents = getActiveP1PlanningMunicipalities().flatMap((entry) => entry.documents)
+
+    expect(documents).not.toHaveLength(0)
+    expect(documents.every((document) => document.documentType !== undefined)).toBe(true)
+    expect(documents.map((document) => document.documentType)).toEqual(
+      expect.arrayContaining(['normative_text', 'catalogue', 'other'])
+    )
+  })
+
   it('does not activate municipalities outside P1', () => {
     expect(getActiveP1PlanningKnowledge('15030')).toBeUndefined()
     expect(getActiveP1PlanningKnowledge('15075')).toBeUndefined()

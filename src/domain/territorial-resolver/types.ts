@@ -4,6 +4,7 @@ export interface TerritorialCoordinates {
 }
 
 import type { ParcelContextSource } from '@/domain/parcel-context/types'
+import type { PlanningNormativeDocumentType } from '@/domain/planning-knowledge/types'
 
 export interface ParcelGeometry {
   type: 'MultiPolygon'
@@ -426,6 +427,7 @@ export interface PlanningDocumentReference {
   title: string
   sourceUrl: string
   binding: 'general' | 'area_specific' | 'unverified_for_detected_area'
+  documentType?: PlanningNormativeDocumentType
 }
 
 export interface PlanningApplicability {
