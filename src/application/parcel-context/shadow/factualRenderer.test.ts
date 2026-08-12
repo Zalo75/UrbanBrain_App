@@ -138,4 +138,117 @@ describe('Structured Factual Renderer', () => {
     const result = renderFactualOutput(output, contract)
     expect(result[0]).toBe('La clasificación aplicable en toda la parcela es Suelo Urbano (SU).')
   })
+
+  // Nuevos Tests Adversariales L2.6 3A.1
+  it('19. Dos categories mismo code + mismo scope: renderer falla seguro', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [
+      { code: 'DUP', status: 'automatic_confirmed', determination: 'automatic' },
+      { code: 'DUP', status: 'automatic_confirmed', determination: 'automatic' }
+    ]
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'DUP' }, status: 'automatic_confirmed' }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Renderer error: FactRef resolution failed with ambiguous')
+  })
+
+  it('20. Dos planningAreas mismo code + mismo scope: renderer falla seguro', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.planningAreas = [
+      { code: 'PA1', status: 'automatic_confirmed', determination: 'automatic' },
+      { code: 'PA1', status: 'automatic_confirmed', determination: 'automatic' }
+    ]
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'planning_area', scope: 'parcel', code: 'PA1' }, status: 'automatic_confirmed' }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Renderer error: FactRef resolution failed with ambiguous')
+  })
+
+  it('21. Dos affects misma identidad + mismo scope: renderer falla seguro', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.affects = {
+      status: 'checked',
+      items: [
+        { label: 'Afeccion A', status: 'automatic_confirmed', determination: 'automatic' },
+        { label: 'Afeccion A', status: 'automatic_confirmed', determination: 'automatic' }
+      ]
+    }
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'affect', scope: 'parcel', label: 'Afeccion A' }, status: 'automatic_confirmed' }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Renderer error: FactRef resolution failed with ambiguous')
+  })
+
+  it('22. Mismo code en parcel/actionArea resuelven por separado', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{ code: 'XX', status: 'automatic_confirmed', determination: 'automatic' }]
+    contract.factsByScope!.actionArea!.categories = [{ code: 'XX', status: 'manual_confirmed', determination: 'manual' }]
+    const output1: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'XX' }, status: 'automatic_confirmed' }], abstentions: [] }
+    const output2: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'actionArea', code: 'XX' }, status: 'manual_confirmed' }], abstentions: [] }
+    expect(renderFactualOutput(output1, contract)[0]).toBe("El estado de la categoría en toda la parcela es 'automatic_confirmed'.")
+    expect(renderFactualOutput(output2, contract)[0]).toBe("El estado de la categoría en el área de actuación es 'manual_confirmed'.")
+  })
+
+  it('23. fact.percentage = 40, claim.value = 50: renderer usa 40', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{ code: 'A', status: 'automatic_confirmed', determination: 'automatic', parcelPercentage: 40 }]
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'A' }, percentage: 50 }], abstentions: [] }
+    const result = renderFactualOutput(output, contract)
+    expect(result[0]).toContain('representa el 40 %')
+    expect(result[0]).not.toContain('50')
+  })
+
+  it('24. semanticCompleteness partial + label undefined: usa code, nunca undefined', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{ code: 'B', semanticCompleteness: 'partial', status: 'automatic_confirmed', determination: 'automatic', label: undefined }]
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'B' }, label: 'Inventado' }], abstentions: [] }
+    const result = renderFactualOutput(output, contract)
+    expect(result[0]).toBe('La categoría aplicable en toda la parcela tiene el código B.')
+    expect(result[0]).not.toContain('undefined')
+  })
+
+  it('25. semanticCompleteness partial + claim label: ignora label del claim', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{ code: 'C', semanticCompleteness: 'partial', status: 'automatic_confirmed', determination: 'automatic' }]
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'C' }, label: 'Falso' }], abstentions: [] }
+    const result = renderFactualOutput(output, contract)
+    expect(result[0]).toBe('La categoría aplicable en toda la parcela tiene el código C.')
+    expect(result[0]).not.toContain('Falso')
+  })
+
+  it('26. status conflict + operación effective: falla seguro', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification = { code: 'U', status: 'conflict', determination: 'automatic' }
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'classification', scope: 'parcel' }, status: 'effective' }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Cannot render effective status')
+  })
+
+  it('27. status unresolved + operación ausencia: falla seguro', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification = { code: 'U', status: 'unresolved', determination: 'unresolved' }
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_absence', factRef: { type: 'classification', scope: 'parcel' } }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Cannot state absence for unresolved')
+  })
+
+  it('28. unresolved affects: falla seguro para ausencia', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.affects = { status: 'unresolved', items: [] }
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_absence', factRef: { type: 'affects_state', scope: 'parcel' } }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('Cannot state absence for unresolved/conflict status')
+  })
+
+  it('29. Sada SNRC 98.53 conflict: geometric dominance permitido, effective bloqueado', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [
+      { code: 'SNRC', status: 'conflict', determination: 'automatic', parcelPercentage: 98.53 },
+      { code: 'SNRT', status: 'conflict', determination: 'automatic', parcelPercentage: 1.47 }
+    ]
+    const outGeom: StructuredFactualOutput = { operations: [{ operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } }], abstentions: [] }
+    const resultGeom = renderFactualOutput(outGeom, contract)
+    expect(resultGeom[0]).toContain('es la de mayor presencia geométrica')
+    
+    const outEff: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, status: 'effective' }], abstentions: [] }
+    expect(() => renderFactualOutput(outEff, contract)).toThrow('Cannot render effective status')
+  })
+
+  it('30. output malicioso no verificado: renderer falla', () => {
+    const contract = createMockContract()
+    // factRef points to non-existent category
+    const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'FAKE' }, status: 'automatic_confirmed' }], abstentions: [] }
+    expect(() => renderFactualOutput(output, contract)).toThrow('FactRef resolution failed with none')
+  })
 })

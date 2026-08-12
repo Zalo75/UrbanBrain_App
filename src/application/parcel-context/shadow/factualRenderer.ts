@@ -1,5 +1,6 @@
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { StructuredFactualOutput, StructuredFactRef } from './structuredFactualOutput'
+import { resolveFactRef } from './resolveFactRef'
 
 function getFactName(ref: StructuredFactRef, capitalize = true): string {
   const name = (() => {
@@ -20,88 +21,80 @@ function renderScope(scope: 'parcel' | 'actionArea'): string {
   return scope === 'parcel' ? 'en toda la parcela' : 'en el área de actuación'
 }
 
-function resolveFactRef(ref: StructuredFactRef, contract: TerritorialFactualContract): any | null {
-  const scopeFacts = contract.factsByScope?.[ref.scope]
-  if (!scopeFacts) return null
-
-  let matches: any[] = []
-  switch (ref.type) {
-    case 'classification':
-      matches = scopeFacts.classification ? [scopeFacts.classification] : []
-      break
-    case 'category':
-      matches = (scopeFacts.categories ?? []).filter((category) => category.code === ref.code)
-      break
-    case 'category_candidate':
-      matches = (scopeFacts.categories ?? [])
-        .filter((category) => category.code === ref.categoryCode)
-        .flatMap((category) => (category.candidates ?? []).filter((candidate) => candidate.code === ref.candidateCode))
-      break
-    case 'consolidation':
-      matches = scopeFacts.consolidation ? [scopeFacts.consolidation] : []
-      break
-    case 'planning_area':
-      matches = (scopeFacts.planningAreas ?? []).filter((planningArea) => planningArea.code === ref.code)
-      break
-    case 'affect':
-      matches = (scopeFacts.affects?.items ?? []).filter((affect) => affect.label === ref.label)
-      break
-    case 'affects_state':
-      matches = scopeFacts.affects ? [scopeFacts.affects] : []
-      break
-  }
-
-  if (matches.length === 1) return matches[0]
-  return null
-}
-
 export function renderFactualOutput(output: StructuredFactualOutput, contract: TerritorialFactualContract): string[] {
   const lines: string[] = []
 
   for (const op of output.operations) {
-    const fact = resolveFactRef(op.factRef, contract)
-    if (!fact) continue
+    const resolution = resolveFactRef(op.factRef, contract)
+    
+    // Hardening: Operaciones de estado requieren el hecho. Si no hay match (0 o >1), fallamos seguro.
+    if (resolution.result !== 'one') {
+      throw new Error(`Renderer error: FactRef resolution failed with ${resolution.result} for ${JSON.stringify(op.factRef)}`)
+    }
+    
+    const fact = resolution.fact
 
     const factNameCapitalized = getFactName(op.factRef, true)
     const factNameLower = getFactName(op.factRef, false)
     const scopeText = renderScope(op.factRef.scope)
 
-    const code = fact.code
-    const hasLabel = fact.semanticCompleteness === 'complete' && fact.label
-    const labelText = hasLabel ? `${fact.label} (${code})` : `(${code})`
+    const code = 'code' in fact && fact.code ? fact.code : undefined
+    const isComplete = 'semanticCompleteness' in fact && fact.semanticCompleteness === 'complete'
+    const label = 'label' in fact ? fact.label : undefined
+    
+    // Hardening: Nunca 'undefined' o 'null'. Si partial, no usamos label.
+    const hasLabel = isComplete && typeof label === 'string' && label.length > 0
+    const labelText = hasLabel ? `${label} (${code})` : (code ? `(${code})` : '')
 
     switch (op.operation) {
       case 'reference_code':
+        if (!code) throw new Error('Renderer error: code is undefined for reference_code')
         lines.push(`${factNameCapitalized} aplicable ${scopeText} incluye el código ${code}.`)
         break
       case 'state_label':
         if (hasLabel) {
           lines.push(`${factNameCapitalized} aplicable ${scopeText} es ${labelText}.`)
-        } else {
+        } else if (code) {
           lines.push(`${factNameCapitalized} aplicable ${scopeText} tiene el código ${code}.`)
+        } else {
+          lines.push(`${factNameCapitalized} aplicable ${scopeText}.`) // Fallback si no hay ni code ni label
         }
         break
       case 'state_percentage':
-        if (fact.parcelPercentage !== undefined) {
+        if ('parcelPercentage' in fact && fact.parcelPercentage !== undefined) {
+          const pct = String(fact.parcelPercentage).replace('.', ',')
           if (hasLabel) {
-            lines.push(`${factNameCapitalized} ${labelText} representa el ${String(fact.parcelPercentage).replace('.', ',')} % del ámbito analizado ${scopeText}.`)
-          } else {
-            lines.push(`${factNameCapitalized} con código ${code} representa el ${String(fact.parcelPercentage).replace('.', ',')} % del ámbito analizado ${scopeText}.`)
+            lines.push(`${factNameCapitalized} ${labelText} representa el ${pct} % del ámbito analizado ${scopeText}.`)
+          } else if (code) {
+            lines.push(`${factNameCapitalized} con código ${code} representa el ${pct} % del ámbito analizado ${scopeText}.`)
           }
         }
         break
       case 'state_status':
-        lines.push(`El estado de ${factNameLower} ${scopeText} es '${fact.status}'.`)
+        if ('status' in fact) {
+          // Hardening: no producir 'effective' si el fact.status !== effective
+          if (op.status === 'effective' && (fact.status as string) !== 'effective') {
+            throw new Error(`Renderer error: Cannot render effective status because fact.status is ${fact.status}`)
+          }
+          // Usar siempre el status real del fact
+          lines.push(`El estado de ${factNameLower} ${scopeText} es '${fact.status}'.`)
+        }
         break
       case 'state_determination':
-        lines.push(`La determinación de ${factNameLower} ${scopeText} es '${fact.determination}'.`)
+        if ('determination' in fact) {
+          if (op.determination === 'effective' && fact.determination !== 'effective') {
+             throw new Error(`Renderer error: Cannot render effective determination because fact.determination is ${fact.determination}`)
+          }
+          lines.push(`La determinación de ${factNameLower} ${scopeText} es '${fact.determination}'.`)
+        }
         break
       case 'state_geometric_dominance':
-        if (fact.parcelPercentage !== undefined) {
+        if ('parcelPercentage' in fact && fact.parcelPercentage !== undefined) {
+          const pct = String(fact.parcelPercentage).replace('.', ',')
           if (hasLabel) {
-            lines.push(`${factNameCapitalized} ${labelText} representa el ${String(fact.parcelPercentage).replace('.', ',')} % del ámbito analizado ${scopeText} y es la de mayor presencia geométrica.`)
-          } else {
-            lines.push(`${factNameCapitalized} con código ${code} representa el ${String(fact.parcelPercentage).replace('.', ',')} % del ámbito analizado ${scopeText} y es la de mayor presencia geométrica.`)
+            lines.push(`${factNameCapitalized} ${labelText} representa el ${pct} % del ámbito analizado ${scopeText} y es la de mayor presencia geométrica.`)
+          } else if (code) {
+            lines.push(`${factNameCapitalized} con código ${code} representa el ${pct} % del ámbito analizado ${scopeText} y es la de mayor presencia geométrica.`)
           }
         }
         break
@@ -112,12 +105,36 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
         lines.push(`La información sobre ${factNameLower} ${scopeText} no está resuelta.`)
         break
       case 'state_absence':
+        // Hardening: Ausencia confirmada
+        if ('status' in fact) {
+          if (fact.status === 'unresolved' || fact.status === 'conflict') {
+            throw new Error(`Renderer error: Cannot state absence for unresolved/conflict status`)
+          }
+        }
+        if ('determination' in fact && fact.determination === 'unresolved') {
+          throw new Error(`Renderer error: Cannot state absence for unresolved determination`)
+        }
+        // Colección explícita vacía para affects
+        if (op.factRef.type === 'affects_state') {
+          if ('items' in fact && fact.items.length > 0) {
+            throw new Error(`Renderer error: Cannot state absence when items exist`)
+          }
+          if ('status' in fact && fact.status !== 'checked') {
+            throw new Error(`Renderer error: Cannot state absence when status is not checked`)
+          }
+        }
         lines.push(`No se registra la presencia de ${factNameLower} ${scopeText}.`)
         break
     }
   }
 
   for (const abs of output.abstentions) {
+    if (abs.factRef) {
+      const resolution = resolveFactRef(abs.factRef, contract)
+      if (resolution.result !== 'one') {
+        throw new Error(`Renderer error: FactRef resolution failed with ${resolution.result} for ${JSON.stringify(abs.factRef)}`)
+      }
+    }
     const scopeText = abs.factRef ? renderScope(abs.factRef.scope) : ''
     const factNameLower = abs.factRef ? getFactName(abs.factRef, false) : 'el hecho'
 
