@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => {
   return m
 })
 
-vi.mock('@/infrastructure/db/client', () => ({ 
-  db: { 
-    insert: mocks.insert 
-  } 
+vi.mock('@/infrastructure/db/client', () => ({
+  db: {
+    insert: mocks.insert
+  }
 }))
 
 describe('factualShadowEvaluationsRepository', () => {
@@ -36,7 +36,7 @@ describe('factualShadowEvaluationsRepository', () => {
     }
 
     await persistShadowEvaluation(event)
-    
+
     expect(mocks.insert).toHaveBeenCalled()
     expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
       expedienteId: 'exp-123',
