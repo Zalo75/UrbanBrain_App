@@ -30,10 +30,18 @@ interface Props {
 }
 
 export function PordPlanViewer(props: Props) {
-  if (!props.wmsLayer) {
+  const hasRaster = Boolean(props.wmsLayer)
+  const hasClassificationVector = Boolean(props.classificationCode)
+  const hasCategoryVector = Boolean(props.categoryCode)
+  const hasAffects = Boolean(props.affects && props.affects.length > 0)
+  const hasParcel = Boolean(props.parcelGeometry)
+
+  const hasAnyPlanningCartography = hasRaster || hasClassificationVector || hasCategoryVector || hasAffects
+
+  if (!hasAnyPlanningCartography && !hasParcel) {
     return (
       <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        No se ha detectado ninguna capa PORD asociada a este expediente.
+        No existe información cartográfica disponible para este expediente.
       </div>
     )
   }

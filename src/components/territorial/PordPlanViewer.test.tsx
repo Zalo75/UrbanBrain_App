@@ -200,8 +200,44 @@ describe('LeafletPordViewer', () => {
 })
 
 describe('PordPlanViewer', () => {
-  it('does not render a map when no PORD layer is available', () => {
-    render(<PordPlanViewer municipality="Betanzos" />)
-    expect(screen.getByText(/No se ha detectado ninguna capa PORD/i)).toBeTruthy()
+  it('renders viewer with WMS and vectors', async () => {
+    render(<PordPlanViewer wmsLayer="some_wms" classificationCode="SU" parcelGeometry={parcelGeometry} />)
+    expect(screen.queryByText(/No existe información cartográfica/i)).not.toBeInTheDocument()
+    expect(await screen.findByTestId('wms-tile-layer')).toBeInTheDocument()
+  })
+
+  it('renders viewer with vectors but NO WMS', async () => {
+    render(<PordPlanViewer classificationCode="SU" parcelGeometry={parcelGeometry} />)
+    expect(screen.queryByText(/No existe información cartográfica/i)).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('wms-tile-layer')).not.toBeInTheDocument()
+      expect(screen.getAllByTestId('geojson').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('renders viewer with affects but NO WMS', async () => {
+    render(
+      <PordPlanViewer
+        affects={[{ category: 'Aguas', name: 'Dominio', confidence: 'high' }]}
+        parcelGeometry={parcelGeometry}
+      />
+    )
+    expect(screen.queryByText(/No existe información cartográfica/i)).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('wms-tile-layer')).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders viewer with parcel but no planning layers', async () => {
+    render(<PordPlanViewer parcelGeometry={parcelGeometry} />)
+    expect(screen.queryByText(/No existe información cartográfica/i)).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('wms-tile-layer')).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders error block when absolutely no cartographic information is available', () => {
+    render(<PordPlanViewer />)
+    expect(screen.getByText(/No existe información cartográfica/i)).toBeInTheDocument()
   })
 })

@@ -22,6 +22,7 @@ import { GeometricAuditAccordion } from '@/components/territorial/GeometricAudit
 import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap';
 import { PordPlanViewer } from '@/components/territorial/PordPlanViewer';
+import { getMunicipalPilotRegistry } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -758,7 +759,7 @@ export function TerritorialContextPanel({
                     <PordPlanViewer
                       municipality={context.municipality || undefined}
                       instrument={context.instrument || undefined}
-                      wmsLayer={context.municipalityCode === '15009' ? '_15009_NNSSPP_199606_AD_PORD_02CL_22221' : undefined}
+                      wmsLayer={getMunicipalPilotRegistry(context.municipalityCode)?.layers.detailedPlanningWms}
                       parcelGeometry={context.parcelGeometry}
                       actionAreaGeometry={context.actionArea?.geometry}
                       classificationCode={context.classification?.code}

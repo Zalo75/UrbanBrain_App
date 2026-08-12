@@ -347,7 +347,11 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       setSelectedClassificationCandidateId('')
       setExploredCandidateId('')
       setClassificationSelectionReason('')
-      toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
+      if (classificationResolution?.candidates?.length) {
+        toast.success('Análisis territorial completado. Revise los datos antes de crear el expediente.')
+      } else {
+        toast.warning('Análisis territorial completado. Clasificación no resuelta automáticamente.')
+      }
     } catch {
       if (requestId !== latestDetectionRequest.current || requestRevision !== territorialRevision.current) return
       toast.error('No se ha podido completar el análisis territorial. Puede reintentar o continuar con los datos pendientes.')
@@ -504,12 +508,16 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-md border border-sky-200 bg-sky-50 p-4 dark:bg-sky-950/20">
-                    <h3 className="font-semibold text-sky-900 dark:text-sky-400">Parcela completa (Estado inicial)</h3>
-                    <p className="mt-1 text-sm text-sky-800 dark:text-sky-300">
-                      {detection.classificationResolution.candidates.length > 1
-                        ? 'Se han detectado varias zonas. Selecciona la zona sobre la que deseas trabajar haciendo clic en el mapa.'
-                        : 'No se ha fijado una zona de trabajo específica. Puede trabajar con la parcela completa o seleccionar una zona en el mapa.'}
+                  <div className={`rounded-md border p-4 ${detection.classificationResolution.candidates.length === 0 ? 'border-amber-200 bg-amber-50 dark:bg-amber-950/20' : 'border-sky-200 bg-sky-50 dark:bg-sky-950/20'}`}>
+                    <h3 className={`font-semibold ${detection.classificationResolution.candidates.length === 0 ? 'text-amber-900 dark:text-amber-400' : 'text-sky-900 dark:text-sky-400'}`}>
+                      {detection.classificationResolution.candidates.length === 0 ? 'Clasificación no resuelta automáticamente' : 'Parcela completa (Estado inicial)'}
+                    </h3>
+                    <p className={`mt-1 text-sm ${detection.classificationResolution.candidates.length === 0 ? 'text-amber-800 dark:text-amber-300' : 'text-sky-800 dark:text-sky-300'}`}>
+                      {detection.classificationResolution.candidates.length === 0
+                        ? 'No se ha podido resolver la clasificación mediante fuentes automáticas. Debe rellenar el régimen urbanístico de forma manual.'
+                        : detection.classificationResolution.candidates.length > 1
+                          ? 'Se han detectado varias zonas. Selecciona la zona sobre la que deseas trabajar haciendo clic en el mapa.'
+                          : 'No se ha fijado una zona de trabajo específica. Puede trabajar con la parcela completa o seleccionar una zona en el mapa.'}
                     </p>
                   </div>
                 )}

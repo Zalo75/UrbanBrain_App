@@ -3,6 +3,9 @@ import {
   type ActiveP1MunicipalityPlanning,
 } from './corunaP1PlanningKnowledge'
 import { CORUNA_P1_DOCUMENTS_BY_INSTRUMENT } from './corunaP1PlanningDocuments.generated'
+import { BETANZOS_REGISTRY } from '@/municipal-pilots/betanzos/registry'
+
+const MUNICIPAL_PILOTS = [BETANZOS_REGISTRY]
 
 const REQUIRED_CLASSIFICATION_ATTRIBUTES = ['cla_homo', 'cat_homo'] as const
 
@@ -55,4 +58,11 @@ export function getActiveP1PlanningMunicipalities() {
 export function getPlanningDocumentsByInstrument(instrumentId?: string) {
   if (!instrumentId) return []
   return [...(CORUNA_P1_DOCUMENTS_BY_INSTRUMENT[instrumentId as keyof typeof CORUNA_P1_DOCUMENTS_BY_INSTRUMENT] ?? [])]
+}
+
+export function getMunicipalPilotRegistry(municipalityCode?: string) {
+  if (!municipalityCode) return undefined
+  return MUNICIPAL_PILOTS.find(
+    (pilot) => pilot.municipality.ineCode === municipalityCode
+  )
 }
