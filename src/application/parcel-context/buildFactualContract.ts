@@ -10,6 +10,13 @@ import type {
   FactualAffectsState
 } from '@/domain/parcel-context/factualContract'
 import type { UrbanisticFactStatus, UrbanisticFactOrigin, UrbanisticFact, UrbanisticFactCandidate } from '@/domain/territorial-resolver/types'
+import type { SemanticCompleteness } from '@/domain/parcel-context/factualContract'
+
+function semanticCompletenessFor(code?: string, label?: string): SemanticCompleteness | undefined {
+  if (code === undefined || code === null) return undefined
+  if (label !== undefined && label.trim().length > 0) return 'complete'
+  return 'partial'
+}
 
 function mapDetermination(origin?: UrbanisticFactOrigin, status?: UrbanisticFactStatus | 'unresolved'): FactDeterminationType {
   if (status === 'unresolved' || status === 'not_available' || status === 'source_unavailable' || status === 'not_applicable') return 'unresolved'
@@ -101,9 +108,12 @@ function buildAffects(context: NormalizedParcelContext): FactualAffectsState {
 }
 
 function mapCandidate<T>(c: UrbanisticFactCandidate<T>): FactualCandidate {
+  const code = (c.value as any)?.code ?? String(c.value)
+  const label = c.label ?? (c.value as any)?.label
   return {
-    code: (c.value as any)?.code ?? String(c.value),
-    label: c.label ?? (c.value as any)?.label,
+    code,
+    label,
+    semanticCompleteness: semanticCompletenessFor(code, label),
     parcelPercentage: c.parcelPercentage,
     intersectionAreaSquareMetres: c.intersectionAreaSquareMetres
   }
@@ -117,9 +127,12 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
   if (uf?.category) {
     if (uf.category.status === 'conflict' && uf.category.candidates && uf.category.candidates.length > 0) {
       for (const c of uf.category.candidates) {
+        const code = c.value.code
+        const label = c.label ?? c.value.label
         categories.push({
-          code: c.value.code,
-          label: c.label ?? c.value.label,
+          code,
+          label,
+          semanticCompleteness: semanticCompletenessFor(code, label),
           status: uf.category.status,
           determination: mapDetermination(uf.category.origin, uf.category.status),
           parcelPercentage: c.parcelPercentage,
@@ -128,9 +141,12 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
         })
       }
     } else if (uf.category.value?.code) {
+      const code = uf.category.value.code
+      const label = uf.category.label ?? uf.category.value.label
       categories.push({
-        code: uf.category.value.code,
-        label: uf.category.label ?? uf.category.value.label,
+        code,
+        label,
+        semanticCompleteness: semanticCompletenessFor(code, label),
         status: uf.category.status,
         determination: mapDetermination(uf.category.origin, uf.category.status),
         provenance: buildProvenance(uf.category)
@@ -164,6 +180,7 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
     classification: {
       code: classification?.value?.code,
       label: classification?.label ?? classification?.value?.label,
+      semanticCompleteness: semanticCompletenessFor(classification?.value?.code, classification?.label ?? classification?.value?.label),
       status: classStatus,
       determination: mapDetermination(classification?.origin, classStatus),
       provenance: classification ? buildProvenance(classification) : undefined,
@@ -173,12 +190,14 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
     consolidation: {
       code: uf?.consolidation?.value?.code ? String(uf.consolidation.value.code) : undefined,
       label: uf?.consolidation?.label ?? uf?.consolidation?.value?.label,
+      semanticCompleteness: semanticCompletenessFor(uf?.consolidation?.value?.code ? String(uf.consolidation.value.code) : undefined, uf?.consolidation?.label ?? uf?.consolidation?.value?.label),
       status: uf?.consolidation?.status ?? 'unresolved',
       determination: mapDetermination(uf?.consolidation?.origin, uf?.consolidation?.status ?? 'unresolved'),
       provenance: uf?.consolidation ? buildProvenance(uf.consolidation) : undefined
     },
     planningAreas: context.planningArea ? [{
       code: context.planningArea.value,
+      semanticCompleteness: semanticCompletenessFor(context.planningArea.value, undefined),
       status: 'automatic_confirmed',
       determination: 'automatic',
       provenance: { sourceType: context.planningArea.source }

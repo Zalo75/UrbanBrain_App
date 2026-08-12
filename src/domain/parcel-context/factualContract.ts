@@ -7,6 +7,8 @@ import type { ParcelContextSource } from '@/domain/parcel-context/types'
 
 export type FactDeterminationType = 'automatic' | 'manual' | 'effective' | 'unresolved'
 
+export type SemanticCompleteness = 'complete' | 'partial'
+
 export interface FactualProvenance {
   sourceName?: string
   sourceType?: OfficialSource | ParcelContextSource | string
@@ -20,6 +22,7 @@ export interface FactualProvenance {
 export interface FactualCandidate {
   code: string
   label?: string
+  semanticCompleteness?: SemanticCompleteness
   parcelPercentage?: number
   intersectionAreaSquareMetres?: number
 }
@@ -27,6 +30,7 @@ export interface FactualCandidate {
 export interface FactualClassification {
   code?: string
   label?: string
+  semanticCompleteness?: SemanticCompleteness
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
   provenance?: FactualProvenance
@@ -36,6 +40,7 @@ export interface FactualClassification {
 export interface FactualCategory {
   code?: string
   label?: string
+  semanticCompleteness?: SemanticCompleteness
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
   parcelPercentage?: number
@@ -47,6 +52,7 @@ export interface FactualCategory {
 export interface FactualConsolidation {
   code?: string
   label?: string
+  semanticCompleteness?: SemanticCompleteness
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
   provenance?: FactualProvenance
@@ -55,6 +61,7 @@ export interface FactualConsolidation {
 export interface FactualPlanningArea {
   code?: string
   label?: string
+  semanticCompleteness?: SemanticCompleteness
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
   provenance?: FactualProvenance

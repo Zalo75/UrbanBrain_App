@@ -265,4 +265,134 @@ describe('Territorial Factual Contract', () => {
     const snrt = contract.categories.find(c => c.code === 'SNRT')
     expect(snrt?.label).toBeUndefined() // label undefined
   })
+
+  it('L2.6 - A, B, C: Classification semanticCompleteness', () => {
+    const build = (code?: string, label?: string) => buildTerritorialFactualContract({
+      urbanisticFacts: {
+        classification: {
+          value: { code, label } as any,
+          status: 'automatic_confirmed',
+          origin: 'spatial_intersection',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+        },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        consolidation: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+
+    // 1. classification code + label => complete
+    expect(build('SU', 'Suelo Urbano').classification.semanticCompleteness).toBe('complete')
+    
+    // 2. classification code sin label => partial
+    expect(build('SU', undefined).classification.semanticCompleteness).toBe('partial')
+
+    // 3 y 4. classification con label "" o whitespace-only => partial
+    expect(build('SU', '').classification.semanticCompleteness).toBe('partial')
+    expect(build('SU', '   ').classification.semanticCompleteness).toBe('partial')
+  })
+
+  it('L2.6 - 5, 6, 7, 8, 9: Category and candidates semanticCompleteness', () => {
+    const contract = buildTerritorialFactualContract({
+      urbanisticFacts: {
+        classification: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        category: {
+          status: 'conflict',
+          origin: 'spatial_intersection',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+          candidates: [
+            { value: { code: 'A', label: 'Cat A' }, parcelPercentage: 50 }, // 8. candidate con label => complete
+            { value: { code: 'B' } as any, parcelPercentage: 50 } // 9. candidate sin label => partial
+          ]
+        },
+        consolidation: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+
+    // 7. dos categorías simultáneas: una complete y otra partial
+    const catA = contract.categories.find(c => c.code === 'A')
+    const catB = contract.categories.find(c => c.code === 'B')
+    
+    expect(catA?.semanticCompleteness).toBe('complete') // 5 y 8. => complete
+    expect(catB?.semanticCompleteness).toBe('partial') // 6 y 9. => partial
+  })
+
+  it('L2.6 - 10, 11: Consolidation semanticCompleteness', () => {
+    const build = (code?: string, label?: string) => buildTerritorialFactualContract({
+      urbanisticFacts: {
+        classification: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        consolidation: {
+          value: { code, label } as any,
+          status: 'automatic_confirmed',
+          origin: 'spatial_intersection',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+        }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+
+    // 10. consolidation con label => complete
+    expect(build('C', 'Consolidado').consolidation.semanticCompleteness).toBe('complete')
+    
+    // 11. consolidation sin label => partial
+    expect(build('C', undefined).consolidation.semanticCompleteness).toBe('partial')
+  })
+
+  it('L2.6 - 12: PlanningArea semanticCompleteness', () => {
+    const contract = buildTerritorialFactualContract({
+      planningArea: { value: 'Z-1', source: 'siotuga', confidence: 1, verification: 'confirmed' },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+    // Planning area directly maps a string code without a label field in our implementation
+    expect(contract.planningAreas[0].semanticCompleteness).toBe('partial')
+  })
+
+  it('L2.6 - TEST CRÍTICO DE ORTOGONALIDAD: semanticCompleteness = partial NO altera status ni determination', () => {
+    const contract = buildTerritorialFactualContract({
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SU' } as any, // no label -> partial
+          status: 'technician_validated', // explicitly technician_validated (status)
+          origin: 'technician_confirmation', // explicitly manual origin (=> determination: effective)
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+        },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        consolidation: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+
+    expect(contract.classification.semanticCompleteness).toBe('partial')
+    // Check that status and determination are preserved exactly as they were
+    expect(contract.classification.status).toBe('technician_validated')
+    expect(contract.classification.determination).toBe('effective')
+    expect(contract.classification.provenance?.sourceType).toBe('manual')
+  })
+
+  it('L2.6 - TEST CRÍTICO SNR: code: "SNR" label: undefined', () => {
+    const contract = buildTerritorialFactualContract({
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SNR', label: undefined },
+          status: 'automatic_confirmed',
+          origin: 'spatial_intersection',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+        },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        consolidation: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    })
+
+    expect(contract.classification.code).toBe('SNR')
+    expect(contract.classification.label).toBeUndefined()
+    expect(contract.classification.semanticCompleteness).toBe('partial')
+
+    // El resultado NO debe contener las expansiones inventadas.
+    const stringified = JSON.stringify(contract.classification)
+    expect(stringified).not.toContain('Suelo no urbanizable')
+    expect(stringified).not.toContain('Suelo de núcleo rural')
+  })
 })
