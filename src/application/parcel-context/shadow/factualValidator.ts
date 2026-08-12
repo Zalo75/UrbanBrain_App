@@ -57,7 +57,7 @@ export function validateStructuredFactualOutput(output: StructuredFactualOutput,
 
   for (const op of output.operations) {
     const fact = resolveFactRef(op.factRef)
-    
+
     if (!fact) {
       if (op.operation === 'state_absence') {
         if (['category', 'category_candidate', 'planning_area', 'affect'].includes(op.factRef.type)) {
@@ -106,7 +106,7 @@ export function validateStructuredFactualOutput(output: StructuredFactualOutput,
         errors.push({ code: 'DETERMINATION_MISMATCH', message: `Expected determination ${fact.determination}, got ${op.determination}`, factRef: op.factRef })
       }
     }
-    
+
     if (op.operation === 'state_geometric_dominance') {
       if (fact.parcelPercentage === undefined) {
          errors.push({ code: 'PERCENTAGE_MISMATCH', message: 'Fact does not have a percentage for dominance', factRef: op.factRef })

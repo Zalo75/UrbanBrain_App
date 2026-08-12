@@ -343,7 +343,7 @@ describe('Structured Factual Validator', () => {
         { code: 'SNRT', label: 'Núcleo rural tradicional', semanticCompleteness: 'complete', status: 'conflict', determination: 'unresolved', parcelPercentage: 1.47 }
       ]
     })
-    
+
     // Good output
     const goodOutput: StructuredFactualOutput = {
       operations: [
@@ -387,7 +387,7 @@ describe('Structured Factual Validator', () => {
     const contract = createMockContract({
       classification: { status: 'unresolved', determination: 'unresolved' }
     })
-    
+
     // Permite abstain
     const goodOutput: StructuredFactualOutput = {
       operations: [],
@@ -412,7 +412,7 @@ describe('Structured Factual Validator', () => {
     const contract = createMockContract({
       classification: { code: 'X-42', label: undefined, semanticCompleteness: 'partial', status: 'automatic_confirmed', determination: 'automatic' }
     })
-    
+
     // Permite reference_code X-42
     const goodOutput: StructuredFactualOutput = {
       operations: [
