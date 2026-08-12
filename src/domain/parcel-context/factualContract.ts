@@ -46,6 +46,7 @@ export interface FactualCategory {
 
 export interface FactualConsolidation {
   code?: string
+  label?: string
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
   provenance?: FactualProvenance

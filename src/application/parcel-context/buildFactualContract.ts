@@ -171,7 +171,8 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
     },
     categories,
     consolidation: {
-      code: uf?.consolidation?.value ? String(uf.consolidation.value) : undefined,
+      code: uf?.consolidation?.value?.code ? String(uf.consolidation.value.code) : undefined,
+      label: uf?.consolidation?.label ?? uf?.consolidation?.value?.label,
       status: uf?.consolidation?.status ?? 'unresolved',
       determination: mapDetermination(uf?.consolidation?.origin, uf?.consolidation?.status ?? 'unresolved'),
       provenance: uf?.consolidation ? buildProvenance(uf.consolidation) : undefined

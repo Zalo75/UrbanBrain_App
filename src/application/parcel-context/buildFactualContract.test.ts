@@ -209,4 +209,60 @@ describe('Territorial Factual Contract', () => {
     expect(contract.classification.determination).toBe('effective') // Must map manual validation to effective
     expect(contract.classification.provenance?.sourceType).toBe('manual')
   })
+
+  it('CASO GOLDEN L2.5 - A. Consolidation preserve label y code', () => {
+    const mockContext: NormalizedParcelContext = {
+      urbanisticFacts: {
+        classification: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+        consolidation: {
+          value: { code: 'consolidated', label: 'Suelo Urbano Consolidado' },
+          status: 'automatic_confirmed',
+          origin: 'spatial_intersection',
+          confidence: 'high',
+          evidence: [],
+          warnings: [],
+          discrepancies: [],
+          nextAction: 'none'
+        }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    }
+
+    const contract = buildTerritorialFactualContract(mockContext)
+    expect(contract.consolidation.code).toBe('consolidated')
+    expect(contract.consolidation.label).toBe('Suelo Urbano Consolidado')
+  })
+
+  it('CASO GOLDEN L2.5 - C. classification y category preserve label si existe', () => {
+    const mockContext: NormalizedParcelContext = {
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SNR', label: 'Suelo de núcleo rural' },
+          status: 'automatic_confirmed',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+        },
+        category: {
+          status: 'conflict',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+          candidates: [
+            { value: { code: 'SNRC', label: 'Núcleo rural común' }, parcelPercentage: 98.53, intersectionAreaSquareMetres: 1738 },
+            { value: { code: 'SNRT' }, parcelPercentage: 1.47, intersectionAreaSquareMetres: 26 } // without label!
+          ]
+        },
+        consolidation: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+      },
+      knownConstraints: [], conflicts: [], pendingValidation: []
+    }
+
+    const contract = buildTerritorialFactualContract(mockContext)
+    expect(contract.classification.code).toBe('SNR')
+    expect(contract.classification.label).toBe('Suelo de núcleo rural')
+
+    const snrc = contract.categories.find(c => c.code === 'SNRC')
+    expect(snrc?.label).toBe('Núcleo rural común') // preserve label
+
+    const snrt = contract.categories.find(c => c.code === 'SNRT')
+    expect(snrt?.label).toBeUndefined() // label undefined
+  })
 })
