@@ -201,6 +201,7 @@ export type ClassificationReviewReason =
   | 'instrument_traceability_pending'
   | 'instrument_layer_mismatch'
   | 'source_disagreement'
+  | 'intra_source_disagreement'
   | 'incomplete_source_check'
   | 'ambiguous_code_mapping'
   | 'insufficient_geometry'
@@ -387,10 +388,18 @@ export type UrbanisticFactNextAction =
   | 'manual_selection'
   | 'retry_source'
 
+export interface UrbanisticFactCandidate<T> {
+  value: T
+  label?: string
+  parcelPercentage?: number
+  intersectionAreaSquareMetres?: number
+}
+
 export interface UrbanisticFact<T> {
   value?: T
   label?: string
   status: UrbanisticFactStatus
+  candidates?: UrbanisticFactCandidate<T>[]
   origin?: UrbanisticFactOrigin
   confidence: TerritorialConfidence | 'unknown'
   evidence: TerritorialEvidence[]

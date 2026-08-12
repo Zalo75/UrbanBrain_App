@@ -180,7 +180,10 @@ export function buildStructuredParcelFactAnswer(
     return { answer: lines.join('\n'), hasConflict: true }
   }
 
-  const facts = context.urbanisticFacts
+  const asksForWholeParcel = /\b(?:parcela\s+(?:catastral\s+)?completa|toda\s+la\s+parcela)\b/i.test(question)
+  const facts = asksForWholeParcel && context.parcelUrbanisticFacts
+    ? context.parcelUrbanisticFacts
+    : context.urbanisticFacts
   const lines: string[] = []
   const usedFacts: Array<
     UrbanisticRegimeFacts['classification'] | UrbanisticRegimeFacts['category']
@@ -191,6 +194,16 @@ export function buildStructuredParcelFactAnswer(
     if (fact?.value && isUsableUrbanisticFactStatus(fact.status)) {
       lines.push(`Clasificación: ${fact.value.label} (${fact.value.code}).`)
       usedFacts.push(fact)
+    } else if (fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
+      lines.push(`Clasificación: existen múltiples clasificaciones detectadas.`)
+      const sorted = [...fact.candidates].sort((a, b) => (b.parcelPercentage ?? 0) - (a.parcelPercentage ?? 0))
+      sorted.forEach(c => {
+        lines.push(`  - ${c.label ?? c.value.code} (${c.value.code}) — ${c.parcelPercentage != null ? c.parcelPercentage + ' %' : 'sin %'}`)
+      })
+      if (sorted[0] && sorted[0].parcelPercentage != null && sorted[0].parcelPercentage > 0) {
+        lines.push(`Predominio superficial: ${sorted[0].label ?? sorted[0].value.code}. La parcela presenta también intersección con otras clasificaciones, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+      }
+      usedFacts.push(fact)
     } else {
       lines.push('Clasificación: no determinada.')
     }
@@ -199,6 +212,16 @@ export function buildStructuredParcelFactAnswer(
     const fact = facts?.category
     if (fact?.value && isUsableUrbanisticFactStatus(fact.status)) {
       lines.push(`Categoría: ${fact.value.label ?? fact.value.code} (${fact.value.code}).`)
+      usedFacts.push(fact)
+    } else if (fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
+      lines.push(`Categoría: existen múltiples categorías detectadas.`)
+      const sorted = [...fact.candidates].sort((a, b) => (b.parcelPercentage ?? 0) - (a.parcelPercentage ?? 0))
+      sorted.forEach(c => {
+        lines.push(`  - ${c.label ?? c.value.code} (${c.value.code}) — ${c.parcelPercentage != null ? c.parcelPercentage + ' %' : 'sin %'}`)
+      })
+      if (sorted[0] && sorted[0].parcelPercentage != null && sorted[0].parcelPercentage > 0) {
+        lines.push(`Predominio superficial: ${sorted[0].label ?? sorted[0].value.code}. La parcela presenta también intersección con otras categorías, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+      }
       usedFacts.push(fact)
     } else {
       lines.push('Categoría: no determinada.')
@@ -225,7 +248,6 @@ export function buildStructuredParcelFactAnswer(
     )
   }
   if (topics.has('affects')) {
-    const asksForWholeParcel = /\b(?:parcela\s+(?:catastral\s+)?completa|toda\s+la\s+parcela)\b/i.test(question)
     const constraintScope =
       context.actionArea && asksForWholeParcel
         ? context.parcelKnownConstraints ?? context.knownConstraints

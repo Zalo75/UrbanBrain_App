@@ -75,6 +75,7 @@ const reviewReasonCopy: Record<ClassificationReviewReason, string> = {
   instrument_layer_mismatch:
     'La capa cartográfica consultada no coincide con el instrumento identificado como vigente.',
   source_disagreement: 'Las fuentes oficiales consultadas ofrecen resultados diferentes.',
+  intra_source_disagreement: 'Una misma fuente oficial devuelve múltiples clasificaciones o categorías.',
   incomplete_source_check: 'No se pudo completar una comprobación necesaria en una fuente oficial.',
   ambiguous_code_mapping:
     'El código oficial no tiene una equivalencia inequívoca con las opciones operativas del expediente.',

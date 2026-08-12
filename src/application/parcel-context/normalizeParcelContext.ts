@@ -362,6 +362,7 @@ export function buildNormalizedParcelContext(
   const context: NormalizedParcelContext = {
     canAnswerConcreteParameters: detected?.planningCanAnswerConcreteParameters === true,
     urbanisticFacts: detected?.urbanisticFacts ?? undefined,
+    parcelUrbanisticFacts: detected?.urbanisticFacts ?? undefined,
     parcelGeometry: detected?.parcelGeometry ?? undefined,
     knownConstraints: [],
     conflicts: [],

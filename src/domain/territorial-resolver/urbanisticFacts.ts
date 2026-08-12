@@ -1,14 +1,19 @@
 import type {
   ClassificationCandidate,
   ClassificationResolution,
+  ClassificationReviewReason,
+  ClassificationSourceCheck,
   ConsolidationFactValue,
   PlanningApplicability,
+  PlanningClassification,
   TerritorialConfidence,
+  TerritorialEvidence,
   UrbanisticFact,
   UrbanisticFactNextAction,
   UrbanisticFactOrigin,
   UrbanisticFactStatus,
   UrbanisticRegimeFacts,
+  UrbanisticFactCandidate,
 } from './types'
 
 function currentInstrumentId(planning: PlanningApplicability) {
@@ -96,11 +101,13 @@ function fact<T>(input: {
   resolution?: ClassificationResolution
   resolvedAt?: string
   additionalWarnings?: string[]
+  candidates?: UrbanisticFactCandidate<T>[]
 }): UrbanisticFact<T> {
   return {
     value: input.value,
     label: input.label,
     status: input.status,
+    candidates: input.candidates,
     origin: factOrigin(input.candidate),
     confidence: confidence(input.candidate),
     evidence: evidence(input.planning, input.resolution),
@@ -127,6 +134,15 @@ export function urbanisticFactsFromClassificationResolution(
   const classificationAvailable =
     classificationStatus === 'automatic_confirmed' ||
     classificationStatus === 'automatic_probable'
+  const classificationCandidates = resolution?.candidates
+    ?.filter((c) => c.kind === 'official_classification' && c.classification?.code)
+    .map((c) => ({
+      value: { code: c.classification!.code, label: c.classification!.label },
+      label: c.classification!.label,
+      parcelPercentage: c.parcelCoverage?.parcelPercentage,
+      intersectionAreaSquareMetres: c.parcelCoverage?.intersectionAreaSquareMetres,
+    }))
+
   const classification = fact({
     value: classificationAvailable && isOfficial && candidate
       ? { code: candidate.classification.code, label: candidate.classification.label }
@@ -137,6 +153,7 @@ export function urbanisticFactsFromClassificationResolution(
     planning,
     resolution,
     resolvedAt,
+    candidates: classificationCandidates?.length ? classificationCandidates : undefined,
   })
 
   const categoryAvailable = Boolean(
@@ -156,6 +173,15 @@ export function urbanisticFactsFromClassificationResolution(
           : isOfficial && candidate?.classification.code
       ? 'manual_review_required'
       : 'not_available'
+  const categoryCandidates = resolution?.candidates
+    ?.filter((c) => c.kind === 'official_classification' && c.classification?.categoryCode)
+    .map((c) => ({
+      value: { code: c.classification!.categoryCode!, label: c.classification!.categoryLabel },
+      label: c.classification!.categoryLabel,
+      parcelPercentage: c.parcelCoverage?.parcelPercentage,
+      intersectionAreaSquareMetres: c.parcelCoverage?.intersectionAreaSquareMetres,
+    }))
+
   const category = fact({
     value: categoryAvailable && isOfficial && candidate
       ? {
@@ -169,6 +195,7 @@ export function urbanisticFactsFromClassificationResolution(
     planning,
     resolution,
     resolvedAt,
+    candidates: categoryCandidates?.length ? categoryCandidates : undefined,
     additionalWarnings:
       categoryStatus === 'manual_review_required'
         ? [

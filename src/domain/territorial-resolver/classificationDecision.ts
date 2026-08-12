@@ -285,6 +285,22 @@ export function evaluateClassificationResolution(
         evidence: candidate.evidence,
       })),
     })
+  } else if (
+    semanticClassifications.size > 1 &&
+    sourceClassificationSets.length === 1 &&
+    !discrepancies.some((item) => item.reason === 'intra_source_disagreement')
+  ) {
+    discrepancies.push({
+      reason: 'intra_source_disagreement',
+      field: 'classification',
+      explanation: 'Una misma fuente oficial devuelve múltiples clasificaciones o categorías que intersecan con la parcela.',
+      assertions: candidates.map((candidate) => ({
+        candidateId: candidate.id,
+        value: semanticKey(candidate),
+        source: candidate.source === 'derived_geometry_complement' ? 'urbanbrain' : candidate.source,
+        evidence: candidate.evidence,
+      })),
+    })
   }
 
   const reviewReasons = derivedReviewReasons(candidates)
@@ -294,7 +310,8 @@ export function evaluateClassificationResolution(
   const blockingDiscrepancies = discrepancies.filter(
     (discrepancy) =>
       discrepancy.reason !== 'point_geometry_mismatch' &&
-      discrepancy.reason !== 'partial_parcel_coverage'
+      discrepancy.reason !== 'partial_parcel_coverage' &&
+      discrepancy.reason !== 'intra_source_disagreement'
   )
   const allAreVerifiedParcelIntersections = candidates.every(
     (candidate) =>

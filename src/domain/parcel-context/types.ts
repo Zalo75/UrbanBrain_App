@@ -50,6 +50,7 @@ export interface NormalizedParcelContext {
   technicalNotes?: ParcelContextField<string>
   canAnswerConcreteParameters?: boolean
   urbanisticFacts?: UrbanisticRegimeFacts
+  parcelUrbanisticFacts?: UrbanisticRegimeFacts
   actionArea?: ParcelContextField<ActionAreaSelection>
   parcelGeometry?: ParcelGeometry
   parcelSurfaceSquareMetres?: number

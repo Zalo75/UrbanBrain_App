@@ -97,7 +97,7 @@ describe('evaluateClassificationResolution', () => {
     expect(result.status).toBe('multiple_intersections')
     expect(result.nextAction).toBe('manual_selection')
     expect(result.candidates).toEqual([first, second])
-    expect(result.reviewReasons).toEqual([])
+    expect(result.reviewReasons).toEqual(['intra_source_disagreement'])
     expect(result.automaticSelection).toBeUndefined()
     expect(result.proposal).toBeUndefined()
   })
@@ -234,5 +234,18 @@ describe('evaluateClassificationResolution', () => {
     expect(result.automaticSelection?.candidateId).toBe('a-candidate')
     expect(result.proposal).toBeUndefined()
     expect(result.finalSelection).toBeUndefined()
+  })
+
+  it('crea discrepancia intra_source_disagreement para conflictos de la misma fuente', () => {
+    const snrc = candidate('snrc', 'SNR', 'SNRC')
+    const snrt = candidate('snrt', 'SNR', 'SNRT')
+    snrt.source = 'siotuga'
+    snrc.source = 'siotuga'
+
+    const result = evaluate({ candidates: [snrc, snrt] })
+
+    expect(result.status).toBe('multiple_intersections')
+    expect(result.discrepancies.some((d) => d.reason === 'intra_source_disagreement')).toBe(true)
+    expect(result.discrepancies.some((d) => d.reason === 'source_disagreement')).toBe(false)
   })
 })

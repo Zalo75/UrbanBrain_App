@@ -10,6 +10,7 @@ import {
   buildMunicipalSafetyPrompt,
   buildSafeAbstention,
   validateGeneratedAnswer,
+  buildStructuredParcelFactAnswer,
 } from './responseSafety'
 
 const context = buildNormalizedParcelContext({
