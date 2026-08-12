@@ -87,6 +87,14 @@ export interface FactualScope {
   source?: string
 }
 
+export interface FactualScopeFacts {
+  classification?: FactualClassification
+  categories?: FactualCategory[]
+  consolidation?: FactualConsolidation
+  planningAreas?: FactualPlanningArea[]
+  affects?: FactualAffectsState
+}
+
 export interface TerritorialFactualContract {
   identity: {
     municipalityName?: string
@@ -99,6 +107,12 @@ export interface TerritorialFactualContract {
     parcel?: FactualScope
     actionArea?: FactualScope
   }
+  /** Canonical scoped facts; optional only for legacy contracts created before L2.6 Block 2.2A. */
+  factsByScope?: {
+    parcel?: FactualScopeFacts
+    actionArea?: FactualScopeFacts
+  }
+  // Legacy compatibility fields; factsByScope is canonical for scoped resolution.
   classification: FactualClassification
   categories: FactualCategory[]
   consolidation: FactualConsolidation
