@@ -3,7 +3,7 @@ import { buildTerritorialFactualContract } from './buildFactualContract'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 
 describe('Territorial Factual Contract', () => {
-  
+
   it('CASO GOLDEN 1 - Sada: separa clasificación de múltiples categorías sin colapsar dimensiones ni inventar effective', () => {
     // Sada has SNR classification and 2 category candidates (SNRC, SNRT)
     const mockSadaContext: NormalizedParcelContext = {
@@ -56,14 +56,14 @@ describe('Territorial Factual Contract', () => {
     expect(contract.categories).toHaveLength(2)
     const snrc = contract.categories.find(c => c.code === 'SNRC')
     const snrt = contract.categories.find(c => c.code === 'SNRT')
-    
+
     expect(snrc?.parcelPercentage).toBe(98.53)
     expect(snrt?.parcelPercentage).toBe(1.47)
-    
+
     // 3. Status must remain 'conflict' and determination 'unresolved' (no fake 'effective')
     expect(snrc?.status).toBe('conflict')
     expect(snrc?.determination).toBe('unresolved')
-    
+
     // 4. SNR does not appear as a category
     expect(contract.categories.find(c => c.code === 'SNR')).toBeUndefined()
   })
@@ -147,7 +147,7 @@ describe('Territorial Factual Contract', () => {
 
     expect(contract.scopes.parcel?.hasGeometry).toBe(true)
     expect(contract.scopes.parcel?.areaSquareMetres).toBe(500)
-    
+
     expect(contract.scopes.actionArea?.hasGeometry).toBe(true)
     expect(contract.scopes.actionArea?.areaSquareMetres).toBe(200)
     expect(contract.scopes.actionArea?.source).toBe('user_polygon')
@@ -171,12 +171,12 @@ describe('Territorial Factual Contract', () => {
 
     expect(contract.identity.municipalityName).toBe('Arzúa')
     expect(contract.normativeReferences.planningInstrument).toBe('NNSS')
-    
+
     // Classifications and categories should default to unresolved without fabricating fake 'no coverage' if it was a timeout
     expect(contract.classification.status).toBe('unresolved')
     expect(contract.classification.determination).toBe('unresolved')
     expect(contract.classification.code).toBeUndefined()
-    
+
     expect(contract.categories).toHaveLength(0)
 
     // Affects should be unresolved because of global source issues
@@ -204,7 +204,7 @@ describe('Territorial Factual Contract', () => {
     }
 
     const contract = buildTerritorialFactualContract(mockManualContext)
-    
+
     expect(contract.classification.status).toBe('technician_validated')
     expect(contract.classification.determination).toBe('effective') // Must map manual validation to effective
     expect(contract.classification.provenance?.sourceType).toBe('manual')
@@ -283,7 +283,7 @@ describe('Territorial Factual Contract', () => {
 
     // 1. classification code + label => complete
     expect(build('SU', 'Suelo Urbano').classification.semanticCompleteness).toBe('complete')
-    
+
     // 2. classification code sin label => partial
     expect(build('SU', undefined).classification.semanticCompleteness).toBe('partial')
 
@@ -313,7 +313,7 @@ describe('Territorial Factual Contract', () => {
     // 7. dos categorías simultáneas: una complete y otra partial
     const catA = contract.categories.find(c => c.code === 'A')
     const catB = contract.categories.find(c => c.code === 'B')
-    
+
     expect(catA?.semanticCompleteness).toBe('complete') // 5 y 8. => complete
     expect(catB?.semanticCompleteness).toBe('partial') // 6 y 9. => partial
   })
@@ -335,7 +335,7 @@ describe('Territorial Factual Contract', () => {
 
     // 10. consolidation con label => complete
     expect(build('C', 'Consolidado').consolidation.semanticCompleteness).toBe('complete')
-    
+
     // 11. consolidation sin label => partial
     expect(build('C', undefined).consolidation.semanticCompleteness).toBe('partial')
   })
