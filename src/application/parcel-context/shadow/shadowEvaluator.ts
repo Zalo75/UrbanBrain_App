@@ -23,7 +23,8 @@ export async function runTerritorialFactualShadowEvaluation(
       { role: 'system', content: systemMessage },
       { role: 'user', content: question }
     ],
-    temperature: options.temperature ?? 0.0, // Using 0.0 for predictability in factual extraction
+    temperature: options.temperature ?? 0.0,
+    response_format: { type: 'json_object' }
   })
 
   return completion.choices[0]?.message?.content ?? ''

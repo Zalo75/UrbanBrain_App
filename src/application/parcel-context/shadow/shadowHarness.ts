@@ -1,5 +1,4 @@
-import { runTerritorialFactualShadowEvaluation } from './shadowEvaluator'
-import { validateShadowFactualResponse } from './shadowGuardrail'
+import { runTerritorialFactualShadowPipeline } from './shadowPipeline'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import OpenAI from 'openai'
 
@@ -22,15 +21,26 @@ async function runGoldenEvaluations() {
   const sadaContract: TerritorialFactualContract = {
     identity: { municipalityName: 'Sada' },
     scopes: {},
-    classification: { code: 'SNR', status: 'automatic_confirmed', determination: 'automatic' },
+    classification: { code: 'SNR', semanticCompleteness: 'complete', label: 'Suelo de núcleo rural', status: 'automatic_confirmed', determination: 'automatic', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
     categories: [
-      { code: 'SNRC', parcelPercentage: 98.53, status: 'conflict', determination: 'unresolved' },
-      { code: 'SNRT', parcelPercentage: 1.47, status: 'conflict', determination: 'unresolved' }
+      { code: 'SNRC', label: 'Núcleo rural común', semanticCompleteness: 'complete', parcelPercentage: 98.53, status: 'conflict', determination: 'unresolved' },
+      { code: 'SNRT', label: 'Núcleo rural tradicional', semanticCompleteness: 'complete', parcelPercentage: 1.47, status: 'conflict', determination: 'unresolved' }
     ],
-    consolidation: { status: 'unresolved', determination: 'unresolved' },
+    consolidation: { status: 'unresolved', determination: 'unresolved', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
     planningAreas: [],
-    affects: { status: 'checked', items: [] },
+    affects: { status: 'checked', items: [], confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
     normativeReferences: {}
+  } as unknown as TerritorialFactualContract
+
+  // Convert to full contract with factsByScope
+  sadaContract.factsByScope = {
+    parcel: {
+      classification: sadaContract.classification,
+      categories: sadaContract.categories,
+      consolidation: sadaContract.consolidation,
+      planningAreas: sadaContract.planningAreas,
+      affects: sadaContract.affects
+    }
   }
 
   const questions = [
@@ -49,16 +59,16 @@ async function runGoldenEvaluations() {
     console.log(`\nQ: ${q}`)
     try {
       const start = Date.now()
-      const answer = await runTerritorialFactualShadowEvaluation(q, sadaContract, { client, temperature: 0.1 })
-      const latency = Date.now() - start
-      console.log(`A: ${answer}`)
-      console.log(`[Latency: ${latency}ms]`)
+      const result = await runTerritorialFactualShadowPipeline(q, sadaContract, client, 'deepseek-v4-flash')
 
-      const validation = validateShadowFactualResponse(answer, sadaContract)
-      if (!validation.valid) {
-        console.error(`GUARDRAIL FAIL:`, validation.reasons)
+      console.log(`LATENCY: ${result.diagnostics.latencyMs}ms`)
+      console.log(`RAW STRUCTURED OUTPUT:\n`, JSON.stringify(result.structuredOutput, null, 2))
+      console.log(`VALIDATION RESULT: ${result.status}`)
+
+      if (result.status === 'valid') {
+         console.log(`RENDERED SHADOW ANSWER:\n`, result.renderedText?.join('\n'))
       } else {
-        console.log(`GUARDRAIL PASS`)
+         console.log(`ERRORS:`, JSON.stringify(result.validation?.errors || result.diagnostics.error, null, 2))
       }
     } catch (e) {
       console.error(`Error processing question:`, e)

@@ -1,8 +1,18 @@
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 
 export function serializeTerritorialFactualContract(contract: TerritorialFactualContract): string {
-  // We stringify with a custom replacer to omit empty arrays, empty objects, and undefined/null.
-  const serialized = JSON.stringify(contract, (key, value) => {
+  // Solo exportamos factsByScope para el shadow pipeline si existe
+  const target = contract.factsByScope
+    ? { factsByScope: contract.factsByScope }
+    : {
+        classification: contract.classification,
+        categories: contract.categories,
+        consolidation: contract.consolidation,
+        planningAreas: contract.planningAreas,
+        affects: contract.affects
+      }
+
+  const serialized = JSON.stringify(target, (key, value) => {
     if (value === null || value === undefined) return undefined
     
     // Omit empty arrays
