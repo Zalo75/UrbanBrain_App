@@ -80,7 +80,7 @@ describe('shadowIntegration', () => {
   it('9. Shadow throw no afecta al primary', async () => {
     process.env.URBANBRAIN_FACTUAL_SHADOW_ENABLED = 'true';
     vi.mocked(runTerritorialFactualShadowPipeline).mockRejectedValueOnce(new Error('Pipeline error'));
-    
+
     scheduleFactualShadowPipeline('Test', getValidContext(), 'exp-1', '15030');
     const cb = globalThis.__afterCallback;
     expect(cb).toBeDefined();
@@ -106,7 +106,7 @@ describe('shadowIntegration', () => {
 
     scheduleFactualShadowPipeline('Test', getValidContext(), 'exp-1', '15030');
     const cb = globalThis.__afterCallback;
-    
+
     await expect(cb()).resolves.toBeUndefined();
     expect(console.warn).toHaveBeenCalledWith(
       '[FactualShadow] Unhandled exception in shadow pipeline:',

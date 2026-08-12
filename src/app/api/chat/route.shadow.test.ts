@@ -87,10 +87,10 @@ describe('POST /api/chat factual shadow integration (Bloque 5B)', () => {
   it('4. primary response es idéntica con flag OFF', async () => {
     process.env.URBANBRAIN_FACTUAL_SHADOW_ENABLED = 'false';
     const resultOff = await executePrimary('¿Es urbano?');
-    
+
     process.env.URBANBRAIN_FACTUAL_SHADOW_ENABLED = 'true';
     const resultOn = await executePrimary('¿Es urbano?');
-    
+
     expect(resultOn.answer).toBe(resultOff.answer);
     expect(mocks.scheduleFactualShadowPipeline).toHaveBeenCalled();
   });
@@ -103,7 +103,7 @@ describe('POST /api/chat factual shadow integration (Bloque 5B)', () => {
     // La ejecución del shadow no interfiere con el hilo principal
 
     const result = await executePrimary('¿Es urbano?');
-    
+
     expect(result.answer).toBe(resultOff.answer);
     expect(result.answer).not.toContain('Shadow Pipeline');
   });
