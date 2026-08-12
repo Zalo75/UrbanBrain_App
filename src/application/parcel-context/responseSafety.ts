@@ -180,7 +180,7 @@ export function buildStructuredParcelFactAnswer(
     return { answer: lines.join('\n'), hasConflict: true }
   }
 
-  const asksForWholeParcel = /\b(?:parcela\s+(?:catastral\s+)?completa|toda\s+la\s+parcela)\b/i.test(question)
+  const asksForWholeParcel = /\b(?:esta\s+parcela|la\s+parcela|parcela\s+(?:catastral\s+)?completa|toda\s+la\s+parcela|conjunto\s+de\s+la\s+parcela|finca\s+completa|toda\s+la\s+finca|terreno\s+completo)\b/i.test(question)
   const facts = asksForWholeParcel && context.parcelUrbanisticFacts
     ? context.parcelUrbanisticFacts
     : context.urbanisticFacts
