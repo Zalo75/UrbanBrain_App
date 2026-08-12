@@ -49,15 +49,15 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
     switch (op.operation) {
       case 'reference_code':
         if (!code) throw new Error('Renderer error: code is undefined for reference_code')
-        lines.push(`${factNameCapitalized} aplicable ${scopeText} incluye el código ${code}.`)
+        lines.push(`Se ha identificado que ${factNameLower} ${scopeText} incluye el código ${code}.`)
         break
       case 'state_label':
         if (hasLabel) {
-          lines.push(`${factNameCapitalized} aplicable ${scopeText} es ${labelText}.`)
+          lines.push(`Se ha identificado ${factNameLower} ${labelText} ${scopeText}.`)
         } else if (code) {
-          lines.push(`${factNameCapitalized} aplicable ${scopeText} tiene el código ${code}.`)
+          lines.push(`Se ha identificado ${factNameLower} con código ${code} ${scopeText}.`)
         } else {
-          lines.push(`${factNameCapitalized} aplicable ${scopeText}.`) // Fallback si no hay ni code ni label
+          lines.push(`Se ha identificado ${factNameLower} ${scopeText}.`) // Fallback si no hay ni code ni label
         }
         break
       case 'state_percentage':
@@ -77,7 +77,20 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
             throw new Error(`Renderer error: Cannot render effective status because fact.status is ${fact.status}`)
           }
           // Usar siempre el status real del fact
-          lines.push(`El estado de ${factNameLower} ${scopeText} es '${fact.status}'.`)
+          const status = fact.status as string
+          if (status === 'automatic_confirmed') {
+            lines.push(`El estado de ${factNameLower} ${scopeText} está confirmado automáticamente.`)
+          } else if (status === 'conflict') {
+            lines.push(`El estado de ${factNameLower} ${scopeText} presenta un conflicto pendiente de resolver.`)
+          } else if (status === 'unresolved') {
+            lines.push(`El estado de ${factNameLower} ${scopeText} no está resuelto.`)
+          } else if (status === 'checked') {
+            lines.push(`El estado de ${factNameLower} ${scopeText} ha sido verificado.`)
+          } else if (status === 'effective') {
+            lines.push(`El estado de ${factNameLower} ${scopeText} es efectivo.`)
+          } else {
+            lines.push(`El estado de ${factNameLower} ${scopeText} es '${status}'.`)
+          }
         }
         break
       case 'state_determination':
@@ -85,7 +98,16 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
           if (op.determination === 'effective' && fact.determination !== 'effective') {
              throw new Error(`Renderer error: Cannot render effective determination because fact.determination is ${fact.determination}`)
           }
-          lines.push(`La determinación de ${factNameLower} ${scopeText} es '${fact.determination}'.`)
+          const det = fact.determination as string
+          if (det === 'automatic') {
+            lines.push(`La determinación de ${factNameLower} ${scopeText} es automática.`)
+          } else if (det === 'unresolved') {
+            lines.push(`La determinación de ${factNameLower} ${scopeText} no está resuelta.`)
+          } else if (det === 'effective') {
+            lines.push(`La determinación de ${factNameLower} ${scopeText} es efectiva.`)
+          } else {
+            lines.push(`La determinación de ${factNameLower} ${scopeText} es '${det}'.`)
+          }
         }
         break
       case 'state_geometric_dominance':
@@ -140,22 +162,22 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
 
     switch (abs.cause) {
       case 'missing_label':
-        lines.push(`No se dispone de la denominación completa para ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `No se dispone de la denominación completa para ${factNameLower} ${scopeText}.` : `No se dispone de la denominación completa.`)
         break
       case 'unresolved_fact':
-        lines.push(`No se ha podido determinar con los datos disponibles la información sobre ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `No se ha podido determinar con los datos disponibles la información sobre ${factNameLower} ${scopeText}.` : `No se ha podido determinar con los datos disponibles la información solicitada.`)
         break
       case 'conflict':
-        lines.push(`Existe un conflicto en los datos oficiales respecto a ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `Existe un conflicto en los datos oficiales respecto a ${factNameLower} ${scopeText}.` : `Existe un conflicto en los datos oficiales.`)
         break
       case 'missing_fact':
-        lines.push(`Faltan datos en el contrato para ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `Faltan datos en el contrato para ${factNameLower} ${scopeText}.` : `Faltan datos en el contrato.`)
         break
       case 'scope_mismatch':
-        lines.push(`El alcance territorial proporcionado no coincide para evaluar ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `El alcance territorial proporcionado no coincide para evaluar ${factNameLower} ${scopeText}.` : `No hay información factual suficiente para responder sobre ese ámbito territorial.`)
         break
       case 'unsupported_operation':
-        lines.push(`La operación solicitada no es compatible con ${factNameLower} ${scopeText}.`)
+        lines.push(abs.factRef ? `La operación solicitada no es compatible con ${factNameLower} ${scopeText}.` : `La operación solicitada no es compatible.`)
         break
     }
   }
