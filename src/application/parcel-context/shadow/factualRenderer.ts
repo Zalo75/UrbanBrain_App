@@ -26,12 +26,12 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
 
   for (const op of output.operations) {
     const resolution = resolveFactRef(op.factRef, contract)
-    
+
     // Hardening: Operaciones de estado requieren el hecho. Si no hay match (0 o >1), fallamos seguro.
     if (resolution.result !== 'one') {
       throw new Error(`Renderer error: FactRef resolution failed with ${resolution.result} for ${JSON.stringify(op.factRef)}`)
     }
-    
+
     const fact = resolution.fact
 
     const factNameCapitalized = getFactName(op.factRef, true)
@@ -41,7 +41,7 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
     const code = 'code' in fact && fact.code ? fact.code : undefined
     const isComplete = 'semanticCompleteness' in fact && fact.semanticCompleteness === 'complete'
     const label = 'label' in fact ? fact.label : undefined
-    
+
     // Hardening: Nunca 'undefined' o 'null'. Si partial, no usamos label.
     const hasLabel = isComplete && typeof label === 'string' && label.length > 0
     const labelText = hasLabel ? `${label} (${code})` : (code ? `(${code})` : '')

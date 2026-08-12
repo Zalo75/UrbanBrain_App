@@ -240,7 +240,7 @@ describe('Structured Factual Renderer', () => {
     const outGeom: StructuredFactualOutput = { operations: [{ operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } }], abstentions: [] }
     const resultGeom = renderFactualOutput(outGeom, contract)
     expect(resultGeom[0]).toContain('es la de mayor presencia geométrica')
-    
+
     const outEff: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, status: 'effective' }], abstentions: [] }
     expect(() => renderFactualOutput(outEff, contract)).toThrow('Cannot render effective status')
   })
