@@ -1,12 +1,18 @@
+export type StructuredFactScope = 'parcel' | 'actionArea'
+
 export type StructuredFactRef =
-  | { type: 'classification' }
-  | { type: 'category'; code: string }
-  | { type: 'category_candidate'; categoryCode: string; candidateCode: string }
-  | { type: 'consolidation' }
-  | { type: 'planning_area'; code: string }
-  | { type: 'affect'; label: string }
-  | { type: 'affects_state' }
-  | { type: 'scope'; scopeType: 'parcel' | 'actionArea' }
+  | { type: 'classification'; scope: StructuredFactScope }
+  | { type: 'category'; scope: StructuredFactScope; code: string }
+  | {
+      type: 'category_candidate'
+      scope: StructuredFactScope
+      categoryCode: string
+      candidateCode: string
+    }
+  | { type: 'consolidation'; scope: StructuredFactScope }
+  | { type: 'planning_area'; scope: StructuredFactScope; code: string }
+  | { type: 'affect'; scope: StructuredFactScope; label: string }
+  | { type: 'affects_state'; scope: StructuredFactScope }
 
 export type StructuredOperation =
   | { operation: 'reference_code'; factRef: StructuredFactRef; code: string }
