@@ -74,10 +74,10 @@ export function urbanisticFactsFromRaw(raw: unknown): UrbanisticRegimeFacts | un
   const result = raw as Partial<TerritorialResolution>
   const planning = (result.continuity?.effectiveOfficialContext ?? result).planning
   if (!planning) return undefined
-  if (planning.urbanisticFacts) return planning.urbanisticFacts
-  return planning.classificationResolution
-    ? urbanisticFactsFromClassificationResolution(planning, result.resolvedAt)
-    : undefined
+  if (planning.classificationResolution) {
+    return urbanisticFactsFromClassificationResolution(planning, result.resolvedAt)
+  }
+  return planning.urbanisticFacts
 }
 
 export function buildAuthorizedExpedienteQuery(
@@ -146,7 +146,7 @@ export async function loadAuthorizedParcelInputs(
           storedSummary.planningCanAnswerConcreteParameters,
         classificationDetermination:
           storedSummary.classificationDetermination ?? derivedClassification?.classificationDetermination,
-        urbanisticFacts: storedSummary.urbanisticFacts ?? derivedUrbanisticFacts,
+        urbanisticFacts: derivedUrbanisticFacts ?? storedSummary.urbanisticFacts,
       }
     : derivedUrbanisticFacts
       ? { urbanisticFacts: derivedUrbanisticFacts }
