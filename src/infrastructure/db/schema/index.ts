@@ -695,3 +695,34 @@ export const legalUpdates = pgTable(
     };
   }
 );
+
+// ==========================================
+// FASE 2.6: Shadow Factual Pipeline Telemetry
+// ==========================================
+
+export const shadowStatusEnum = pgEnum('shadow_status', [
+  'valid',
+  'validation_failed',
+  'render_failed',
+  'llm_failed',
+]);
+
+export const factualShadowEvaluations = pgTable('factual_shadow_evaluations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'set null' }),
+  municipalityIne: text('municipality_ine'),
+  query: text('query').notNull(),
+  shadowModel: text('shadow_model').notNull(),
+  shadowStatus: shadowStatusEnum('shadow_status').notNull(),
+  latencyMs: integer('latency_ms').notNull(),
+  validationErrors: jsonb('validation_errors'),
+  structuredOutput: jsonb('structured_output'),
+  renderedAnswer: text('rendered_answer'),
+  pipelineVersion: text('pipeline_version')
+}, (table) => {
+  return {
+    createdAtIdx: index('factual_shadow_eval_created_at_idx').on(table.createdAt),
+    expedienteIdIdx: index('factual_shadow_eval_exp_id_idx').on(table.expedienteId),
+  }
+});

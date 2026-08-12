@@ -92,6 +92,13 @@
       "when": 1783680319200,
       "tag": "0012_curved_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786556879908,
+      "tag": "0013_big_thanos",
+      "breakpoints": true
     }
   ]
 }
