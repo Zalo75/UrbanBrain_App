@@ -32,6 +32,7 @@ import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-co
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
 import type { KnowledgePlan } from '@/application/knowledge-orchestrator/KnowledgeOrchestrator';
+import { scheduleFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowIntegration';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -178,6 +179,9 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const trustedMunicipioCodigo = trustedMunicipalityCodeFilter(parcelContext);
     const municipioCodigo =
       trustedMunicipioCodigo ?? '__urbanbrain_unconfirmed_municipality__';
+
+    scheduleFactualShadowPipeline(message, parcelContext, expedienteId, trustedMunicipioCodigo ?? null);
+
     const questionScope = classifyParcelQuestionScope(message);
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
     const normativeScope = buildNormativeSearchScope({
