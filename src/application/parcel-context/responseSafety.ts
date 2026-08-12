@@ -195,13 +195,29 @@ export function buildStructuredParcelFactAnswer(
       lines.push(`Clasificación: ${fact.value.label} (${fact.value.code}).`)
       usedFacts.push(fact)
     } else if (fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
-      lines.push(`Clasificación: existen múltiples clasificaciones detectadas.`)
-      const sorted = [...fact.candidates].sort((a, b) => (b.parcelPercentage ?? 0) - (a.parcelPercentage ?? 0))
-      sorted.forEach(c => {
-        lines.push(`  - ${c.label ?? c.value.code} (${c.value.code}) — ${c.parcelPercentage != null ? c.parcelPercentage + ' %' : 'sin %'}`)
-      })
-      if (sorted[0] && sorted[0].parcelPercentage != null && sorted[0].parcelPercentage > 0) {
-        lines.push(`Predominio superficial: ${sorted[0].label ?? sorted[0].value.code}. La parcela presenta también intersección con otras clasificaciones, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+      const uniqueCodes = new Set(fact.candidates.map(c => c.value.code))
+      
+      if (uniqueCodes.size === 1) {
+        const representative = fact.candidates[0]
+        lines.push(`Clasificación: ${representative.label ?? representative.value.code} (${representative.value.code}).`)
+      } else {
+        lines.push(`Clasificación: existen múltiples clasificaciones detectadas.`)
+        
+        // Group by code to sum percentages if multiple candidates have the same classification code
+        const grouped = new Map<string, { code: string, label: string, percentage: number }>()
+        for (const c of fact.candidates) {
+          const existing = grouped.get(c.value.code) || { code: c.value.code, label: c.label ?? c.value.code, percentage: 0 }
+          if (c.parcelPercentage) existing.percentage += c.parcelPercentage
+          grouped.set(c.value.code, existing)
+        }
+        
+        const sorted = Array.from(grouped.values()).sort((a, b) => b.percentage - a.percentage)
+        sorted.forEach(g => {
+          lines.push(`  - ${g.label} (${g.code}) — ${g.percentage > 0 ? Number(g.percentage.toFixed(2)) + ' %' : 'sin %'}`)
+        })
+        if (sorted[0] && sorted[0].percentage > 0) {
+          lines.push(`Predominio superficial: ${sorted[0].label}. La parcela presenta también intersección con otras clasificaciones, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+        }
       }
       usedFacts.push(fact)
     } else {
@@ -214,13 +230,28 @@ export function buildStructuredParcelFactAnswer(
       lines.push(`Categoría: ${fact.value.label ?? fact.value.code} (${fact.value.code}).`)
       usedFacts.push(fact)
     } else if (fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
-      lines.push(`Categoría: existen múltiples categorías detectadas.`)
-      const sorted = [...fact.candidates].sort((a, b) => (b.parcelPercentage ?? 0) - (a.parcelPercentage ?? 0))
-      sorted.forEach(c => {
-        lines.push(`  - ${c.label ?? c.value.code} (${c.value.code}) — ${c.parcelPercentage != null ? c.parcelPercentage + ' %' : 'sin %'}`)
-      })
-      if (sorted[0] && sorted[0].parcelPercentage != null && sorted[0].parcelPercentage > 0) {
-        lines.push(`Predominio superficial: ${sorted[0].label ?? sorted[0].value.code}. La parcela presenta también intersección con otras categorías, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+      const uniqueCodes = new Set(fact.candidates.map(c => c.value.code))
+      
+      if (uniqueCodes.size === 1) {
+        const representative = fact.candidates[0]
+        lines.push(`Categoría: ${representative.label ?? representative.value.code} (${representative.value.code}).`)
+      } else {
+        lines.push(`Categoría: existen múltiples categorías detectadas.`)
+        
+        const grouped = new Map<string, { code: string, label: string, percentage: number }>()
+        for (const c of fact.candidates) {
+          const existing = grouped.get(c.value.code) || { code: c.value.code, label: c.label ?? c.value.code, percentage: 0 }
+          if (c.parcelPercentage) existing.percentage += c.parcelPercentage
+          grouped.set(c.value.code, existing)
+        }
+        
+        const sorted = Array.from(grouped.values()).sort((a, b) => b.percentage - a.percentage)
+        sorted.forEach(g => {
+          lines.push(`  - ${g.label} (${g.code}) — ${g.percentage > 0 ? Number(g.percentage.toFixed(2)) + ' %' : 'sin %'}`)
+        })
+        if (sorted[0] && sorted[0].percentage > 0) {
+          lines.push(`Predominio superficial: ${sorted[0].label}. La parcela presenta también intersección con otras categorías, por lo que el predominio geométrico no sustituye la validación técnica del régimen aplicable.`)
+        }
       }
       usedFacts.push(fact)
     } else {
