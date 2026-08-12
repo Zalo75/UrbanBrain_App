@@ -35,7 +35,7 @@ export async function runTerritorialFactualShadowPipeline(
   let rawLlmResponse = ''
   try {
     rawLlmResponse = await runTerritorialFactualShadowEvaluation(question, contract, { client, model, temperature: 0.0 })
-    
+
     let structuredOutput: StructuredFactualOutput
     try {
       const jsonMatch = rawLlmResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || rawLlmResponse.match(/(\{[\s\S]*\})/);

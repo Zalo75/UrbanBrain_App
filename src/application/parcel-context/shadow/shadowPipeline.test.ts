@@ -43,7 +43,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
       affects: { status: 'checked', items: [], confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
       normativeReferences: {}
     } as unknown as TerritorialFactualContract
-    
+
     contract.factsByScope = {
       parcel: {
         classification: contract.classification,
@@ -66,7 +66,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
     }
     const client = mockClient(JSON.stringify(validOutput))
     const result = await runTerritorialFactualShadowPipeline('¿Cuál predomina?', contract, client)
-    
+
     expect(result.status).toBe('valid')
     expect(result.renderedText?.[0]).toContain('representa el 98,53 %')
   })
@@ -74,7 +74,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
   it('B. Output inválido (JSON malformado)', async () => {
     const client = mockClient('Esto no es un json')
     const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)
-    
+
     expect(result.status).toBe('llm_failed')
     expect(result.diagnostics.error).toContain('JSON Parse error')
   })
@@ -90,7 +90,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
     }
     const client = mockClient(JSON.stringify(output))
     const result = await runTerritorialFactualShadowPipeline('?', contract, client)
-    
+
     expect(result.status).toBe('validation_failed')
     expect(result.validation?.errors[0].code).toBe('LABEL_HALLUCINATION')
   })
@@ -104,13 +104,13 @@ describe('Territorial Factual Shadow Pipeline', () => {
     }
     const client = mockClient(JSON.stringify(output))
     const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)
-    
+
     expect(result.status).toBe('validation_failed')
     expect(result.validation?.errors[0].code).toBe('PERCENTAGE_MISMATCH')
   })
 
   it('E. Output con scope mismatch', async () => {
-    const contract = createMockContract() 
+    const contract = createMockContract()
     const output = {
       operations: [
         { operation: 'state_status', factRef: { type: 'classification', scope: 'actionArea' }, status: 'automatic_confirmed' }
@@ -119,7 +119,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
     }
     const client = mockClient(JSON.stringify(output))
     const result = await runTerritorialFactualShadowPipeline('?', contract, client)
-    
+
     expect(result.status).toBe('validation_failed')
     expect(result.validation?.errors[0].code).toBe('INVALID_FACT_REF')
   })
@@ -134,7 +134,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
     const contract = createMockContract()
     const client = mockClient(JSON.stringify(output))
     const result = await runTerritorialFactualShadowPipeline('?', contract, client)
-    
+
     // Status is 'conflict' in contract, but output says 'effective'.
     // Validation catches this as STATUS_MISMATCH.
     expect(result.status).toBe('validation_failed')
@@ -151,7 +151,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
     const contract = createMockContract()
     const client = mockClient(JSON.stringify(output))
     const result = await runTerritorialFactualShadowPipeline('?', contract, client)
-    
+
     expect(result.status).toBe('validation_failed')
     expect(result.validation?.errors[0].code).toBe('UNRESOLVED_AS_ABSENCE')
   })
@@ -167,9 +167,9 @@ describe('Territorial Factual Shadow Pipeline', () => {
     // Añadimos el category para que pase validación (ya que state_conflict no comprueba status)
     contract.factsByScope!.parcel!.categories!.push({ code: 'CRASH', status: 'conflict', determination: 'automatic' } as any)
     const client = mockClient(JSON.stringify(output))
-    
+
     const result = await runTerritorialFactualShadowPipeline('?', contract, client)
-    
+
     expect(result.status).toBe('render_failed')
     expect(result.diagnostics.error).toContain('Render fail-safe triggered')
   })
