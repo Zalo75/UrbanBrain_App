@@ -126,6 +126,28 @@ export function validateStructuredFactualOutput(
       }
     }
 
+    if (op.operation === 'state_conflict') {
+      const actualStatus = 'status' in fact ? fact.status : undefined
+      if (actualStatus !== 'conflict') {
+        errors.push({
+          code: 'STATUS_MISMATCH',
+          message: `Expected status conflict, got ${actualStatus}`,
+          factRef: op.factRef,
+        })
+      }
+    }
+
+    if (op.operation === 'state_unresolved') {
+      const actualStatus = 'status' in fact ? fact.status : undefined
+      if (actualStatus !== 'unresolved') {
+        errors.push({
+          code: 'STATUS_MISMATCH',
+          message: `Expected status unresolved, got ${actualStatus}`,
+          factRef: op.factRef,
+        })
+      }
+    }
+
     if (op.operation === 'state_determination') {
       const actualDetermination = 'determination' in fact ? fact.determination : undefined
       if (actualDetermination !== op.determination) {

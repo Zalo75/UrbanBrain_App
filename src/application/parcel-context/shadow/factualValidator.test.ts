@@ -447,6 +447,95 @@ describe('Structured Factual Validator - scoped unique refs', () => {
     ).toBe('DETERMINATION_MISMATCH')
   })
 
+  it.each([
+    ['parcel', 'conflict', true],
+    ['parcel', 'effective', false],
+    ['parcel', 'unresolved', false],
+    ['actionArea', 'conflict', true],
+    ['actionArea', 'effective', false],
+    ['actionArea', 'unresolved', false],
+  ] as const)('state_conflict en %s con status %s tiene valid=%s', (scope, status, expectedValid) => {
+    const facts: FactualScopeFacts = {
+      classification: { code: 'SNR', status, determination: 'automatic' },
+    }
+    const contract = createContract({ [scope]: facts })
+    const result = validate(contract, [
+      { operation: 'state_conflict', factRef: { type: 'classification', scope } },
+    ])
+
+    expect(result.valid).toBe(expectedValid)
+    if (!expectedValid) expect(result.errors[0].code).toBe('STATUS_MISMATCH')
+  })
+
+  it.each([
+    ['parcel', 'unresolved', true],
+    ['parcel', 'effective', false],
+    ['parcel', 'conflict', false],
+    ['actionArea', 'unresolved', true],
+    ['actionArea', 'effective', false],
+    ['actionArea', 'conflict', false],
+  ] as const)('state_unresolved en %s con status %s tiene valid=%s', (scope, status, expectedValid) => {
+    const facts: FactualScopeFacts = {
+      classification: { code: 'SNR', status, determination: 'unresolved' },
+    }
+    const contract = createContract({ [scope]: facts })
+    const result = validate(contract, [
+      { operation: 'state_unresolved', factRef: { type: 'classification', scope } },
+    ])
+
+    expect(result.valid).toBe(expectedValid)
+    if (!expectedValid) expect(result.errors[0].code).toBe('STATUS_MISMATCH')
+  })
+
+  it('state_conflict con ref inexistente sigue siendo INVALID_FACT_REF', () => {
+    const result = validate(createContract({ parcel: baseParcelFacts() }), [
+      {
+        operation: 'state_conflict',
+        factRef: { type: 'category', scope: 'parcel', code: 'INEXISTENTE' },
+      },
+    ])
+
+    expect(result.errors[0].code).toBe('INVALID_FACT_REF')
+  })
+
+  it('state_unresolved con ref ambiguo sigue siendo AMBIGUOUS_FACT_REF', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [
+      { code: 'DUP', status: 'unresolved', determination: 'unresolved' },
+      { code: 'DUP', status: 'unresolved', determination: 'unresolved' },
+    ]
+    const result = validate(createContract({ parcel }), [
+      {
+        operation: 'state_unresolved',
+        factRef: { type: 'category', scope: 'parcel', code: 'DUP' },
+      },
+    ])
+
+    expect(result.errors[0].code).toBe('AMBIGUOUS_FACT_REF')
+  })
+
+  it('caso Sada conserva state_conflict valido para SNRC realmente conflict', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [
+      {
+        code: 'SNRC',
+        label: 'Nucleo rural comun',
+        semanticCompleteness: 'complete',
+        status: 'conflict',
+        determination: 'unresolved',
+        parcelPercentage: 98.53,
+      },
+    ]
+    const result = validate(createContract({ parcel }), [
+      {
+        operation: 'state_conflict',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      },
+    ])
+
+    expect(result.valid).toBe(true)
+  })
+
   it('percentage mismatch y code mismatch se conservan', () => {
     const contract = createContract({ parcel: baseParcelFacts() })
 

@@ -164,7 +164,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
       abstentions: []
     }
     const contract = createMockContract()
-    // Añadimos el category para que pase validación (ya que state_conflict no comprueba status)
+    // El estado conflict acreditado permite llegar al renderer y comprobar su fail-safe.
     contract.factsByScope!.parcel!.categories!.push({ code: 'CRASH', status: 'conflict', determination: 'automatic' } as any)
     const client = mockClient(JSON.stringify(output))
 
@@ -172,5 +172,33 @@ describe('Territorial Factual Shadow Pipeline', () => {
 
     expect(result.status).toBe('render_failed')
     expect(result.diagnostics.error).toContain('Render fail-safe triggered')
+  })
+
+  it('I. state_conflict sin status conflict falla en validación', async () => {
+    const output = {
+      operations: [
+        { operation: 'state_conflict', factRef: { type: 'classification', scope: 'parcel' } }
+      ],
+      abstentions: []
+    }
+    const client = mockClient(JSON.stringify(output))
+    const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)
+
+    expect(result.status).toBe('validation_failed')
+    expect(result.validation?.errors[0].code).toBe('STATUS_MISMATCH')
+  })
+
+  it('J. state_unresolved sin status unresolved falla en validación', async () => {
+    const output = {
+      operations: [
+        { operation: 'state_unresolved', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } }
+      ],
+      abstentions: []
+    }
+    const client = mockClient(JSON.stringify(output))
+    const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)
+
+    expect(result.status).toBe('validation_failed')
+    expect(result.validation?.errors[0].code).toBe('STATUS_MISMATCH')
   })
 })
