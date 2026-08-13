@@ -6,6 +6,7 @@ import {
   buildSafeHttpUrl,
   extractValidPageNumber,
   parseCitations,
+  prepareCitationPresentation,
 } from './chatCitations'
 
 describe('parseCitations', () => {
@@ -73,6 +74,25 @@ describe('parseCitations', () => {
   it('does not destroy legitimate bracketed prose', () => {
     const content = 'El valor [orientativo] requiere revisión.'
     expect(parseCitations(content)).toEqual([{ type: 'text', value: content }])
+  })
+
+  it('keeps multiple context markers internally but requests one discreet indicator', () => {
+    const presentation = prepareCitationPresentation(
+      'Referencia [contexto].\nDirección [contexto].\nSuperficie [contexto].'
+    )
+
+    expect(presentation.tokens.filter((token) => token.type === 'context')).toHaveLength(3)
+    expect(presentation.showContextIndicator).toBe(true)
+  })
+
+  it('makes context markers visually silent under an explicit provenance section', () => {
+    const presentation = prepareCitationPresentation(
+      'CONTEXTO DE PARCELA UTILIZADO\nReferencia [contexto].\nSuperficie [contexto]. [Fuente 1]'
+    )
+
+    expect(presentation.showContextIndicator).toBe(false)
+    expect(presentation.tokens.some((token) => token.type === 'context')).toBe(true)
+    expect(presentation.tokens.some((token) => token.type === 'citation')).toBe(true)
   })
 })
 

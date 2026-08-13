@@ -705,7 +705,8 @@ ${usedV2 ? v2Citas : 'N/A'}
       applicability,
       questionScope,
       parcelContext,
-      hasReviewableRegimeEvidence
+      hasReviewableRegimeEvidence,
+      message
     );
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';

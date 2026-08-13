@@ -64,6 +64,34 @@ describe('ChatInterface autoscroll', () => {
     expect(screen.getByText(/Valor \[orientativo\]/)).toBeTruthy()
   })
 
+  it('renders at most one context indicator for multiple historical markers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: 'Referencia [contexto]. Dirección [contexto]. Superficie [contexto].',
+      sources: [],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect(await screen.findAllByText('Dato del expediente')).toHaveLength(1)
+    expect(document.body.textContent).not.toContain('[contexto]')
+  })
+
+  it('leaves context silent under its explicit heading and keeps documentary citations interactive', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: 'CONTEXTO DE PARCELA UTILIZADO\nCategoría SNRC [contexto].\nFundamento [Fuente 1]. Valor [orientativo].',
+      sources: [source(1, 'https://example.test/norma.pdf', 4)],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect(await screen.findByRole('link', { name: '[Fuente 1]' })).toBeTruthy()
+    expect(screen.queryByText('Dato del expediente')).toBeNull()
+    expect(document.body.textContent).not.toContain('[contexto]')
+    expect(screen.getByText(/Valor \[orientativo\]/)).toBeTruthy()
+  })
+
   it('loads the expanded source DTO from history while ignoring its legacy local path', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
       role: 'assistant',

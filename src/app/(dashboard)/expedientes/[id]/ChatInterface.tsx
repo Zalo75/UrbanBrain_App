@@ -8,7 +8,7 @@ import {
   buildPdfPageUrl,
   buildPdfUrl,
   buildSafeHttpUrl,
-  parseCitations,
+  prepareCitationPresentation,
 } from './chatCitations';
 import {
   buildSourceCitationText,
@@ -273,22 +273,20 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
             Hola, soy UrbanBrain. ¿Qué necesitas saber sobre la normativa de este expediente?
           </div>
 
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`max-w-[85%] rounded-lg p-3 text-sm break-words ${msg.role === 'user' ? 'bg-primary text-primary-foreground ml-auto' : 'bg-muted'}`}
-              style={{ whiteSpace: 'pre-wrap' }}
-            >
-              {parseCitations(msg.content).map((token, i) => {
+          {messages.map((msg, index) => {
+            const citationPresentation = prepareCitationPresentation(msg.content);
+            return (
+              <div
+                key={index}
+                className={`max-w-[85%] rounded-lg p-3 text-sm break-words ${msg.role === 'user' ? 'bg-primary text-primary-foreground ml-auto' : 'bg-muted'}`}
+                style={{ whiteSpace: 'pre-wrap' }}
+              >
+              {citationPresentation.tokens.map((token, i) => {
                 if (token.type === 'text') {
                   return <span key={i}>{token.value}</span>;
                 }
                 if (token.type === 'context') {
-                  return (
-                    <span key={i} className="mx-1 inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground" title="Dato estructurado del expediente; no es una fuente documental">
-                      Dato del expediente
-                    </span>
-                  );
+                  return null;
                 }
                 const source = msg.sources.find((item) => item.source_index === token.sourceIndex);
                 const sourceUrl = source?.official_url ?? source?.original_path;
@@ -322,8 +320,14 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
 
                 return <button key={i} type="button" onClick={() => setActiveSource(source)} className="text-primary inline border-0 bg-transparent p-0 font-semibold hover:underline">{token.originalText}</button>;
               })}
-            </div>
-          ))}
+              {citationPresentation.showContextIndicator && (
+                <span className="mx-1 inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground" title="Dato estructurado del expediente; no es una fuente documental">
+                  Dato del expediente
+                </span>
+              )}
+              </div>
+            );
+          })}
 
           {loading && (
             <div className="bg-muted max-w-[85%] animate-pulse rounded-lg p-3 text-sm break-words">

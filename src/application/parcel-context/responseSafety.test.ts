@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type {
   ApplicabilityResult,
+  NormalizedParcelContext,
   NormativeCandidate,
 } from '@/domain/parcel-context/types'
+import type { UrbanisticFactStatus, UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import { buildNormalizedParcelContext } from './normalizeParcelContext'
 import {
   buildAnswerContract,
@@ -55,6 +57,83 @@ const determined: ApplicabilityResult = {
   missingData: [],
   conflicts: [],
   canAnswerConcreteParameters: true,
+}
+
+function regimeFacts(status: UrbanisticFactStatus): UrbanisticRegimeFacts {
+  return {
+    classification: {
+      value: { code: 'SNR', label: 'Suelo de núcleo rural' },
+      status,
+      confidence: status === 'automatic_confirmed' ? 'high' : 'unknown',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: status === 'automatic_confirmed' ? 'none' : 'review_official_sources',
+    },
+    category: {
+      value: { code: 'SNRC', label: 'Núcleo Rural Común' },
+      status,
+      confidence: status === 'automatic_confirmed' ? 'high' : 'unknown',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: status === 'automatic_confirmed' ? 'none' : 'review_official_sources',
+    },
+    consolidation: {
+      status: 'not_available',
+      confidence: 'unknown',
+      evidence: [],
+      warnings: [],
+      discrepancies: [],
+      nextAction: 'none',
+    },
+  }
+}
+
+function confirmationContext({
+  parcelStatus,
+  actionAreaStatus,
+  reliabilityMode,
+}: {
+  parcelStatus?: UrbanisticFactStatus
+  actionAreaStatus?: UrbanisticFactStatus
+  reliabilityMode?: NonNullable<NormalizedParcelContext['reliability']>['mode']
+}): NormalizedParcelContext {
+  return {
+    parcelUrbanisticFacts: parcelStatus ? regimeFacts(parcelStatus) : undefined,
+    urbanisticFacts: actionAreaStatus
+      ? regimeFacts(actionAreaStatus)
+      : parcelStatus
+        ? regimeFacts(parcelStatus)
+        : undefined,
+    actionArea: actionAreaStatus
+      ? {
+          value: {
+            id: 'area-1',
+            geometry: { type: 'MultiPolygon', coordinates: [], crs: 'EPSG:4326' },
+            surfaceSquareMetres: 800,
+            parcelSurfaceSquareMetres: 1800,
+            selectionType: 'detected_zone',
+            classification: 'SNR',
+            category: 'SNRC',
+            source: 'manual',
+            confidence: 'high',
+            selectedBy: 'technician',
+            selectedAt: '2026-08-13T10:00:00.000Z',
+            verification: actionAreaStatus === 'technician_validated' ? 'confirmed' : 'unresolved',
+          },
+          source: 'manual',
+          confidence: 0.8,
+          verification: actionAreaStatus === 'technician_validated' ? 'confirmed' : 'unverified',
+        }
+      : undefined,
+    knownConstraints: [],
+    conflicts: [],
+    pendingValidation: reliabilityMode === 'manual_unverified' ? ['Revisión manual pendiente.'] : [],
+    reliability: reliabilityMode
+      ? { mode: reliabilityMode, sourceIssues: [] }
+      : undefined,
+  }
 }
 
 describe('validateGeneratedAnswer', () => {
@@ -352,6 +431,103 @@ La clasificación de la parcela como núcleo rural es un dato manual no verifica
     )
 
     expect(validation.valid).toBe(true)
+  })
+})
+
+describe('categorical territorial confirmations', () => {
+  const parcelQuestion = '¿Puedo considerar toda la parcela como Núcleo Rural Común (SNRC)?'
+  const actionAreaQuestion = '¿Puedo considerar el área seleccionada como Núcleo Rural Común (SNRC)?'
+  const categoricalAnswer = 'CONCLUSIÓN\nSí, toda la parcela puede considerarse Núcleo Rural Común (SNRC) [contexto].'
+
+  it.each([
+    ['manual_unverified', confirmationContext({ parcelStatus: 'manual_review_required', reliabilityMode: 'manual_unverified' })],
+    ['unresolved', confirmationContext({ parcelStatus: 'not_available', reliabilityMode: 'unresolved' })],
+    ['conflict', confirmationContext({ parcelStatus: 'conflict' })],
+    ['automatic_probable', confirmationContext({ parcelStatus: 'automatic_probable' })],
+  ])('rejects a categorical parcel confirmation for %s', (_label, provisionalContext) => {
+    const validation = validateGeneratedAnswer(
+      categoricalAnswer,
+      [],
+      determined,
+      'regime',
+      provisionalContext,
+      false,
+      parcelQuestion
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(validation.reasons).toContain(
+      'La respuesta confirma categóricamente un régimen territorial no verificado o de otro ámbito.'
+    )
+  })
+
+  it('does not use actionArea facts to confirm the whole parcel', () => {
+    const validation = validateGeneratedAnswer(
+      categoricalAnswer,
+      [],
+      determined,
+      'regime',
+      confirmationContext({ actionAreaStatus: 'automatic_confirmed' }),
+      false,
+      parcelQuestion
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(buildStructuredParcelFactAnswer('¿Qué categoría tiene toda la parcela?', confirmationContext({ actionAreaStatus: 'automatic_confirmed' }))?.answer)
+      .toContain('Categoría: no determinada.')
+  })
+
+  it('does not use parcel facts to confirm an unbacked actionArea', () => {
+    const validation = validateGeneratedAnswer(
+      'Sí, el área seleccionada puede considerarse Núcleo Rural Común (SNRC) [contexto].',
+      [],
+      determined,
+      'regime',
+      confirmationContext({ parcelStatus: 'automatic_confirmed' }),
+      false,
+      actionAreaQuestion
+    )
+
+    expect(validation.valid).toBe(false)
+    expect(buildStructuredParcelFactAnswer('¿Qué categoría tiene el área seleccionada?', confirmationContext({ parcelStatus: 'automatic_confirmed' }))?.answer)
+      .toContain('Categoría: no determinada.')
+  })
+
+  it('preserves an affirmative answer for a confirmed fact from the requested scope', () => {
+    const validation = validateGeneratedAnswer(
+      categoricalAnswer,
+      [],
+      determined,
+      'regime',
+      confirmationContext({ parcelStatus: 'automatic_confirmed', reliabilityMode: 'current_official' }),
+      false,
+      parcelQuestion
+    )
+
+    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
+  })
+
+  it('does not turn an automatic probable structured fact into a categorical confirmation', () => {
+    const answer = buildStructuredParcelFactAnswer(
+      '¿Puedo confirmar la categoría de toda la parcela como Núcleo Rural Común (SNRC)?',
+      confirmationContext({ parcelStatus: 'automatic_probable' })
+    )?.answer
+
+    expect(answer).toContain('Categoría: no determinada.')
+    expect(answer).not.toContain('Categoría: Núcleo Rural Común (SNRC).')
+  })
+
+  it('instructs the model to qualify provisional states and preserve scope', () => {
+    const prompt = buildMunicipalSafetyPrompt(
+      confirmationContext({ parcelStatus: 'manual_review_required', reliabilityMode: 'manual_unverified' }),
+      determined,
+      [],
+      'regime'
+    )
+
+    expect(prompt).toContain('Nunca extrapoles de actionArea a parcel ni de parcel a actionArea')
+    expect(prompt).toContain('no comiences con "Sí"')
+    expect(prompt).toContain('automatic_confirmed o technician_validated')
   })
 })
 

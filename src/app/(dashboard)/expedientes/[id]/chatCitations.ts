@@ -3,6 +3,14 @@ export type CitationToken =
   | { type: 'citation'; sourceIndex: number; originalText: string }
   | { type: 'context'; originalText: string }
 
+export interface CitationPresentation {
+  tokens: CitationToken[]
+  showContextIndicator: boolean
+}
+
+const EXPLICIT_CONTEXT_SECTION_PATTERN =
+  /(?:^|\n)[ \t]*(?:CONTEXTO DE PARCELA UTILIZADO|HECHOS ESTRUCTURADOS DEL EXPEDIENTE)[ \t]*(?:\r?\n|$)/iu
+
 function isTechnicalPlaceholder(label: string) {
   return /^(?:undefined|null|nan|fuente\s+(?:undefined|null|nan))$/iu.test(label.trim())
 }
@@ -77,6 +85,17 @@ export function parseCitations(content: string): CitationToken[] {
   }
 
   return transformed ? tokens : [{ type: 'text', value: content }]
+}
+
+/** Keeps context provenance machine-readable while presenting it only once when needed. */
+export function prepareCitationPresentation(content: string): CitationPresentation {
+  const tokens = parseCitations(content)
+  const hasContext = tokens.some((token) => token.type === 'context')
+
+  return {
+    tokens,
+    showContextIndicator: hasContext && !EXPLICIT_CONTEXT_SECTION_PATTERN.test(content),
+  }
 }
 
 export function extractValidPageNumber(pageDetected?: string | number | null): number | null {
