@@ -131,7 +131,7 @@ describe('shadowIntegration', () => {
       query: 'Test Query',
       expedienteId: 'exp-123',
       municipalityIne: '15030',
-      shadowModel: 'deepseek-v4',
+      shadowModel: 'deepseek-v4-flash',
       shadowStatus: 'valid',
       structuredOutput: { isUrban: true },
       renderedAnswer: 'Yes',

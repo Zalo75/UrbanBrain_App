@@ -24,7 +24,7 @@ export function scheduleFactualShadowPipeline(
     // 3. after() mechanism
     after(async () => {
       try {
-        const shadowModel = 'deepseek-v4';
+        const shadowModel = 'deepseek-v4-flash';
         const openai = new OpenAI({
           baseURL: 'https://api.deepseek.com/v1',
           apiKey: process.env.DEEPSEEK_API_KEY!,
