@@ -516,4 +516,82 @@ describe('Structured Factual Renderer', () => {
     expect(unresolved).toContain('no está resuelto')
     expect(`${conflict} ${unresolved}`).not.toMatch(/probablemente|parece|podría corresponder/i)
   })
+
+  it('43. label idéntico al code se renderiza una sola vez', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification = {
+      code: 'SNR',
+      label: '  snr  ',
+      semanticCompleteness: 'complete',
+      status: 'automatic_confirmed',
+      determination: 'automatic',
+    }
+    const result = renderFactualOutput({
+      operations: [{ operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: '  snr  ' }],
+      abstentions: [],
+    }, contract)
+
+    expect(result).toEqual(['Se ha identificado la clasificación SNR en toda la parcela.'])
+    expect(result.join(' ').match(/SNR/g)).toHaveLength(1)
+  })
+
+  it('44. label distinto del code conserva Label (CODE)', () => {
+    const result = renderFactualOutput({
+      operations: [{ operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'Suelo Urbano' }],
+      abstentions: [],
+    }, createMockContract())
+
+    expect(result[0]).toContain('Suelo Urbano (SU)')
+  })
+
+  it('45. actionArea con labels SNR/SNRC no duplica los códigos', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.actionArea = {
+      classification: { code: 'SNR', label: 'SNR', semanticCompleteness: 'complete', status: 'automatic_confirmed', determination: 'automatic' },
+      categories: [{ code: 'SNRC', label: 'SNRC', semanticCompleteness: 'complete', status: 'automatic_confirmed', determination: 'automatic' }],
+    }
+    const result = renderFactualOutput({
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'SNR' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'SNRC' },
+      ],
+      abstentions: [],
+    }, contract)
+
+    expect(result[0]).toBe('El área de actuación seleccionada está identificada como SNR, categoría SNRC.')
+    expect(result[0]).not.toMatch(/SNR \(SNR\)|SNRC \(SNRC\)/)
+  })
+
+  it('46. parcel multicategoría no duplica labels iguales a códigos', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification = { code: 'SNR', label: 'SNR', semanticCompleteness: 'complete', status: 'automatic_confirmed', determination: 'automatic' }
+    contract.factsByScope!.parcel!.categories = [
+      { code: 'SNRC', label: 'SNRC', semanticCompleteness: 'complete', status: 'automatic_confirmed', determination: 'automatic' },
+      { code: 'SNRT', label: 'snrt', semanticCompleteness: 'complete', status: 'automatic_confirmed', determination: 'automatic' },
+    ]
+    const result = renderFactualOutput({
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'SNR' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'SNRC' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, label: 'snrt' },
+      ],
+      abstentions: [],
+    }, contract)
+
+    expect(result).toEqual(['La parcela está identificada como SNR, con las categorías SNRC y SNRT.'])
+  })
+
+  it('47. partial sigue usando solo el code acreditado', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [
+      { code: 'SNRC', label: 'Label no acreditado', semanticCompleteness: 'partial', status: 'automatic_confirmed', determination: 'automatic' },
+    ]
+    const result = renderFactualOutput({
+      operations: [{ operation: 'reference_code', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, code: 'SNRC' }],
+      abstentions: [],
+    }, contract)
+
+    expect(result).toEqual(['Se ha identificado que la categoría en toda la parcela incluye el código SNRC.'])
+    expect(result.join(' ')).not.toContain('Label no acreditado')
+  })
 })

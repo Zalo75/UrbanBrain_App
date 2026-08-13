@@ -61,16 +61,23 @@ function getFactIdentity(fact: ResolvedFact): { code?: string; label?: string } 
   return { code, label }
 }
 
+function normalizeIdentityValue(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
+}
+
 function renderLabelAndCode(fact: ResolvedFact): string | undefined {
   const { code, label } = getFactIdentity(fact)
-  if (label && code) return `${label} (${code})`
+  if (label && code) {
+    if (normalizeIdentityValue(label) === normalizeIdentityValue(code)) return code
+    return `${label} (${code})`
+  }
   return label ?? code
 }
 
 function renderNamedFact(ref: StructuredFactRef, fact: ResolvedFact, capitalize = true): string {
   const name = getFactName(ref, capitalize)
   const { code, label } = getFactIdentity(fact)
-  if (label) return `${name} ${code ? `${label} (${code})` : label}`
+  if (label) return `${name} ${renderLabelAndCode(fact)}`
   if (code) return `${name} con código ${code}`
   return name
 }
@@ -94,7 +101,7 @@ function renderStandaloneIdentity(entry: ResolvedOperation): string {
     return `Se ha identificado que ${factNameLower} ${scopeText} incluye el código ${code}.`
   }
   if (label) {
-    return `Se ha identificado ${factNameLower} ${code ? `${label} (${code})` : label} ${scopeText}.`
+    return `Se ha identificado ${factNameLower} ${renderLabelAndCode(entry.fact)} ${scopeText}.`
   }
   if (code) return `Se ha identificado ${factNameLower} con código ${code} ${scopeText}.`
   return `Se ha identificado ${factNameLower} ${scopeText}.`
