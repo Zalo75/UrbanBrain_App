@@ -189,7 +189,7 @@ describe('Structured Factual Renderer', () => {
     const output1: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'XX' }, status: 'automatic_confirmed' }], abstentions: [] }
     const output2: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'actionArea', code: 'XX' }, status: 'manual_confirmed' }], abstentions: [] }
     expect(renderFactualOutput(output1, contract)[0]).toBe("El estado de la categoría en toda la parcela está confirmado automáticamente.")
-    expect(renderFactualOutput(output2, contract)[0]).toBe("El estado de la categoría en el área de actuación es 'manual_confirmed'.")
+    expect(renderFactualOutput(output2, contract)[0]).toBe('El estado de la categoría en el área de actuación ha sido confirmado mediante revisión manual.')
   })
 
   it('23. fact.percentage = 40, claim.value = 50: renderer usa 40', () => {
@@ -442,5 +442,78 @@ describe('Structured Factual Renderer', () => {
     expect(result[0]).toContain('Categoría uno (C1)')
     expect(result[1]).toContain('Categoría dos (C2)')
     expect(result.every((line) => line.includes('conflicto pendiente de resolución'))).toBe(true)
+  })
+
+  it('40. caso real: compone actionArea y humaniza manual_review_required + manual', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.actionArea = {
+      classification: {
+        code: 'SNR',
+        label: 'Suelo de Núcleo Rural',
+        semanticCompleteness: 'complete',
+        status: 'manual_review_required',
+        determination: 'manual',
+      },
+      categories: [
+        {
+          code: 'SNRC',
+          label: 'Núcleo Rural Común',
+          semanticCompleteness: 'complete',
+          status: 'manual_review_required',
+          determination: 'manual',
+        },
+      ],
+    }
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de Núcleo Rural' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+        { operation: 'state_determination', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, determination: 'manual' },
+        { operation: 'state_status', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, status: 'manual_review_required' },
+      ],
+      abstentions: [],
+    }
+    const rendered = renderFactualOutput(output, contract)
+    const text = rendered.join(' ')
+
+    expect(rendered[0]).toBe('El área de actuación seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).')
+    expect(text).toContain('procede de revisión manual')
+    expect(text).toContain('requiere revisión manual antes de confirmarse')
+    expect(text).not.toContain('manual_review_required')
+    expect(text).not.toContain("'manual'")
+    expect(text).not.toMatch(/ordenanza|edificabilidad|ocupación|retranqueo|altura|viabilidad|vivienda|derecho urbanístico/i)
+  })
+
+  it('41. determination automatic se expresa sin exponer el literal interno', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_determination', factRef: { type: 'classification', scope: 'parcel' }, determination: 'automatic' },
+      ],
+      abstentions: [],
+    }
+    const rendered = renderFactualOutput(output, createMockContract()).join(' ')
+
+    expect(rendered).toContain('se ha obtenido automáticamente')
+    expect(rendered).not.toContain("'automatic'")
+  })
+
+  it('42. state_status conflict y unresolved mantienen formulaciones seguras', () => {
+    const conflictContract = createMockContract()
+    conflictContract.factsByScope!.parcel!.classification!.status = 'conflict'
+    const unresolvedContract = createMockContract()
+    unresolvedContract.factsByScope!.parcel!.classification!.status = 'unresolved'
+
+    const conflict = renderFactualOutput({
+      operations: [{ operation: 'state_status', factRef: { type: 'classification', scope: 'parcel' }, status: 'conflict' }],
+      abstentions: [],
+    }, conflictContract).join(' ')
+    const unresolved = renderFactualOutput({
+      operations: [{ operation: 'state_status', factRef: { type: 'classification', scope: 'parcel' }, status: 'unresolved' }],
+      abstentions: [],
+    }, unresolvedContract).join(' ')
+
+    expect(conflict).toContain('conflicto pendiente de resolver')
+    expect(unresolved).toContain('no está resuelto')
+    expect(`${conflict} ${unresolved}`).not.toMatch(/probablemente|parece|podría corresponder/i)
   })
 })

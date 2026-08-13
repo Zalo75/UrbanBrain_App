@@ -158,6 +158,52 @@ function getSemanticOperationKey(entry: ResolvedOperation): string {
   return `${operation.operation}:${entry.factKey}`
 }
 
+function renderStatus(status: string, factNameLower: string, scopeText: string): string {
+  switch (status) {
+    case 'automatic_confirmed':
+      return `El estado de ${factNameLower} ${scopeText} está confirmado automáticamente.`
+    case 'automatic_probable':
+      return `El estado de ${factNameLower} ${scopeText} procede de una determinación automática pendiente de confirmación.`
+    case 'manual_review_required':
+      return `El estado de ${factNameLower} ${scopeText} requiere revisión manual antes de confirmarse.`
+    case 'manual_confirmed':
+      return `El estado de ${factNameLower} ${scopeText} ha sido confirmado mediante revisión manual.`
+    case 'technician_validated':
+      return `El estado de ${factNameLower} ${scopeText} ha sido validado por personal técnico.`
+    case 'conflict':
+      return `El estado de ${factNameLower} ${scopeText} presenta un conflicto pendiente de resolver.`
+    case 'unresolved':
+      return `El estado de ${factNameLower} ${scopeText} no está resuelto.`
+    case 'checked':
+      return `El estado de ${factNameLower} ${scopeText} ha sido verificado.`
+    case 'effective':
+      return `El estado de ${factNameLower} ${scopeText} es efectivo.`
+    case 'not_available':
+      return `No hay información disponible sobre el estado de ${factNameLower} ${scopeText}.`
+    case 'source_unavailable':
+      return `No está disponible la fuente necesaria para determinar el estado de ${factNameLower} ${scopeText}.`
+    case 'not_applicable':
+      return `El estado de ${factNameLower} ${scopeText} no resulta aplicable.`
+    default:
+      return `El estado de ${factNameLower} ${scopeText} consta como ${status}.`
+  }
+}
+
+function renderDetermination(determination: string, factNameLower: string, scopeText: string): string {
+  switch (determination) {
+    case 'automatic':
+      return `La determinación de ${factNameLower} ${scopeText} se ha obtenido automáticamente.`
+    case 'manual':
+      return `La determinación de ${factNameLower} ${scopeText} procede de revisión manual.`
+    case 'unresolved':
+      return `La determinación de ${factNameLower} ${scopeText} no está resuelta.`
+    case 'effective':
+      return `La determinación de ${factNameLower} ${scopeText} es efectiva.`
+    default:
+      return `La determinación de ${factNameLower} ${scopeText} consta como ${determination}.`
+  }
+}
+
 export function renderFactualOutput(output: StructuredFactualOutput, contract: TerritorialFactualContract): string[] {
   const lines: string[] = []
   const resolvedOperations: ResolvedOperation[] = output.operations.map((operation, index) => {
@@ -262,21 +308,8 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
           if (op.status === 'effective' && (fact.status as string) !== 'effective') {
             throw new Error(`Renderer error: Cannot render effective status because fact.status is ${fact.status}`)
           }
-          // Usar siempre el status real del fact
           const status = fact.status as string
-          if (status === 'automatic_confirmed') {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} está confirmado automáticamente.`, op.factRef.scope)
-          } else if (status === 'conflict') {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} presenta un conflicto pendiente de resolver.`, op.factRef.scope)
-          } else if (status === 'unresolved') {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} no está resuelto.`, op.factRef.scope)
-          } else if (status === 'checked') {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} ha sido verificado.`, op.factRef.scope)
-          } else if (status === 'effective') {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} es efectivo.`, op.factRef.scope)
-          } else {
-            pushOperationLine(`El estado de ${factNameLower} ${scopeText} es '${status}'.`, op.factRef.scope)
-          }
+          pushOperationLine(renderStatus(status, factNameLower, scopeText), op.factRef.scope)
         }
         break
       case 'state_determination':
@@ -285,15 +318,7 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
              throw new Error(`Renderer error: Cannot render effective determination because fact.determination is ${fact.determination}`)
           }
           const det = fact.determination as string
-          if (det === 'automatic') {
-            pushOperationLine(`La determinación de ${factNameLower} ${scopeText} es automática.`, op.factRef.scope)
-          } else if (det === 'unresolved') {
-            pushOperationLine(`La determinación de ${factNameLower} ${scopeText} no está resuelta.`, op.factRef.scope)
-          } else if (det === 'effective') {
-            pushOperationLine(`La determinación de ${factNameLower} ${scopeText} es efectiva.`, op.factRef.scope)
-          } else {
-            pushOperationLine(`La determinación de ${factNameLower} ${scopeText} es '${det}'.`, op.factRef.scope)
-          }
+          pushOperationLine(renderDetermination(det, factNameLower, scopeText), op.factRef.scope)
         }
         break
       case 'state_geometric_dominance':

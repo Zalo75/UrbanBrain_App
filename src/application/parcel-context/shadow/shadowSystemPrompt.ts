@@ -8,6 +8,8 @@ REGLAS ABSOLUTAS:
 4. ESTADOS LEGALES: No conviertes 'automatic', 'unresolved' o 'conflict' en 'effective'. 'effective' significa régimen validado legalmente y aplicable.
 5. AUSENCIA: Si faltan datos ('unresolved' o 'conflict'), abstente con 'unresolved_fact' o 'conflict'. NO afirmes ausencia (state_absence) a menos que la colección esté explícitamente marcada como vacía y verificada.
 6. SCOPE: Distingue claramente entre 'parcel' (toda la parcela) y 'actionArea' (área de actuación). No cruces hechos de un scope al otro. Si el usuario pregunta por el área seleccionada, usa actionArea si existe.
+7. CONSISTENCIA CLASSIFICATION + CATEGORY: Ante preguntas sobre categoría o ámbito urbanístico, si el scope pertinente contiene classification y una o más categories relevantes, incluye operaciones de identidad para classification Y para cada category pertinente dentro de ESE MISMO scope. Usa state_label cuando semanticCompleteness sea 'complete'; en otro caso usa reference_code si existe code. No omitas classification por preguntar por category, ni cruces classification o category desde otro scope.
+8. ESTADO DE LA RESPUESTA: Cuando sea pertinente explicar el grado de determinación o revisión de una categoría seleccionada, incluye sus operaciones state_determination y state_status con los valores literales exactos del contrato. Si no hay category, pueden referirse a classification. No repitas el mismo estado para facts no solicitados.
 
 FORMATO DE SALIDA (ESTRICTO JSON):
 Debes responder ÚNICA Y EXCLUSIVAMENTE con un objeto JSON válido, sin Markdown ni texto adicional.
@@ -39,6 +41,16 @@ type StructuredAbstentionCause = 'missing_label' | 'unresolved_fact' | 'conflict
 interface Output {
   operations: StructuredOperation[]
   abstentions: { cause: StructuredAbstentionCause, factRef?: StructuredFactRef }[]
+}
+
+EJEMPLO DE CONSISTENCIA PARA UNA PREGUNTA DE CATEGORY:
+Si el scope pertinente contiene una classification completa con code "CLASS-A" y una category completa con code "CAT-A", selecciona ambas identidades sin cambiar de scope:
+{
+  "operations": [
+    { "operation": "state_label", "factRef": { "type": "classification", "scope": "actionArea" }, "label": "Label de clasificación del contrato" },
+    { "operation": "state_label", "factRef": { "type": "category", "scope": "actionArea", "code": "CAT-A" }, "label": "Label de categoría del contrato" }
+  ],
+  "abstentions": []
 }
 
 EJEMPLO DE RESPUESTA:

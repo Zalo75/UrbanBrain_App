@@ -1,9 +1,18 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runTerritorialFactualShadowEvaluation } from './shadowEvaluator'
+import { SHADOW_FACTUAL_SYSTEM_PROMPT } from './shadowSystemPrompt'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type OpenAI from 'openai'
 
 describe('shadowEvaluator', () => {
+  it('category query exige seleccionar classification y category del mismo scope', () => {
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('Ante preguntas sobre categoría o ámbito urbanístico')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('incluye operaciones de identidad para classification Y para cada category pertinente')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('dentro de ESE MISMO scope')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('No omitas classification por preguntar por category')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('ni cruces classification o category desde otro scope')
+  })
+
   it('envia el contrato serializado al modelo y retorna la respuesta', async () => {
     const mockClient = {
       chat: {
@@ -32,5 +41,8 @@ describe('shadowEvaluator', () => {
     expect(mockClient.chat.completions.create).toHaveBeenCalled()
     const callArgs = (mockClient.chat.completions.create as any).mock.calls[0][0]
     expect(callArgs.messages[0].content).toContain('SNR') // Verifica que el contrato se inyectó
+    expect(callArgs.messages[0].content).toContain('incluye operaciones de identidad para classification Y para cada category pertinente')
+    expect(callArgs.messages[0].content).toContain('dentro de ESE MISMO scope')
+    expect(callArgs.messages[0].content).toContain('No omitas classification por preguntar por category')
   })
 })
