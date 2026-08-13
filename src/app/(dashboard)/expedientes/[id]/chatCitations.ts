@@ -8,8 +8,54 @@ export interface CitationPresentation {
   showContextIndicator: boolean
 }
 
-const EXPLICIT_CONTEXT_SECTION_PATTERN =
-  /(?:^|\n)[ \t]*(?:CONTEXTO DE PARCELA UTILIZADO|HECHOS ESTRUCTURADOS DEL EXPEDIENTE)[ \t]*(?:\r?\n|$)/iu
+const EXPLICIT_CONTEXT_SECTION_HEADINGS = new Set([
+  'CONTEXTO DE PARCELA UTILIZADO',
+  'HECHOS ESTRUCTURADOS DEL EXPEDIENTE',
+])
+
+const RESPONSE_SECTION_HEADINGS = new Set([
+  'CONCLUSION',
+  'CONTEXTO DE PARCELA UTILIZADO',
+  'HECHOS ESTRUCTURADOS DEL EXPEDIENTE',
+  'FUNDAMENTO POR NIVEL NORMATIVO',
+  'FUNDAMENTO NORMATIVO',
+  'ADVERTENCIAS Y DATOS PENDIENTES',
+  'DECISION',
+  'FUENTES',
+])
+
+function normalizedSectionHeading(line: string) {
+  return line
+    .trim()
+    .replace(/^#{1,6}\s*/u, '')
+    .replace(/^\*{1,2}|\*{1,2}$/gu, '')
+    .replace(/^_{1,2}|_{1,2}$/gu, '')
+    .replace(/:\s*$/u, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLocaleUpperCase('es-ES')
+}
+
+function hasContextOutsideExplicitSection(content: string) {
+  let insideExplicitContextSection = false
+
+  for (const line of content.split(/\r?\n/u)) {
+    const heading = normalizedSectionHeading(line)
+    if (EXPLICIT_CONTEXT_SECTION_HEADINGS.has(heading)) {
+      insideExplicitContextSection = true
+      continue
+    }
+    if (RESPONSE_SECTION_HEADINGS.has(heading)) {
+      insideExplicitContextSection = false
+      continue
+    }
+    if (/\[\s*contexto\s*\]/iu.test(line) && !insideExplicitContextSection) return true
+  }
+
+  return false
+}
 
 function isTechnicalPlaceholder(label: string) {
   return /^(?:undefined|null|nan|fuente\s+(?:undefined|null|nan))$/iu.test(label.trim())
@@ -90,11 +136,10 @@ export function parseCitations(content: string): CitationToken[] {
 /** Keeps context provenance machine-readable while presenting it only once when needed. */
 export function prepareCitationPresentation(content: string): CitationPresentation {
   const tokens = parseCitations(content)
-  const hasContext = tokens.some((token) => token.type === 'context')
 
   return {
     tokens,
-    showContextIndicator: hasContext && !EXPLICIT_CONTEXT_SECTION_PATTERN.test(content),
+    showContextIndicator: hasContextOutsideExplicitSection(content),
   }
 }
 

@@ -92,6 +92,30 @@ describe('ChatInterface autoscroll', () => {
     expect(screen.getByText(/Valor \[orientativo\]/)).toBeTruthy()
   })
 
+  it('silences every marker in the real multiline context block with a Markdown heading', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: `CONCLUSIÓN
+Respuesta prudente.
+
+**CONTEXTO DE PARCELA UTILIZADO**
+
+- Área de actuación efectiva: 1764,22 m² [contexto]
+- Superficie de parcela catastral completa: 1790,46 m² [contexto]
+- Referencia catastral: 123456789 [contexto]
+
+FUNDAMENTO POR NIVEL NORMATIVO
+Fundamento [Fuente 1].`,
+      sources: [source(1, 'https://example.test/norma.pdf', 4)],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect(await screen.findByRole('link', { name: '[Fuente 1]' })).toBeTruthy()
+    expect(screen.queryByText('Dato del expediente')).toBeNull()
+    expect(document.body.textContent).not.toContain('[contexto]')
+  })
+
   it('loads the expanded source DTO from history while ignoring its legacy local path', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
       role: 'assistant',

@@ -94,6 +94,27 @@ describe('parseCitations', () => {
     expect(presentation.tokens.some((token) => token.type === 'context')).toBe(true)
     expect(presentation.tokens.some((token) => token.type === 'citation')).toBe(true)
   })
+
+  it.each([
+    '**CONTEXTO DE PARCELA UTILIZADO**',
+    '## CONTEXTO DE PARCELA UTILIZADO',
+    'CONTEXTO\u00a0DE\u00a0PARCELA\u00a0UTILIZADO:',
+  ])('recognizes the deployed heading variant %s', (heading) => {
+    const presentation = prepareCitationPresentation(
+      `CONCLUSIÓN\nRespuesta.\n\n${heading}\n\n- Área de actuación efectiva: 1764,22 m² [contexto]\n- Superficie de parcela catastral completa: 1790,46 m² [contexto]\n- Referencia catastral: 123 [contexto]`
+    )
+
+    expect(presentation.showContextIndicator).toBe(false)
+    expect(presentation.tokens.filter((token) => token.type === 'context')).toHaveLength(3)
+  })
+
+  it('shows one indicator when another context marker exists outside the explicit section', () => {
+    const presentation = prepareCitationPresentation(
+      'Dato previo [contexto].\nCONTEXTO DE PARCELA UTILIZADO\n- Superficie [contexto].'
+    )
+
+    expect(presentation.showContextIndicator).toBe(true)
+  })
 })
 
 describe('document URL helpers', () => {
