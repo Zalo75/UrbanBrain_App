@@ -47,7 +47,8 @@ describe('Structured Factual Renderer', () => {
   it('3. category + percentage', () => {
     const output: StructuredFactualOutput = { operations: [{ operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, percentage: 98.53 }], abstentions: [] }
     const result = renderFactualOutput(output, createMockContract())
-    expect(result[0]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % del ámbito analizado en toda la parcela.')
+    expect(result[0]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % de la parcela.')
+    expect(result[0]).not.toContain('100 %')
   })
 
   it('4. multiple categories', () => {
@@ -64,15 +65,19 @@ describe('Structured Factual Renderer', () => {
   it('5. geometric dominance & 6. geometric dominance NO menciona effective', () => {
     const output: StructuredFactualOutput = { operations: [{ operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } }], abstentions: [] }
     const result = renderFactualOutput(output, createMockContract())
-    expect(result[0]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % del ámbito analizado en toda la parcela y es la de mayor presencia geométrica.')
+    expect(result[0]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % de la parcela y es la de mayor presencia geométrica.')
     expect(result[0]).not.toContain('effective')
     expect(result[0]).not.toContain('predominante')
+    expect(result[0]).not.toContain('toda la parcela')
+    expect(result[0]).not.toContain('completamente')
   })
 
   it('7. conflict', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification!.status = 'conflict'
     const output: StructuredFactualOutput = { operations: [{ operation: 'state_conflict', factRef: { type: 'classification', scope: 'parcel' } }], abstentions: [] }
-    const result = renderFactualOutput(output, createMockContract())
-    expect(result[0]).toBe('La clasificación en toda la parcela se encuentra en conflicto.')
+    const result = renderFactualOutput(output, contract)
+    expect(result[0]).toBe('La clasificación Suelo Urbano (SU) en toda la parcela presenta un conflicto pendiente de resolución.')
   })
 
   it('8. unresolved', () => {
@@ -111,9 +116,13 @@ describe('Structured Factual Renderer', () => {
       { operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } }
     ], abstentions: [] }
     const result = renderFactualOutput(output, createMockContract())
-    expect(result[0]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % del ámbito analizado en toda la parcela.')
-    expect(result[1]).toBe('La categoría con código SNRT representa el 1,47 % del ámbito analizado en toda la parcela.')
-    expect(result[2]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % del ámbito analizado en toda la parcela y es la de mayor presencia geométrica.')
+    expect(result).toHaveLength(2)
+    expect(result[0]).toBe('La categoría con código SNRT representa el 1,47 % de la parcela.')
+    expect(result[1]).toBe('La categoría Núcleo rural común (SNRC) representa el 98,53 % de la parcela y es la de mayor presencia geométrica.')
+    expect(result.join(' ')).toContain('98,53 %')
+    expect(result.join(' ')).toContain('1,47 %')
+    expect(result.join(' ')).not.toContain('100 %')
+    expect(result.join(' ')).not.toContain('toda la parcela')
   })
 
   it('15. X-42 sin label: solo X-42', () => {
@@ -250,5 +259,188 @@ describe('Structured Factual Renderer', () => {
     // factRef points to non-existent category
     const output: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'FAKE' }, status: 'automatic_confirmed' }], abstentions: [] }
     expect(() => renderFactualOutput(output, contract)).toThrow('FactRef resolution failed with none')
+  })
+
+  it('31. compone classification + category del mismo actionArea y delimita su alcance', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.actionArea = {
+      classification: {
+        code: 'SNR',
+        label: 'Suelo de Núcleo Rural',
+        semanticCompleteness: 'complete',
+        status: 'automatic_confirmed',
+        determination: 'automatic',
+      },
+      categories: [
+        {
+          code: 'SNRC',
+          label: 'Núcleo Rural Común',
+          semanticCompleteness: 'complete',
+          status: 'automatic_confirmed',
+          determination: 'automatic',
+        },
+      ],
+    }
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de Núcleo Rural' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+      ],
+      abstentions: [],
+    }
+
+    expect(renderFactualOutput(output, contract)).toEqual([
+      'El área de actuación seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).',
+      'Esta conclusión se refiere al área seleccionada y no implica necesariamente que toda la parcela catastral tenga el mismo régimen.',
+    ])
+  })
+
+  it('32. compone classification + category del mismo parcel', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'Suelo Urbano' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'Núcleo rural común' },
+      ],
+      abstentions: [],
+    }
+
+    expect(renderFactualOutput(output, createMockContract())).toEqual([
+      'La parcela está identificada como Suelo Urbano (SU), categoría Núcleo rural común (SNRC).',
+    ])
+  })
+
+  it('33. nunca mezcla identidades de parcel y actionArea', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.actionArea = {
+      classification: {
+        code: 'SR',
+        label: 'Suelo Rústico',
+        semanticCompleteness: 'complete',
+        status: 'automatic_confirmed',
+        determination: 'automatic',
+      },
+      categories: [
+        {
+          code: 'SRP',
+          label: 'Protección',
+          semanticCompleteness: 'complete',
+          status: 'automatic_confirmed',
+          determination: 'automatic',
+        },
+      ],
+    }
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'Suelo Urbano' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'Núcleo rural común' },
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo Rústico' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SRP' }, label: 'Protección' },
+      ],
+      abstentions: [],
+    }
+    const result = renderFactualOutput(output, contract)
+
+    expect(result[0]).toContain('Suelo Urbano (SU)')
+    expect(result[0]).toContain('Núcleo rural común (SNRC)')
+    expect(result[0]).not.toContain('Suelo Rústico')
+    expect(result[1]).toContain('Suelo Rústico (SR)')
+    expect(result[1]).toContain('Protección (SRP)')
+    expect(result[1]).not.toContain('Suelo Urbano')
+  })
+
+  it('34. classification sin category conserva una salida segura', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'Suelo Urbano' },
+      ],
+      abstentions: [],
+    }
+
+    expect(renderFactualOutput(output, createMockContract())).toEqual([
+      'Se ha identificado la clasificación Suelo Urbano (SU) en toda la parcela.',
+    ])
+  })
+
+  it('35. category sin classification conserva una salida segura', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'Núcleo rural común' },
+      ],
+      abstentions: [],
+    }
+
+    expect(renderFactualOutput(output, createMockContract())).toEqual([
+      'Se ha identificado la categoría Núcleo rural común (SNRC) en toda la parcela.',
+    ])
+  })
+
+  it('36. reference_code + state_label del mismo fact no duplican la identidad', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'reference_code', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, code: 'SNRC' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'Núcleo rural común' },
+      ],
+      abstentions: [],
+    }
+    const result = renderFactualOutput(output, createMockContract())
+
+    expect(result).toEqual([
+      'Se ha identificado la categoría Núcleo rural común (SNRC) en toda la parcela.',
+    ])
+  })
+
+  it('37. unresolved mantiene lenguaje estricto sin hipótesis', () => {
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_unresolved', factRef: { type: 'consolidation', scope: 'parcel' } },
+      ],
+      abstentions: [],
+    }
+    const rendered = renderFactualOutput(output, createMockContract()).join(' ')
+
+    expect(rendered).toContain('no está resuelta')
+    expect(rendered).not.toMatch(/probablemente|parece|indicios|podría/i)
+  })
+
+  it('38. múltiples categorías del mismo scope conservan todas sus identidades', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories![1] = {
+      ...contract.factsByScope!.parcel!.categories![1],
+      label: 'Núcleo rural tradicional',
+      semanticCompleteness: 'complete',
+    }
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'parcel' }, label: 'Suelo Urbano' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, label: 'Núcleo rural común' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, label: 'Núcleo rural tradicional' },
+      ],
+      abstentions: [],
+    }
+    const rendered = renderFactualOutput(output, contract).join(' ')
+
+    expect(rendered).toContain('Núcleo rural común (SNRC)')
+    expect(rendered).toContain('Núcleo rural tradicional (SNRT)')
+  })
+
+  it('39. múltiples categorías en conflicto permanecen diferenciadas', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [
+      { code: 'C1', label: 'Categoría uno', semanticCompleteness: 'complete', status: 'conflict', determination: 'unresolved' },
+      { code: 'C2', label: 'Categoría dos', semanticCompleteness: 'complete', status: 'conflict', determination: 'unresolved' },
+    ]
+    const output: StructuredFactualOutput = {
+      operations: [
+        { operation: 'state_conflict', factRef: { type: 'category', scope: 'parcel', code: 'C1' } },
+        { operation: 'state_conflict', factRef: { type: 'category', scope: 'parcel', code: 'C2' } },
+      ],
+      abstentions: [],
+    }
+    const result = renderFactualOutput(output, contract)
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toContain('Categoría uno (C1)')
+    expect(result[1]).toContain('Categoría dos (C2)')
+    expect(result.every((line) => line.includes('conflicto pendiente de resolución'))).toBe(true)
   })
 })
