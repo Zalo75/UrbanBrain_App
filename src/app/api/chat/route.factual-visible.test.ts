@@ -1,0 +1,352 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { NextRequest } from 'next/server'
+
+import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
+import type { UrbanisticFactStatus, UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
+import type { TerritorialShadowResult } from '@/application/parcel-context/shadow/shadowPipeline'
+
+const mocks = vi.hoisted(() => ({
+  context: undefined as NormalizedParcelContext | undefined,
+  getExpedienteAccess: vi.fn(),
+  loadAuthorizedParcelInputs: vi.fn(),
+  insert: vi.fn(),
+  values: vi.fn(),
+  select: vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue(Object.assign(Promise.resolve([]), {
+        limit: vi.fn().mockResolvedValue([]),
+      })),
+    }),
+  }),
+  embedContent: vi.fn(),
+  rpc: vi.fn(),
+  abortSignal: vi.fn(),
+  completionCreate: vi.fn(),
+  runFactual: vi.fn(),
+  scheduleShadow: vi.fn(),
+  persistFactualResult: vi.fn(),
+}))
+
+vi.mock('@/application/authorization/expedienteAccess', () => ({
+  getExpedienteAccess: mocks.getExpedienteAccess,
+}))
+vi.mock('@/infrastructure/db/parcelContextRepository', () => ({
+  loadAuthorizedParcelInputs: mocks.loadAuthorizedParcelInputs,
+}))
+vi.mock('@/application/parcel-context/normalizeParcelContext', () => ({
+  buildNormalizedParcelContext: vi.fn(() => mocks.context),
+  trustedMunicipalityCodeFilter: vi.fn(() => '15075'),
+}))
+vi.mock('@/infrastructure/db/client', () => ({
+  db: { insert: mocks.insert, select: mocks.select },
+}))
+vi.mock('@google/generative-ai', () => ({
+  GoogleGenerativeAI: class {
+    getGenerativeModel() { return { embedContent: mocks.embedContent } }
+  },
+  TaskType: { RETRIEVAL_QUERY: 'RETRIEVAL_QUERY' },
+}))
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => ({ rpc: mocks.rpc })),
+}))
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: mocks.completionCreate } }
+  },
+}))
+vi.mock('@/application/parcel-context/shadow/shadowPipeline', () => ({
+  runTerritorialFactualShadowPipeline: mocks.runFactual,
+}))
+vi.mock('@/application/parcel-context/shadow/shadowIntegration', () => ({
+  scheduleFactualShadowPipeline: mocks.scheduleShadow,
+  scheduleFactualShadowResultPersistence: mocks.persistFactualResult,
+}))
+
+import { resetChatRequestGuardForTests } from '@/application/chat/chatRequestGuard'
+import { POST } from './route'
+
+function facts(
+  categoryStatus: UrbanisticFactStatus,
+  categories: Array<{ code: string; label: string; percentage?: number }>
+): UrbanisticRegimeFacts {
+  return {
+    classification: {
+      value: { code: 'SNR', label: 'Suelo de núcleo rural' },
+      status: categoryStatus === 'conflict' ? 'automatic_confirmed' : categoryStatus,
+      origin: categoryStatus === 'manual_review_required' ? 'technician_selection' : 'spatial_intersection',
+      confidence: categoryStatus === 'manual_review_required' ? 'medium' : 'high',
+      evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+    },
+    category: categories.length === 1
+      ? {
+          value: { code: categories[0].code, label: categories[0].label },
+          status: categoryStatus,
+          origin: categoryStatus === 'manual_review_required' ? 'technician_selection' : 'spatial_intersection',
+          confidence: categoryStatus === 'manual_review_required' ? 'medium' : 'high',
+          evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+        }
+      : {
+          status: categoryStatus,
+          candidates: categories.map((category) => ({
+            value: { code: category.code, label: category.label },
+            label: category.label,
+            parcelPercentage: category.percentage,
+          })),
+          origin: 'spatial_intersection',
+          confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+        },
+    consolidation: {
+      status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+      discrepancies: [], nextAction: 'none',
+    },
+  }
+}
+
+function territorialContext(): NormalizedParcelContext {
+  return {
+    municipality: {
+      value: { name: 'Sada', ineCode: '15075' }, source: 'catastro', confidence: 1,
+      verification: 'confirmed',
+    },
+    urbanisticFacts: facts('manual_review_required', [
+      { code: 'SNRC', label: 'Núcleo Rural Común' },
+    ]),
+    parcelUrbanisticFacts: facts('conflict', [
+      { code: 'SNRC', label: 'Núcleo Rural Común', percentage: 98.53 },
+      { code: 'SNRT', label: 'Núcleo Rural Tradicional', percentage: 1.47 },
+    ]),
+    actionArea: {
+      value: {
+        id: 'area-1',
+        geometry: { type: 'MultiPolygon', coordinates: [], crs: 'EPSG:4326' },
+        surfaceSquareMetres: 1764.22,
+        parcelSurfaceSquareMetres: 1790.46,
+        selectionType: 'detected_zone',
+        classification: 'SNR',
+        category: 'SNRC',
+        source: 'manual',
+        confidence: 'medium',
+        selectedBy: 'user-1',
+        selectedAt: '2026-08-13T10:00:00.000Z',
+        verification: 'unresolved',
+      },
+      source: 'manual', confidence: 0.75, verification: 'unverified',
+    },
+    parcelSurfaceSquareMetres: 1790.46,
+    knownConstraints: [], conflicts: [], pendingValidation: [],
+  }
+}
+
+function validResult(answer: string, operations: NonNullable<TerritorialShadowResult['structuredOutput']>['operations']): TerritorialShadowResult {
+  return {
+    status: 'valid',
+    structuredOutput: { operations, abstentions: [] },
+    validation: { valid: true, errors: [] },
+    renderedText: [answer],
+    diagnostics: { latencyMs: 20, model: 'deepseek-v4-flash' },
+  }
+}
+
+async function execute(message: string) {
+  const request = new NextRequest('http://localhost/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expedienteId: 'exp-1', message }),
+  })
+  const response = await POST(request)
+  return { response, payload: await response.json() }
+}
+
+describe('POST /api/chat synchronous factual visibility', () => {
+  const originalSyncFlag = process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetChatRequestGuardForTests()
+    mocks.context = territorialContext()
+    mocks.insert.mockReturnValue({ values: mocks.values })
+    mocks.values.mockResolvedValue(undefined)
+    mocks.getExpedienteAccess.mockResolvedValue({
+      ok: true,
+      userId: 'user-1',
+      orgId: 'org-1',
+      expediente: { id: 'exp-1', orgId: 'org-1' },
+    })
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({ expediente: {}, userMessages: [] })
+    mocks.embedContent.mockResolvedValue({ embedding: { values: new Array(768).fill(0.01) } })
+    mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
+    mocks.abortSignal.mockResolvedValue({ data: [], error: null })
+    mocks.completionCreate.mockResolvedValue({ choices: [{ message: { content: 'Primary Response' } }] })
+    vi.spyOn(console, 'info').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    if (originalSyncFlag === undefined) delete process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED
+    else process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = originalSyncFlag
+    vi.restoreAllMocks()
+  })
+
+  it.each(['false', 'TRUE', '1'])('keeps current Primary behavior when the flag is %s', async (flag) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = flag
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(mocks.runFactual).not.toHaveBeenCalled()
+    expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+    expect(payload.answer).not.toContain('RESPUESTA FACTUAL VISIBLE')
+  })
+
+  it.each([
+    ['¿Qué categoría urbanística tiene exactamente el área que tengo seleccionada en el visor?', 'category'],
+    ['¿Qué clasificación tiene el área seleccionada?', 'classification'],
+  ])('serves actionArea %s from the factual renderer', async (message, factType) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    mocks.runFactual.mockResolvedValueOnce(validResult(
+      'El área de actuación seleccionada está identificada como Suelo de núcleo rural (SNR), categoría Núcleo Rural Común (SNRC).',
+      [
+        { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' },
+        { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+      ]
+    ))
+
+    const { payload } = await execute(message)
+
+    expect(payload.answer).toContain('área de actuación seleccionada')
+    expect(payload.answer).toContain('SNRC')
+    expect(mocks.runFactual).toHaveBeenCalledTimes(1)
+    const pipelineContract = mocks.runFactual.mock.calls[0][1]
+    expect(pipelineContract.factsByScope.actionArea.categories[0].code).toBe('SNRC')
+    expect(factType).toMatch(/category|classification/)
+  })
+
+  it('serves parcel multicategory percentages without mixing actionArea or rounding dominance to 100', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    mocks.runFactual.mockResolvedValueOnce(validResult(
+      'Núcleo Rural Común (SNRC) representa el 98,53 % de la parcela y es la de mayor presencia geométrica.\n\nNúcleo Rural Tradicional (SNRT) representa el 1,47 % de la parcela.\n\nLa categoría en toda la parcela presenta un conflicto pendiente de resolución.',
+      [
+        { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, percentage: 98.53 },
+        { operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+        { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, percentage: 1.47 },
+        { operation: 'state_conflict', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+      ]
+    ))
+
+    const { payload } = await execute(
+      '¿Qué categorías urbanísticas existen en la parcela catastral completa, independientemente del área que tengo seleccionada?'
+    )
+
+    expect(payload.answer).toContain('98,53 %')
+    expect(payload.answer).toContain('1,47 %')
+    expect(payload.answer).toContain('mayor presencia geométrica')
+    expect(payload.answer).toContain('conflicto pendiente')
+    expect(payload.answer).not.toContain('100')
+    expect(payload.answer).not.toContain('efectiv')
+    const pipelineContract = mocks.runFactual.mock.calls[0][1]
+    expect(pipelineContract.factsByScope.parcel.categories.map((item: { code: string }) => item.code))
+      .toEqual(['SNRC', 'SNRT'])
+    expect(pipelineContract.factsByScope.actionArea.categories.map((item: { code: string }) => item.code))
+      .toEqual(['SNRC'])
+  })
+
+  it('does not turn parcel geometric dominance into a categorical yes', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    mocks.runFactual.mockResolvedValueOnce(validResult(
+      'Núcleo Rural Común (SNRC) representa el 98,53 % de la parcela y es la de mayor presencia geométrica.\n\nNúcleo Rural Tradicional (SNRT) representa el 1,47 % de la parcela.\n\nLa determinación de la categoría en toda la parcela no está resuelta.',
+      [
+        { operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+        { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, percentage: 1.47 },
+        { operation: 'state_determination', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, determination: 'unresolved' },
+      ]
+    ))
+
+    const { payload } = await execute('¿Puedo considerar toda la parcela como Núcleo Rural Común (SNRC)?')
+
+    expect(payload.answer).not.toMatch(/^Sí\b/iu)
+    expect(payload.answer).toContain('SNRT')
+    expect(payload.answer).toContain('no está resuelta')
+  })
+
+  it.each([
+    '¿Cuál es la ocupación máxima de NRC-1?',
+    '¿Qué retranqueos se aplican?',
+    '¿Qué usos permitidos tiene SNRC?',
+    'Resume este expediente de forma general.',
+  ])('keeps the non-factual question in Primary: %s', async (message) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+
+    const { payload } = await execute(message)
+
+    expect(mocks.runFactual).not.toHaveBeenCalled()
+    expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+    expect(payload.answer).not.toContain('mayor presencia geométrica')
+  })
+
+  it.each([
+    ['llm_failed', { status: 'llm_failed', diagnostics: { latencyMs: 10, model: 'deepseek-v4-flash' } }],
+    ['validation_failed', { status: 'validation_failed', diagnostics: { latencyMs: 10, model: 'deepseek-v4-flash' } }],
+    ['abstention', validResult('', [])],
+    ['empty rendering', validResult('   ', [{ operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' }])],
+  ] as const)('falls back to current Primary behavior on factual %s', async (_case, pipelineResult) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    const result = _case === 'abstention'
+      ? { ...pipelineResult, structuredOutput: { operations: [], abstentions: [{ cause: 'unresolved_fact' as const }] } }
+      : pipelineResult
+    mocks.runFactual.mockResolvedValueOnce(result)
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(payload.answer).not.toContain('RESPUESTA FACTUAL VISIBLE')
+    expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back safely when the factual call throws', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    mocks.runFactual.mockRejectedValueOnce(new Error('provider timeout'))
+
+    const { response } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(response.status).toBe(200)
+    expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call factual without facts in the requested scope', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    mocks.context = {
+      municipality: territorialContext().municipality,
+      knownConstraints: [], conflicts: [], pendingValidation: [],
+    }
+
+    await execute('¿Qué categoría tiene toda la parcela?')
+
+    expect(mocks.runFactual).not.toHaveBeenCalled()
+    expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+  })
+
+  it('persists one visible factual assistant message, invents no sources and skips Primary and duplicate Shadow', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    const rendered = 'El área de actuación seleccionada está identificada como SNR, categoría SNRC.'
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [
+      { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' },
+      { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+    ]))
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.scheduleShadow).not.toHaveBeenCalled()
+    expect(mocks.persistFactualResult).toHaveBeenCalledTimes(1)
+    expect(mocks.persistFactualResult).toHaveBeenCalledWith(expect.objectContaining({
+      query: '¿Qué categoría tiene el área seleccionada?',
+      expedienteId: 'exp-1',
+      municipalityIne: '15075',
+      pipelineVersion: 'L2.6-sync-visible-v1',
+    }))
+    expect(mocks.values).toHaveBeenCalledTimes(2)
+    expect(mocks.values).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      role: 'assistant', content: rendered, sources: [],
+    }))
+  })
+})

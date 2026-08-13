@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { scheduleFactualShadowPipeline } from './shadowIntegration';
+import {
+  scheduleFactualShadowPipeline,
+  scheduleFactualShadowResultPersistence,
+} from './shadowIntegration';
 import { runTerritorialFactualShadowPipeline } from './shadowPipeline';
 import { persistShadowEvaluation } from '@/infrastructure/db/factualShadowEvaluationsRepository';
 import type { NormalizedParcelContext } from '../types';
@@ -139,5 +142,34 @@ describe('shadowIntegration', () => {
     }));
     // Latency is tested implicitly as any number
     expect(vi.mocked(persistShadowEvaluation).mock.calls[0][0].latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('persiste telemetría de un resultado sync ya calculado sin ejecutar de nuevo el pipeline', async () => {
+    const result = {
+      status: 'valid' as const,
+      structuredOutput: { operations: [], abstentions: [] },
+      renderedText: ['Respuesta visible'],
+      diagnostics: { latencyMs: 321, model: 'deepseek-v4-flash' },
+    };
+
+    scheduleFactualShadowResultPersistence({
+      result,
+      query: 'Consulta territorial',
+      expedienteId: 'exp-sync',
+      municipalityIne: '15075',
+      shadowModel: 'deepseek-v4-flash',
+      latencyMs: 321,
+      pipelineVersion: 'L2.6-sync-visible-v1',
+    });
+    await globalThis.__afterCallback();
+
+    expect(runTerritorialFactualShadowPipeline).not.toHaveBeenCalled();
+    expect(persistShadowEvaluation).toHaveBeenCalledWith(expect.objectContaining({
+      expedienteId: 'exp-sync',
+      shadowStatus: 'valid',
+      latencyMs: 321,
+      renderedAnswer: 'Respuesta visible',
+      pipelineVersion: 'L2.6-sync-visible-v1',
+    }));
   });
 });

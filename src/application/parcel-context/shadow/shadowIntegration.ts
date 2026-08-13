@@ -3,6 +3,50 @@ import { runTerritorialFactualShadowPipeline } from './shadowPipeline';
 import { persistShadowEvaluation, type ShadowTelemetryEvent } from '@/infrastructure/db/factualShadowEvaluationsRepository';
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types';
 import OpenAI from 'openai';
+import type { TerritorialShadowResult } from './shadowPipeline';
+
+interface FactualShadowPersistenceInput {
+  result: TerritorialShadowResult
+  query: string
+  expedienteId: string | null
+  municipalityIne: string | null
+  shadowModel: string
+  latencyMs: number
+  pipelineVersion: string
+}
+
+async function persistFactualShadowResult(input: FactualShadowPersistenceInput) {
+  const event: ShadowTelemetryEvent = {
+    expedienteId: input.expedienteId,
+    municipalityIne: input.municipalityIne,
+    query: input.query,
+    shadowModel: input.shadowModel,
+    shadowStatus: input.result.status,
+    latencyMs: input.latencyMs,
+    validationErrors: input.result.validation ?? null,
+    structuredOutput: input.result.structuredOutput ?? null,
+    renderedAnswer: input.result.renderedText ? input.result.renderedText.join('\n\n') : null,
+    pipelineVersion: input.pipelineVersion,
+  };
+
+  await persistShadowEvaluation(event);
+}
+
+export function scheduleFactualShadowResultPersistence(
+  input: FactualShadowPersistenceInput
+): void {
+  try {
+    after(async () => {
+      try {
+        await persistFactualShadowResult(input);
+      } catch (error) {
+        console.warn('[FactualSync] Unable to persist factual telemetry:', error);
+      }
+    });
+  } catch (error) {
+    console.warn('[FactualSync] Unable to schedule factual telemetry:', error);
+  }
+}
 
 export function scheduleFactualShadowPipeline(
   message: string,
@@ -34,20 +78,15 @@ export function scheduleFactualShadowPipeline(
         const result = await runTerritorialFactualShadowPipeline(message, parcelContext, openai, shadowModel);
         const latencyMs = Math.round(performance.now() - t0);
 
-        const event: ShadowTelemetryEvent = {
+        await persistFactualShadowResult({
+          result,
+          query: message,
           expedienteId,
           municipalityIne,
-          query: message,
           shadowModel,
-          shadowStatus: result.status,
           latencyMs,
-          validationErrors: result.validation ?? null,
-          structuredOutput: result.structuredOutput ?? null,
-          renderedAnswer: result.renderedText ? result.renderedText.join('\n\n') : null,
           pipelineVersion: 'L2.6-shadow-v1',
-        };
-
-        await persistShadowEvaluation(event);
+        });
       } catch (error) {
         console.warn('[FactualShadow] Unhandled exception in shadow pipeline:', error);
       }

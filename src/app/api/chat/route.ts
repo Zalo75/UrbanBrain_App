@@ -34,7 +34,17 @@ import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-co
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
 import type { KnowledgePlan } from '@/application/knowledge-orchestrator/KnowledgeOrchestrator';
-import { scheduleFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowIntegration';
+import {
+  scheduleFactualShadowPipeline,
+  scheduleFactualShadowResultPersistence,
+} from '@/application/parcel-context/shadow/shadowIntegration';
+import { buildTerritorialFactualContract } from '@/application/parcel-context/buildFactualContract';
+import { runTerritorialFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowPipeline';
+import {
+  isSynchronousFactualEnabled,
+  shouldRunVisibleFactual,
+  visibleFactualAnswer,
+} from '@/application/parcel-context/shadow/visibleFactualRouting';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -217,7 +227,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const municipioCodigo =
       trustedMunicipioCodigo ?? '__urbanbrain_unconfirmed_municipality__';
 
-    scheduleFactualShadowPipeline(message, parcelContext, expedienteId, trustedMunicipioCodigo ?? null);
+    const synchronousFactualEnabled = isSynchronousFactualEnabled();
+    if (!synchronousFactualEnabled) {
+      scheduleFactualShadowPipeline(message, parcelContext, expedienteId, trustedMunicipioCodigo ?? null);
+    }
 
     const questionScope = classifyParcelQuestionScope(message);
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
@@ -234,6 +247,97 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       role: 'user',
       content: message.trim(),
     });
+
+    if (synchronousFactualEnabled) {
+      const factualContract = buildTerritorialFactualContract(parcelContext);
+      const shouldAttemptFactual = shouldRunVisibleFactual(message, factualContract);
+
+      if (shouldAttemptFactual) {
+        const factualStartedAt = performance.now();
+        console.info('[FactualSync] start', { expedienteId });
+        try {
+          const factualResult = await runTerritorialFactualShadowPipeline(
+            message,
+            factualContract,
+            openai
+          );
+          const answer = visibleFactualAnswer(factualResult);
+          const latencyMs = Math.round(performance.now() - factualStartedAt);
+
+          if (answer) {
+            const operations = factualResult.structuredOutput!.operations;
+            const hasConflict = operations.some(
+              (operation) =>
+                operation.operation === 'state_conflict' ||
+                (operation.operation === 'state_status' && operation.status === 'conflict')
+            );
+            const hasUnresolved = operations.some(
+              (operation) =>
+                operation.operation === 'state_unresolved' ||
+                (operation.operation === 'state_status' && operation.status === 'unresolved') ||
+                (operation.operation === 'state_determination' && operation.determination === 'unresolved')
+            );
+            const applicability: ApplicabilityResult = {
+              status: hasConflict ? 'CONFLICTIVO' : hasUnresolved ? 'PARCIAL' : 'DETERMINADO',
+              applicable: [],
+              review: [],
+              rejected: [],
+              warnings: [],
+              missingData: [],
+              conflicts: [],
+              canAnswerConcreteParameters: false,
+            };
+            const contract = buildAnswerContract(
+              answer,
+              parcelContext,
+              applicability,
+              [],
+              [],
+              'answer'
+            );
+
+            await db.insert(chatMessages).values({
+              expedienteId,
+              userId,
+              role: 'assistant',
+              content: answer,
+              sources: [],
+            });
+            scheduleFactualShadowResultPersistence({
+              result: factualResult,
+              query: message,
+              expedienteId,
+              municipalityIne: trustedMunicipioCodigo ?? null,
+              shadowModel: factualResult.diagnostics.model,
+              latencyMs,
+              pipelineVersion: 'L2.6-sync-visible-v1',
+            });
+            console.info('[FactualSync] end', {
+              expedienteId,
+              status: factualResult.status,
+              latencyMs,
+              fallbackUsed: false,
+            });
+            return NextResponse.json({ answer, sources: [], safety: contract });
+          }
+
+          console.info('[FactualSync] end', {
+            expedienteId,
+            status: factualResult.status,
+            latencyMs,
+            fallbackUsed: true,
+          });
+        } catch (factualError) {
+          console.warn('[FactualSync] pipeline error; using Primary fallback', {
+            expedienteId,
+            latencyMs: Math.round(performance.now() - factualStartedAt),
+            error: factualError instanceof Error ? factualError.name : 'UnknownError',
+          });
+        }
+      }
+
+      scheduleFactualShadowPipeline(message, parcelContext, expedienteId, trustedMunicipioCodigo ?? null);
+    }
 
     const structuredFactAnswer = buildStructuredParcelFactAnswer(message, parcelContext);
     if (structuredFactAnswer) {
