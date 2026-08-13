@@ -18,7 +18,7 @@ describe('sourceClipboard', () => {
     expect(getCopyableSourceFragment({ fragmento_completo: null, fragmento_corto: '  Resumen  ' })).toBe('Resumen')
   })
 
-  it.each([undefined, null, '', '   ', 'null', ' NULL ', 'undefined', ' Undefined '])(
+  it.each([undefined, null, '', '   ', 'null', ' NULL ', 'undefined', ' Undefined ', '[undefined]', '[Fuente undefined]', '[null]'])(
     'rejects a non-copyable fragment: %s',
     (fragment) => {
       expect(getCopyableSourceFragment({ fragmento_completo: fragment, fragmento_corto: fragment })).toBeNull()
@@ -74,6 +74,14 @@ describe('sourceClipboard', () => {
     expect(buildSourceCitationText({ fragmento_corto: 'Texto', original_path: 'https://user:pass@example.test/a' })).toBe(
       '«Texto»'
     )
+    expect(buildSourceCitationText({ fragmento_corto: 'Texto', original_path: 'D:\\corpus\\norma.pdf' })).toBe('«Texto»')
+    expect(buildSourceCitationText({ fragmento_corto: 'Texto', original_path: 'file:///D:/corpus/norma.pdf' })).toBe('«Texto»')
+    expect(buildSourceCitationText({ fragmento_corto: 'Texto', original_path: 'data:application/pdf;base64,abc' })).toBe('«Texto»')
+  })
+
+  it('prefers the explicit official URL over a legacy local path', () => {
+    expect(buildSourceCitationText({ fragmento_corto: 'Texto', official_url: 'https://official.test/norma.pdf', original_path: 'D:\\corpus\\norma.pdf' }))
+      .toContain('Origen oficial: https://official.test/norma.pdf')
   })
 
   it('returns null when no fragment can be copied', () => {

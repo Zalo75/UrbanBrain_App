@@ -18,6 +18,17 @@ export interface AnswerValidationResult {
   citations: number[]
 }
 
+const TECHNICAL_PLACEHOLDER_PATTERN =
+  /\[\s*(?:undefined|null|nan|fuente\s+(?:undefined|null|nan))\s*\]/giu
+
+/** Removes only unmistakable model/serialization placeholders. */
+export function sanitizeTechnicalPlaceholders(answer: string) {
+  return answer
+    .replace(TECHNICAL_PLACEHOLDER_PATTERN, '')
+    .replace(/[^\S\r\n]{2,}/g, ' ')
+    .replace(/[ \t]+([,.;:!?])/g, '$1')
+}
+
 function unique<T>(values: T[]) {
   return [...new Set(values)]
 }

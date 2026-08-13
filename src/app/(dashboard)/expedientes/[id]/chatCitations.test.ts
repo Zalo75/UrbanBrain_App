@@ -51,6 +51,29 @@ describe('parseCitations', () => {
       { type: 'text', value: '.' },
     ])
   })
+
+  it('keeps context provenance as a distinct non-documentary token', () => {
+    expect(parseCitations('Superficie comprobada [contexto].')).toEqual([
+      { type: 'text', value: 'Superficie comprobada ' },
+      { type: 'context', originalText: '[contexto]' },
+      { type: 'text', value: '.' },
+    ])
+  })
+
+  it.each(['[undefined]', '[Fuente undefined]', '[null]', '[ Fuente null ]', '[NaN]'])(
+    'removes the technical placeholder %s',
+    (placeholder) => {
+      expect(parseCitations(`Antes ${placeholder} después`)).toEqual([
+        { type: 'text', value: 'Antes ' },
+        { type: 'text', value: ' después' },
+      ])
+    }
+  )
+
+  it('does not destroy legitimate bracketed prose', () => {
+    const content = 'El valor [orientativo] requiere revisión.'
+    expect(parseCitations(content)).toEqual([{ type: 'text', value: content }])
+  })
 })
 
 describe('document URL helpers', () => {

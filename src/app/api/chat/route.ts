@@ -26,8 +26,10 @@ import {
   buildReviewSafetyPrompt,
   buildSafeAbstention,
   buildStructuredParcelFactAnswer,
+  sanitizeTechnicalPlaceholders,
   validateGeneratedAnswer,
 } from '@/application/parcel-context/responseSafety';
+import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
 import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
@@ -74,6 +76,31 @@ interface V2SearchResult {
   category?: string | null;
 }
 
+type ChatNormativeCandidate = NormativeCandidate & {
+  visibleSourceKind?: 'normative_v1' | 'normative_v2';
+};
+
+function safeHttpUrl(value?: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveVisibleOfficialUrl(candidate: ChatNormativeCandidate) {
+  if (candidate.visibleSourceKind === 'normative_v1') {
+    const catalogUrl = safeHttpUrl(
+      getOfficialPlanningDocumentUrl(candidate.parentInstrument, candidate.documentName)
+    );
+    if (catalogUrl) return catalogUrl;
+  }
+  return safeHttpUrl(candidate.sourceUrl);
+}
+
 function hierarchyForSupplementaryCandidate(result: V2SearchResult): NormativeCandidate['hierarchy'] {
   if (
     result.scope === 'especial' ||
@@ -91,7 +118,7 @@ function mapV1Candidates(
   chunks: V1Chunk[],
   scope?: NormativeSearchScope,
   hierarchy: NormativeCandidate['hierarchy'] = 'municipal'
-): NormativeCandidate[] {
+): ChatNormativeCandidate[] {
   return chunks.map((chunk) => ({
     id: String(chunk.chunk_id),
     content: chunk.texto ?? '',
@@ -107,28 +134,38 @@ function mapV1Candidates(
     ordinance: null,
     planningArea: null,
     parentInstrument: scope?.instrumentId ?? null,
+    visibleSourceKind: 'normative_v1',
   }));
 }
 
-function mapVisibleSources(candidates: NormativeCandidate[]) {
-  return candidates.map((candidate, index) => ({
-    chunk_id: candidate.id,
-    municipio_nombre:
-      candidate.hierarchy === 'estatal'
-        ? 'Ámbito estatal'
-        : candidate.hierarchy === 'autonomico'
-          ? 'Ámbito autonómico de Galicia'
-          : candidate.hierarchy === 'sectorial'
-            ? 'Normativa sectorial aplicable'
-            : candidate.municipalityName ?? 'No identificado',
-    nombre_pdf: candidate.documentName ?? 'Documento',
-    titulo_detectado: candidate.title ?? '',
-    similarity: candidate.similarity ?? 0,
-    source_index: index + 1,
-    original_path: candidate.sourceUrl ?? '',
-    pagina_detectada: candidate.page ?? null,
-    fragmento_corto: `${candidate.content.replace(/\s+/g, ' ').trim().slice(0, 180)}${candidate.content.length > 180 ? '…' : ''}`,
-  }));
+function mapVisibleSources(candidates: ChatNormativeCandidate[]) {
+  return candidates.map((candidate, index) => {
+    const normalizedContent = candidate.content.trim();
+    const normalizedPreview = normalizedContent.replace(/\s+/g, ' ');
+    const isLargeV2Fragment =
+      candidate.visibleSourceKind === 'normative_v2' && normalizedContent.length > 3_500;
+    return {
+      chunk_id: candidate.id,
+      municipio_nombre:
+        candidate.hierarchy === 'estatal'
+          ? 'Ámbito estatal'
+          : candidate.hierarchy === 'autonomico'
+            ? 'Ámbito autonómico de Galicia'
+            : candidate.hierarchy === 'sectorial'
+              ? 'Normativa sectorial aplicable'
+              : candidate.municipalityName ?? 'No identificado',
+      nombre_pdf: candidate.documentName ?? 'Documento',
+      titulo_detectado: candidate.title ?? '',
+      similarity: candidate.similarity ?? 0,
+      source_index: index + 1,
+      source_kind: candidate.visibleSourceKind ?? 'normative_document',
+      official_url: resolveVisibleOfficialUrl(candidate),
+      pagina_detectada: candidate.page ?? null,
+      fragmento_corto: `${normalizedPreview.slice(0, 180)}${normalizedPreview.length > 180 ? '…' : ''}`,
+      fragmento_completo: isLargeV2Fragment ? null : normalizedContent || null,
+      truncated: isLargeV2Fragment,
+    };
+  });
 }
 
 function requestsParcelNormativeDocuments(question: string) {
@@ -343,7 +380,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       scopedRetrieval ? normativeScope : undefined
     );
 
-    const supplementaryV1Candidates: NormativeCandidate[] = [];
+    const supplementaryV1Candidates: ChatNormativeCandidate[] = [];
     for (const layer of supplementaryScope.layers) {
       if (layer.source !== 'v1_global_catalog' || !layer.documentNames?.length) continue;
       const { data, error } = await supabase
@@ -372,7 +409,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let v2LLMTime = 0;
     let v2Citas = '';
     let v2Results: V2SearchResult[] = [];
-    let v2Candidates: NormativeCandidate[] = [];
+    let v2Candidates: ChatNormativeCandidate[] = [];
 
     const cteLayer = supplementaryScope.layers.find((layer) => layer.source === 'v2');
     if (cteLayer) {
@@ -432,6 +469,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               similarity: result.similarity,
               hierarchy: hierarchyForSupplementaryCandidate(result),
               status: 'vigente',
+              visibleSourceKind: 'normative_v2',
             }));
 
             for (const r of uniqueValidChunks) {
@@ -660,7 +698,7 @@ ${usedV2 ? v2Citas : 'N/A'}
        console.log(`Tiempo LLM (V2): ${v2LLMTime}ms\n`);
     }
 
-    let answer = completion.choices[0].message.content || '';
+    let answer = sanitizeTechnicalPlaceholders(completion.choices[0].message.content || '');
     const validation = validateGeneratedAnswer(
       answer,
       answerCandidates,

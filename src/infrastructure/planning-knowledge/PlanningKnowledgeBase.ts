@@ -60,6 +60,22 @@ export function getPlanningDocumentsByInstrument(instrumentId?: string) {
   return [...(CORUNA_P1_DOCUMENTS_BY_INSTRUMENT[instrumentId as keyof typeof CORUNA_P1_DOCUMENTS_BY_INSTRUMENT] ?? [])]
 }
 
+export function getOfficialPlanningDocumentUrl(instrumentId?: string | null, filename?: string | null) {
+  const exactInstrumentId = instrumentId?.trim()
+  const exactFilename = filename?.trim()
+  if (!exactInstrumentId || !exactFilename) return undefined
+
+  return getPlanningDocumentsByInstrument(exactInstrumentId).find((document) => {
+    if (document.instrumentId !== exactInstrumentId || !isSafeOfficialDocumentUrl(document.sourceUrl)) return false
+    try {
+      const catalogFilename = decodeURIComponent(new URL(document.sourceUrl).pathname.split('/').pop() ?? '')
+      return catalogFilename === exactFilename
+    } catch {
+      return false
+    }
+  })?.sourceUrl
+}
+
 export function getMunicipalPilotRegistry(municipalityCode?: string) {
   if (!municipalityCode) return undefined
   return MUNICIPAL_PILOTS.find(

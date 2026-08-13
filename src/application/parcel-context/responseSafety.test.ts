@@ -11,7 +11,20 @@ import {
   buildSafeAbstention,
   validateGeneratedAnswer,
   buildStructuredParcelFactAnswer,
+  sanitizeTechnicalPlaceholders,
 } from './responseSafety'
+
+describe('sanitizeTechnicalPlaceholders', () => {
+  it('removes unmistakable technical placeholders before persistence', () => {
+    expect(sanitizeTechnicalPlaceholders('Dato [undefined], otro [Fuente undefined], tercero [null] y [Fuente 1]. [contexto]'))
+      .toBe('Dato, otro, tercero y [Fuente 1]. [contexto]')
+  })
+
+  it('preserves legitimate bracketed prose', () => {
+    expect(sanitizeTechnicalPlaceholders('Valor [orientativo] y artículo [bis].'))
+      .toBe('Valor [orientativo] y artículo [bis].')
+  })
+})
 
 const context = buildNormalizedParcelContext({
   expediente: {

@@ -32,10 +32,13 @@ interface Source {
   titulo_detectado?: string | null;
   similarity?: number | null;
   source_index: number;
+  source_kind?: string | null;
+  official_url?: string | null;
   original_path?: string | null;
   pagina_detectada?: string | number | null;
   fragmento_corto?: string | null;
   fragmento_completo?: string | null;
+  truncated?: boolean;
 }
 
 interface ChatHistoryEntry {
@@ -75,24 +78,35 @@ function normalizeSources(value: unknown): Source[] {
   for (const candidate of value) {
     if (!candidate || typeof candidate !== 'object') continue;
     const raw = candidate as Record<string, unknown>;
-    const sourceIndex = normalizePositiveInteger(raw.source_index);
+    const sourceIndex = normalizePositiveInteger(raw.source_index ?? raw.sourceIndex);
     if (sourceIndex === null || seenSourceIndexes.has(sourceIndex)) continue;
 
     seenSourceIndexes.add(sourceIndex);
+    const explicitOfficialUrl = typeof raw.official_url === 'string'
+      ? raw.official_url
+      : typeof raw.officialUrl === 'string' ? raw.officialUrl : null;
+    const officialUrl = buildSafeHttpUrl(explicitOfficialUrl) ??
+      buildSafeHttpUrl(typeof raw.original_path === 'string' ? raw.original_path : null);
+    const rawChunkId = raw.chunk_id ?? raw.chunkId;
+    const rawDocumentName = raw.nombre_pdf ?? raw.filename ?? raw.documentName;
+    const rawPage = raw.pagina_detectada ?? raw.page;
     sources.push({
-      chunk_id: typeof raw.chunk_id === 'string' || typeof raw.chunk_id === 'number' ? String(raw.chunk_id) : '',
+      chunk_id: typeof rawChunkId === 'string' || typeof rawChunkId === 'number' ? String(rawChunkId) : '',
       municipio_nombre: typeof raw.municipio_nombre === 'string' ? raw.municipio_nombre : 'No identificado',
-      nombre_pdf: typeof raw.nombre_pdf === 'string' ? raw.nombre_pdf : 'Documento',
+      nombre_pdf: typeof rawDocumentName === 'string' ? rawDocumentName : 'Documento',
       titulo_detectado: normalizeDetectedReference(raw.titulo_detectado),
       similarity: typeof raw.similarity === 'number' ? raw.similarity : null,
       source_index: sourceIndex,
-      original_path: typeof raw.original_path === 'string' ? raw.original_path : null,
+      source_kind: typeof raw.source_kind === 'string' ? raw.source_kind : null,
+      official_url: officialUrl,
+      original_path: officialUrl,
       pagina_detectada:
-        typeof raw.pagina_detectada === 'string' || typeof raw.pagina_detectada === 'number'
-          ? raw.pagina_detectada
+        typeof rawPage === 'string' || typeof rawPage === 'number'
+          ? rawPage
           : null,
       fragmento_corto: normalizeFragment(raw.fragmento_corto),
       fragmento_completo: normalizeFragment(raw.fragmento_completo),
+      truncated: raw.truncated === true,
     });
   }
 
@@ -269,12 +283,20 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                 if (token.type === 'text') {
                   return <span key={i}>{token.value}</span>;
                 }
+                if (token.type === 'context') {
+                  return (
+                    <span key={i} className="mx-1 inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground" title="Dato estructurado del expediente; no es una fuente documental">
+                      Dato del expediente
+                    </span>
+                  );
+                }
                 const source = msg.sources.find((item) => item.source_index === token.sourceIndex);
+                const sourceUrl = source?.official_url ?? source?.original_path;
                 const pageUrl = source
-                  ? buildPdfPageUrl(source.original_path, source.pagina_detectada)
+                  ? buildPdfPageUrl(sourceUrl, source.pagina_detectada)
                   : null;
-                const pdfUrl = source ? buildPdfUrl(source.original_path) : null;
-                const externalUrl = source ? buildSafeHttpUrl(source.original_path) : null;
+                const pdfUrl = source ? buildPdfUrl(sourceUrl) : null;
+                const externalUrl = source ? buildSafeHttpUrl(sourceUrl) : null;
                 const destinationUrl = pageUrl ?? pdfUrl ?? externalUrl;
 
                 if (!source) {
@@ -298,7 +320,7 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                   );
                 }
 
-                return <span key={i}>{token.originalText}</span>;
+                return <button key={i} type="button" onClick={() => setActiveSource(source)} className="text-primary inline border-0 bg-transparent p-0 font-semibold hover:underline">{token.originalText}</button>;
               })}
             </div>
           ))}
@@ -407,11 +429,11 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
           ) : (() => {
             const source = activeSource;
             if (!source) return null;
-            const safeOriginalUrl = buildSafeHttpUrl(source.original_path);
-            const pdfUrl = buildPdfUrl(source.original_path);
-            const pdfPageUrl = buildPdfPageUrl(source.original_path, source.pagina_detectada);
+            const sourceUrl = source.official_url ?? source.original_path;
+            const safeOriginalUrl = buildSafeHttpUrl(sourceUrl);
+            const pdfUrl = buildPdfUrl(sourceUrl);
+            const pdfPageUrl = buildPdfPageUrl(sourceUrl, source.pagina_detectada);
             const documentUrl = pdfPageUrl ?? pdfUrl;
-            const isSiotuga = safeOriginalUrl?.includes('siotuga.xunta.gal/siotuga/inventario');
             const hasUrl = safeOriginalUrl !== null;
             const sourceFragment = source.fragmento_completo ?? source.fragmento_corto;
             const copyableFragment = getCopyableSourceFragment(source);
@@ -501,11 +523,12 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                         className="w-full flex-1 rounded-md border bg-white min-h-[300px]"
                         title={`Visor PDF ${source.nombre_pdf}`}
                       />
-                      <div className="text-xs text-muted-foreground line-clamp-3">
+                      <div className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border p-3 text-xs text-muted-foreground">
                         {sourceFragment
                           ? <>Texto recuperado: &ldquo;{sourceFragment}&rdquo;</>
                           : 'Fragmento no disponible.'}
                       </div>
+                      {source.truncated && <p className="text-xs text-muted-foreground">El fragmento ampliado se ha limitado por su tamaño. Consulte el documento original.</p>}
                     </div>
                   );
                 })() : safeOriginalUrl ? (
@@ -563,30 +586,12 @@ export function ChatInterface({ expedienteId }: ChatInterfaceProps) {
                     </p>
                   )}
                   <div className="flex gap-2">
-                    {hasUrl ? (
+                    {hasUrl && (
                       <Button variant="default" size="sm" className="flex-1 text-xs" onClick={() => {
                         window.open(documentUrl ?? safeOriginalUrl, '_blank', 'noopener,noreferrer');
                       }}>
-                        {isSiotuga ? (
-                          <>
-                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                            Abrir ficha de SIOTUGA
-                          </>
-                        ) : documentUrl ? (
-                          <>
-                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                            Abrir original
-                          </>
-                        ) : (
-                          <>
-                            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                            Abrir documento externo
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button variant="secondary" size="sm" className="flex-1 text-xs" disabled>
-                        Enlace oficial no disponible
+                        <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                        Abrir documento original
                       </Button>
                     )}
                   </div>

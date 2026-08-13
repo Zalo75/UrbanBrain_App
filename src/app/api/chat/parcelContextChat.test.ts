@@ -46,7 +46,21 @@ vi.mock('openai', () => ({
 }))
 
 import { resetChatRequestGuardForTests } from '@/application/chat/chatRequestGuard'
+import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
 import { POST } from './route'
+
+describe('visible source URL resolution', () => {
+  it('resolves the audited P1 document by exact instrument and filename', () => {
+    expect(getOfficialPlanningDocumentUrl('22221', '0060no011.pdf')).toBe(
+      'https://siotuga.xunta.gal/siotuga/documentos/urbanismo/BETANZOS/documents/0060no011.pdf'
+    )
+  })
+
+  it('does not fuzzy-match another instrument or filename', () => {
+    expect(getOfficialPlanningDocumentUrl('22221', '0060no011-copia.pdf')).toBeUndefined()
+    expect(getOfficialPlanningDocumentUrl('22231', '0060no011.pdf')).toBeUndefined()
+  })
+})
 
 describe('POST /api/chat parcel context boundary', () => {
   beforeEach(() => {
@@ -497,6 +511,20 @@ describe('POST /api/chat parcel context boundary', () => {
       })
     )
     expect(payload.safety.decision).toBe('answer')
+    expect(payload.sources[0]).toEqual(expect.objectContaining({
+      source_index: 1,
+      source_kind: 'normative_v1',
+      nombre_pdf: '0060no011.pdf',
+      fragmento_corto: expect.any(String),
+      fragmento_completo: expect.stringContaining('Ordenanza R4'),
+      official_url: 'https://siotuga.xunta.gal/siotuga/documentos/urbanismo/BETANZOS/documents/0060no011.pdf',
+      truncated: false,
+    }))
+    expect(payload.sources[0]).not.toHaveProperty('original_path')
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
+      role: 'assistant',
+      sources: payload.sources,
+    }))
     expect(payload.answer).not.toMatch(/otro Ã¡mbito|otro \u00e1mbito/i)
   })
 

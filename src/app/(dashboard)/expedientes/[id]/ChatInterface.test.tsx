@@ -49,6 +49,40 @@ describe('ChatInterface autoscroll', () => {
     vi.unstubAllGlobals()
   })
 
+  it('renders context provenance humanly and hides historical technical placeholders', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: 'Superficie 1790 m² [contexto]. [undefined] [Fuente undefined] [null] Valor [orientativo].',
+      sources: [],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect(await screen.findByText('Dato del expediente')).toBeTruthy()
+    expect(screen.queryByText('[contexto]')).toBeNull()
+    expect(screen.queryByText(/\[undefined\]|\[Fuente undefined\]|\[null\]/)).toBeNull()
+    expect(screen.getByText(/Valor \[orientativo\]/)).toBeTruthy()
+  })
+
+  it('loads the expanded source DTO from history while ignoring its legacy local path', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: 'Consulta [Fuente 1].',
+      sources: [source(1, 'D:\\corpus\\norma.pdf', 7, {
+        source_kind: 'normative_v1',
+        official_url: 'https://official.test/norma.pdf',
+        fragmento_completo: 'Fragmento ampliado conservado.',
+        truncated: false,
+      })],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    expect((await screen.findByRole('link', { name: '[Fuente 1]' })).getAttribute('href'))
+      .toBe('https://official.test/norma.pdf#page=7')
+    expect(document.body.textContent).not.toContain('D:\\corpus')
+  })
+
   it('keeps the latest message visible while sending, loading and receiving the answer', async () => {
     const chatResponse = deferredResponse()
     vi.stubGlobal(
@@ -397,7 +431,7 @@ describe('ChatInterface citations', () => {
 
     const viewer = await screen.findByTitle('Visor PDF Documento 1')
     expect(viewer.getAttribute('src')).toBe('https://example.test/norma.pdf?edition=2#page=4')
-    fireEvent.click(screen.getByRole('button', { name: 'Abrir original' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir documento original' }))
     expect(open).toHaveBeenCalledWith(
       'https://example.test/norma.pdf?edition=2#page=4',
       '_blank',
@@ -497,7 +531,27 @@ describe('ChatInterface citations', () => {
     fireEvent.click(externalCitation)
     expect(await screen.findByText(/ficha o documento externo/i)).toBeTruthy()
     expect(screen.queryByTitle('Visor PDF Documento 1')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Abrir documento externo' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Abrir documento original' })).toBeTruthy()
+  })
+
+  it('opens source evidence without a URL and never exposes a local ingestion path', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([{
+      role: 'assistant',
+      content: 'Consulta [Fuente 1].',
+      sources: [source(1, 'D:\\corpus\\0060no011.pdf', 4, {
+        fragmento_completo: 'Evidencia completa disponible sin enlace externo.',
+      })],
+    }])))
+
+    render(<ChatInterface expedienteId="exp-a" />)
+
+    const citation = await screen.findByRole('button', { name: '[Fuente 1]' })
+    expect(screen.queryByRole('link', { name: '[Fuente 1]' })).toBeNull()
+    fireEvent.click(citation)
+    expect(await screen.findByText(/Evidencia completa disponible/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Abrir documento original' })).toBeNull()
+    expect(screen.queryByText(/Enlace oficial no disponible/i)).toBeNull()
+    expect(document.body.textContent).not.toContain('D:\\corpus')
   })
 
   it('shows a trimmed complete fragment before the short fragment', async () => {
@@ -508,6 +562,8 @@ describe('ChatInterface citations', () => {
 
     const recoveredText = await screen.findByText(/Texto recuperado:/)
     expect(recoveredText.textContent).toBe('Texto recuperado: “Texto completo de la fuente.”')
+    expect(recoveredText.className).not.toContain('line-clamp')
+    expect(recoveredText.className).toContain('whitespace-pre-wrap')
     expect(screen.queryByText(/Texto abreviado/)).toBeNull()
   })
 

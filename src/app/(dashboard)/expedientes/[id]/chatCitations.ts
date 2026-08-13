@@ -1,6 +1,11 @@
 export type CitationToken =
   | { type: 'text'; value: string }
   | { type: 'citation'; sourceIndex: number; originalText: string }
+  | { type: 'context'; originalText: string }
+
+function isTechnicalPlaceholder(label: string) {
+  return /^(?:undefined|null|nan|fuente\s+(?:undefined|null|nan))$/iu.test(label.trim())
+}
 
 function positiveInteger(value: string): number | null {
   if (!value) return null
@@ -35,6 +40,7 @@ export function parseCitations(content: string): CitationToken[] {
   const tokens: CitationToken[] = []
   let cursor = 0
   let textStart = 0
+  let transformed = false
 
   while (cursor < content.length) {
     const openingBracket = content.indexOf('[', cursor)
@@ -44,8 +50,14 @@ export function parseCitations(content: string): CitationToken[] {
     if (closingBracket < 0) break
 
     const originalText = content.slice(openingBracket, closingBracket + 1)
-    const sourceIndex = citationIndex(content.slice(openingBracket + 1, closingBracket))
-    if (sourceIndex === null || content[closingBracket + 1] === '(') {
+    const label = content.slice(openingBracket + 1, closingBracket)
+    const sourceIndex = citationIndex(label)
+    const isContext = label.trim().toLocaleLowerCase('es-ES') === 'contexto'
+    const isInvalidTechnicalPlaceholder = isTechnicalPlaceholder(label)
+    if (
+      (!isContext && !isInvalidTechnicalPlaceholder && sourceIndex === null) ||
+      (sourceIndex !== null && content[closingBracket + 1] === '(')
+    ) {
       cursor = closingBracket + 1
       continue
     }
@@ -53,7 +65,9 @@ export function parseCitations(content: string): CitationToken[] {
     if (openingBracket > textStart) {
       tokens.push({ type: 'text', value: content.slice(textStart, openingBracket) })
     }
-    tokens.push({ type: 'citation', sourceIndex, originalText })
+    transformed = true
+    if (isContext) tokens.push({ type: 'context', originalText })
+    else if (sourceIndex !== null) tokens.push({ type: 'citation', sourceIndex, originalText })
     cursor = closingBracket + 1
     textStart = cursor
   }
@@ -62,7 +76,7 @@ export function parseCitations(content: string): CitationToken[] {
     tokens.push({ type: 'text', value: content.slice(textStart) })
   }
 
-  return tokens.length > 0 ? tokens : [{ type: 'text', value: content }]
+  return transformed ? tokens : [{ type: 'text', value: content }]
 }
 
 export function extractValidPageNumber(pageDetected?: string | number | null): number | null {

@@ -6,7 +6,16 @@ export interface SourceCopyInput {
   nombre_pdf?: unknown
   titulo_detectado?: unknown
   pagina_detectada?: unknown
+  official_url?: unknown
   original_path?: unknown
+}
+
+function isTechnicalMarker(value: string) {
+  const normalized = value.trim().toLocaleLowerCase('es-ES')
+  const unwrapped = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1).trim()
+    : normalized
+  return /^(?:null|undefined|nan|fuente\s+(?:null|undefined|nan))$/u.test(unwrapped)
 }
 
 export function normalizeFragment(value: unknown): string | null {
@@ -15,8 +24,7 @@ export function normalizeFragment(value: unknown): string | null {
   const normalized = value.trim()
   if (!normalized) return null
 
-  const technicalMarker = normalized.toLocaleLowerCase('es-ES')
-  return technicalMarker === 'null' || technicalMarker === 'undefined' ? null : normalized
+  return isTechnicalMarker(normalized) ? null : normalized
 }
 
 export function normalizeDetectedReference(value: unknown): string | null {
@@ -26,7 +34,7 @@ export function normalizeDetectedReference(value: unknown): string | null {
   if (!normalized) return null
 
   const technicalMarker = normalized.toLocaleLowerCase('es-ES')
-  if (['n/a', 'na', 'ninguno', 'sin determinar', '-'].includes(technicalMarker)) {
+  if (isTechnicalMarker(normalized) || ['n/a', 'na', 'ninguno', 'sin determinar', '-'].includes(technicalMarker)) {
     return null
   }
 
@@ -40,7 +48,7 @@ function normalizeDocumentName(value: unknown): string | null {
   if (!normalized) return null
 
   const technicalMarker = normalized.toLocaleLowerCase('es-ES')
-  if (['null', 'undefined', 'n/a', 'na', 'ninguno', 'sin determinar', '-', 'documento'].includes(technicalMarker)) {
+  if (isTechnicalMarker(normalized) || ['n/a', 'na', 'ninguno', 'sin determinar', '-', 'documento'].includes(technicalMarker)) {
     return null
   }
 
@@ -88,7 +96,9 @@ export function buildSourceCitationText(source: SourceCopyInput): string | null 
   const documentName = normalizeDocumentName(source.nombre_pdf)
   const detectedReference = normalizeCitationReference(source.titulo_detectado)
   const page = normalizeSourcePage(source.pagina_detectada)
-  const safeUrl = buildSafeHttpUrl(typeof source.original_path === 'string' ? source.original_path : null)
+  const safeUrl =
+    buildSafeHttpUrl(typeof source.official_url === 'string' ? source.official_url : null) ??
+    buildSafeHttpUrl(typeof source.original_path === 'string' ? source.original_path : null)
 
   if (documentName) metadata.push(`Fuente: ${documentName}`)
   if (detectedReference) metadata.push(`Referencia detectada: ${detectedReference}`)
