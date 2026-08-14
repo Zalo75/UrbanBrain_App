@@ -536,6 +536,43 @@ describe('Structured Factual Validator - scoped unique refs', () => {
     expect(result.valid).toBe(true)
   })
 
+  it('Sada rechaza state_unresolved usado para una determination unresolved con status conflict', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [{
+      code: 'SNRC',
+      label: 'Nucleo rural comun',
+      semanticCompleteness: 'complete',
+      status: 'conflict',
+      determination: 'unresolved',
+      parcelPercentage: 98.53,
+    }]
+    const contract = createContract({ parcel })
+
+    const invalid = validate(contract, [{
+      operation: 'state_unresolved',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+    }])
+    expect(invalid.valid).toBe(false)
+    expect(invalid.errors[0]).toEqual(expect.objectContaining({
+      code: 'STATUS_MISMATCH',
+      operation: 'state_unresolved',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+    }))
+
+    const corrected = validate(contract, [
+      {
+        operation: 'state_conflict',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      },
+      {
+        operation: 'state_determination',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+        determination: 'unresolved',
+      },
+    ])
+    expect(corrected.valid).toBe(true)
+  })
+
   it('percentage mismatch y code mismatch se conservan', () => {
     const contract = createContract({ parcel: baseParcelFacts() })
 

@@ -268,5 +268,44 @@ describe('Territorial Factual Shadow Pipeline', () => {
 
     expect(result.status).toBe('validation_failed')
     expect(result.validation?.errors[0].code).toBe('STATUS_MISMATCH')
+    expect(result.diagnostics.metrics).toEqual(expect.objectContaining({
+      validationErrorCount: 1,
+      validationErrorCodes: ['STATUS_MISMATCH'],
+      validationErrorOperations: [{
+        operation: 'state_unresolved',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      }],
+    }))
+    expect(result.diagnostics.metrics).not.toHaveProperty('question')
+    expect(result.diagnostics.metrics).not.toHaveProperty('payload')
+    expect(result.diagnostics.metrics).not.toHaveProperty('rawLlmResponse')
+  })
+
+  it('K. diagnostics omite codes no seguros de factRefs inválidos', async () => {
+    const output = {
+      operations: [{
+        operation: 'state_conflict',
+        factRef: {
+          type: 'category',
+          scope: 'parcel',
+          code: 'PRIVATE USER TEXT WITH SPACES',
+        },
+      }],
+      abstentions: [],
+    }
+    const result = await runTerritorialFactualShadowPipeline(
+      'pregunta privada',
+      createMockContract(),
+      mockClient(JSON.stringify(output))
+    )
+
+    expect(result.status).toBe('validation_failed')
+    expect(result.diagnostics.metrics?.validationErrorCodes).toEqual(['INVALID_FACT_REF'])
+    expect(result.diagnostics.metrics?.validationErrorOperations).toEqual([{
+      operation: 'state_conflict',
+      factRef: { type: 'category', scope: 'parcel' },
+    }])
+    expect(JSON.stringify(result.diagnostics.metrics)).not.toContain('PRIVATE USER TEXT')
+    expect(JSON.stringify(result.diagnostics.metrics)).not.toContain('pregunta privada')
   })
 })

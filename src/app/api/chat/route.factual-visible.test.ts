@@ -296,7 +296,35 @@ describe('POST /api/chat synchronous factual visibility', () => {
 
   it.each([
     ['llm_failed', { status: 'llm_failed', diagnostics: { latencyMs: 10, model: 'deepseek-v4-flash' } }],
-    ['validation_failed', { status: 'validation_failed', diagnostics: { latencyMs: 10, model: 'deepseek-v4-flash' } }],
+    ['validation_failed', {
+      status: 'validation_failed',
+      validation: {
+        valid: false,
+        errors: [{
+          code: 'STATUS_MISMATCH',
+          message: 'PRIVATE_VALIDATION_MESSAGE',
+          operation: 'state_unresolved',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+        }],
+        warnings: [],
+      },
+      diagnostics: {
+        latencyMs: 10,
+        model: 'deepseek-v4-flash',
+        rawLlmResponse: 'PRIVATE_MODEL_RESPONSE',
+        metrics: {
+          factCount: 2,
+          candidateCount: 0,
+          operationCount: 10,
+          validationErrorCount: 1,
+          validationErrorCodes: ['STATUS_MISMATCH'],
+          validationErrorOperations: [{
+            operation: 'state_unresolved',
+            factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+          }],
+        },
+      },
+    }],
     ['abstention', validResult('', [])],
     ['empty rendering', validResult('   ', [{ operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' }])],
     ['coverage incomplete', {
@@ -346,6 +374,22 @@ describe('POST /api/chat synchronous factual visibility', () => {
         fallbackUsed: true,
         fallbackReason: 'coverage:scope_mismatch',
       }))
+    }
+    if (_case === 'validation_failed') {
+      const factualPerfCall = vi.mocked(console.info).mock.calls.find(
+        ([label]) => label === '[FactualPerf]'
+      )
+      expect(factualPerfCall?.[1]).toEqual(expect.objectContaining({
+        validationErrorCount: 1,
+        validationErrorCodes: ['STATUS_MISMATCH'],
+        validationErrorOperations: [{
+          operation: 'state_unresolved',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+        }],
+      }))
+      expect(JSON.stringify(factualPerfCall)).not.toContain('PRIVATE_VALIDATION_MESSAGE')
+      expect(JSON.stringify(factualPerfCall)).not.toContain('PRIVATE_MODEL_RESPONSE')
+      expect(JSON.stringify(factualPerfCall)).not.toContain('¿Qué categoría tiene')
     }
   })
 

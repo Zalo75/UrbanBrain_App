@@ -18,6 +18,7 @@ export interface ShadowEvaluationDiagnostics {
   payloadChars: number
   inputTokens?: number
   outputTokens?: number
+  reasoningTokens?: number
 }
 
 export async function runTerritorialFactualShadowEvaluation(
@@ -33,15 +34,19 @@ export async function runTerritorialFactualShadowEvaluation(
   const providerStartedAt = performance.now()
 
   try {
-    const completion = await options.client.chat.completions.create({
+    const completionRequest = {
       model: options.model ?? 'deepseek-v4-flash', // Fallback to current model if not strictly specified
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: question }
       ],
       temperature: options.temperature ?? 0.0,
-      response_format: { type: 'json_object' }
-    })
+      response_format: { type: 'json_object' as const },
+      thinking: { type: 'disabled' as const },
+    } satisfies Parameters<typeof options.client.chat.completions.create>[0] & {
+      thinking: { type: 'disabled' }
+    }
+    const completion = await options.client.chat.completions.create(completionRequest)
 
     const providerFinishedAt = performance.now()
     options.onDiagnostics?.({
@@ -52,6 +57,7 @@ export async function runTerritorialFactualShadowEvaluation(
       payloadChars,
       inputTokens: completion.usage?.prompt_tokens,
       outputTokens: completion.usage?.completion_tokens,
+      reasoningTokens: completion.usage?.completion_tokens_details?.reasoning_tokens,
     })
 
     return completion.choices[0]?.message?.content ?? ''

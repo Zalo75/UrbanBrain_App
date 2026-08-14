@@ -9,7 +9,7 @@ import type {
   TerritorialFactualContract,
 } from '@/domain/parcel-context/factualContract'
 import type { SemanticCompleteness } from '@/domain/parcel-context/factualContract'
-import type { StructuredFactualOutput, StructuredFactRef } from './structuredFactualOutput'
+import type { StructuredFactualOutput, StructuredFactRef, StructuredOperation } from './structuredFactualOutput'
 
 export type ValidationErrorCode =
   | 'INVALID_FACT_REF'
@@ -29,6 +29,7 @@ export interface ValidationError {
   code: ValidationErrorCode
   message: string
   factRef?: StructuredFactRef
+  operation?: StructuredOperation['operation']
 }
 
 export interface ValidationResult {
@@ -54,6 +55,7 @@ export function validateStructuredFactualOutput(
         code: 'INVALID_FACT_REF',
         message: `Fact reference not found in contract: ${JSON.stringify(op.factRef)}`,
         factRef: op.factRef,
+        operation: op.operation,
       })
       continue
     }
@@ -62,6 +64,7 @@ export function validateStructuredFactualOutput(
         code: 'AMBIGUOUS_FACT_REF',
         message: `Fact reference matched ${resolution.matchCount} facts in scope ${op.factRef.scope}: ${JSON.stringify(op.factRef)}`,
         factRef: op.factRef,
+        operation: op.operation,
       })
       continue
     }
@@ -75,6 +78,7 @@ export function validateStructuredFactualOutput(
           code: 'CODE_MISMATCH',
           message: `Expected code ${actualCode}, got ${op.code}`,
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }
@@ -87,6 +91,7 @@ export function validateStructuredFactualOutput(
           code: 'LABEL_HALLUCINATION',
           message: 'Cannot state label for a fact with partial completeness',
           factRef: op.factRef,
+          operation: op.operation,
         })
       } else if (semanticCompleteness === 'complete') {
         const actualLabel = 'label' in fact ? fact.label : undefined
@@ -95,6 +100,7 @@ export function validateStructuredFactualOutput(
             code: 'LABEL_MISMATCH',
             message: `Expected label ${actualLabel}, got ${op.label}`,
             factRef: op.factRef,
+            operation: op.operation,
           })
         }
       }
@@ -102,7 +108,7 @@ export function validateStructuredFactualOutput(
 
     if (op.operation === 'state_percentage') {
       if (!('parcelPercentage' in fact) || fact.parcelPercentage === undefined) {
-        errors.push({ code: 'PERCENTAGE_MISMATCH', message: 'Fact does not have a percentage', factRef: op.factRef })
+        errors.push({ code: 'PERCENTAGE_MISMATCH', message: 'Fact does not have a percentage', factRef: op.factRef, operation: op.operation })
       } else {
         const diff = Math.abs(fact.parcelPercentage - op.percentage)
         if (diff > 0.01) {
@@ -110,6 +116,7 @@ export function validateStructuredFactualOutput(
             code: 'PERCENTAGE_MISMATCH',
             message: `Expected percentage ${fact.parcelPercentage}, got ${op.percentage}`,
             factRef: op.factRef,
+            operation: op.operation,
           })
         }
       }
@@ -122,6 +129,7 @@ export function validateStructuredFactualOutput(
           code: 'STATUS_MISMATCH',
           message: `Expected status ${actualStatus}, got ${op.status}`,
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }
@@ -133,6 +141,7 @@ export function validateStructuredFactualOutput(
           code: 'STATUS_MISMATCH',
           message: `Expected status conflict, got ${actualStatus}`,
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }
@@ -144,6 +153,7 @@ export function validateStructuredFactualOutput(
           code: 'STATUS_MISMATCH',
           message: `Expected status unresolved, got ${actualStatus}`,
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }
@@ -155,6 +165,7 @@ export function validateStructuredFactualOutput(
           code: 'DETERMINATION_MISMATCH',
           message: `Expected determination ${actualDetermination}, got ${op.determination}`,
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }
@@ -165,6 +176,7 @@ export function validateStructuredFactualOutput(
           code: 'PERCENTAGE_MISMATCH',
           message: 'Fact does not have a percentage for dominance',
           factRef: op.factRef,
+          operation: op.operation,
         })
       } else {
         if (fact.parcelPercentage <= 50) {
@@ -172,6 +184,7 @@ export function validateStructuredFactualOutput(
             code: 'PERCENTAGE_MISMATCH',
             message: 'Geometric dominance requires > 50%',
             factRef: op.factRef,
+            operation: op.operation,
           })
         }
       }
@@ -184,12 +197,14 @@ export function validateStructuredFactualOutput(
             code: 'UNRESOLVED_AS_ABSENCE',
             message: 'Cannot declare absence for unresolved or conflict state',
             factRef: op.factRef,
+            operation: op.operation,
           })
         } else if ('items' in fact && fact.items.length > 0) {
           errors.push({
             code: 'INVALID_FACT_REF',
             message: 'Cannot declare absence when items exist',
             factRef: op.factRef,
+            operation: op.operation,
           })
         }
       } else if (
@@ -200,6 +215,7 @@ export function validateStructuredFactualOutput(
           code: 'UNRESOLVED_AS_ABSENCE',
           message: 'Cannot declare absence for unresolved or conflict state',
           factRef: op.factRef,
+          operation: op.operation,
         })
       }
     }

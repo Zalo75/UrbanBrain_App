@@ -6,7 +6,7 @@ import { enforceFactualCoverage, type FactualCoverageDiagnostics } from './factu
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { StructuredFactualOutput } from './structuredFactualOutput'
-import type { ValidationResult } from './factualValidator'
+import type { ValidationErrorCode, ValidationResult } from './factualValidator'
 import type OpenAI from 'openai'
 import type { ShadowEvaluationDiagnostics } from './shadowEvaluator'
 
@@ -25,6 +25,7 @@ export interface TerritorialShadowMetrics {
   payloadChars?: number
   inputTokens?: number
   outputTokens?: number
+  reasoningTokens?: number
   factCount: number
   candidateCount: number
   operationCount?: number
@@ -34,6 +35,18 @@ export interface TerritorialShadowMetrics {
   coverageAddedCount?: number
   coverageComplete?: boolean
   coverageReason?: string
+  validationErrorCount?: number
+  validationErrorCodes?: ValidationErrorCode[]
+  validationErrorOperations?: SafeValidationOperation[]
+}
+
+export interface SafeValidationOperation {
+  operation: StructuredFactualOutput['operations'][number]['operation']
+  factRef: {
+    type: StructuredFactualOutput['operations'][number]['factRef']['type']
+    scope: StructuredFactualOutput['operations'][number]['factRef']['scope']
+    code?: string
+  }
 }
 
 export interface TerritorialShadowResult {
@@ -84,6 +97,29 @@ function countContractFacts(contract: TerritorialFactualContract) {
   return { factCount, candidateCount }
 }
 
+const SAFE_FACT_CODE = /^[A-Za-z0-9._/-]{1,64}$/
+
+function safeValidationOperations(
+  validation: ValidationResult
+): SafeValidationOperation[] {
+  const unique = new Map<string, SafeValidationOperation>()
+
+  for (const error of validation.errors) {
+    if (!error.operation || !error.factRef) continue
+    const safeFactRef: SafeValidationOperation['factRef'] = {
+      type: error.factRef.type,
+      scope: error.factRef.scope,
+    }
+    if ('code' in error.factRef && SAFE_FACT_CODE.test(error.factRef.code)) {
+      safeFactRef.code = error.factRef.code
+    }
+    const descriptor = { operation: error.operation, factRef: safeFactRef }
+    unique.set(JSON.stringify(descriptor), descriptor)
+  }
+
+  return [...unique.values()]
+}
+
 export async function runTerritorialFactualShadowPipeline(
   question: string,
   input: NormalizedParcelContext | TerritorialFactualContract,
@@ -104,6 +140,10 @@ export async function runTerritorialFactualShadowPipeline(
   let operationCount: number | undefined
   let abstentionCount: number | undefined
   let coverageDiagnostics: FactualCoverageDiagnostics | undefined
+  let validationDiagnostics: Pick<
+    TerritorialShadowMetrics,
+    'validationErrorCount' | 'validationErrorCodes' | 'validationErrorOperations'
+  > | undefined
   let rawLlmResponse = ''
 
   const diagnostics = (error?: string) => ({
@@ -126,9 +166,11 @@ export async function runTerritorialFactualShadowPipeline(
       payloadChars: evaluationDiagnostics?.payloadChars,
       inputTokens: evaluationDiagnostics?.inputTokens,
       outputTokens: evaluationDiagnostics?.outputTokens,
+      reasoningTokens: evaluationDiagnostics?.reasoningTokens,
       operationCount,
       abstentionCount,
       ...coverageDiagnostics,
+      ...validationDiagnostics,
     },
   })
 
@@ -164,6 +206,11 @@ export async function runTerritorialFactualShadowPipeline(
     let validation = validateStructuredFactualOutput(structuredOutput, contract)
     validateMs = performance.now() - validateStartedAt
     if (!validation.valid) {
+      validationDiagnostics = {
+        validationErrorCount: validation.errors.length,
+        validationErrorCodes: [...new Set(validation.errors.map((error) => error.code))],
+        validationErrorOperations: safeValidationOperations(validation),
+      }
       return {
         status: 'validation_failed',
         structuredOutput,
@@ -181,6 +228,11 @@ export async function runTerritorialFactualShadowPipeline(
       validation = validateStructuredFactualOutput(structuredOutput, contract)
       validateMs += performance.now() - coverageValidationStartedAt
       if (!validation.valid) {
+        validationDiagnostics = {
+          validationErrorCount: validation.errors.length,
+          validationErrorCodes: [...new Set(validation.errors.map((error) => error.code))],
+          validationErrorOperations: safeValidationOperations(validation),
+        }
         return {
           status: 'validation_failed',
           structuredOutput,
