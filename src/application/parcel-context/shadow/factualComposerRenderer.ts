@@ -1,0 +1,140 @@
+import type {
+  FactualComposerEvidence,
+  FactualComposerFact,
+  FactualComposerPlan,
+} from './factualComposerTypes'
+
+function normalized(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
+}
+
+function renderIdentity(fact: FactualComposerFact) {
+  if (fact.label && fact.code && normalized(fact.label) !== normalized(fact.code)) {
+    return `${fact.label} (${fact.code})`
+  }
+  return fact.label ?? fact.code ?? 'sin identificación disponible'
+}
+
+function formatPercentage(value: number) {
+  return new Intl.NumberFormat('es-ES', {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  }).format(value)
+}
+
+function scopeSubject(scope: FactualComposerEvidence['scope']) {
+  return scope === 'actionArea' ? 'El área seleccionada' : 'La parcela completa'
+}
+
+function joinSpanish(items: string[]) {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} y ${items.at(-1)}`
+}
+
+function renderIdentityConclusion(
+  evidence: FactualComposerEvidence,
+  classification: FactualComposerFact | undefined,
+  categories: FactualComposerFact[]
+) {
+  const subject = scopeSubject(evidence.scope)
+  if (evidence.questionIntent === 'classification_identity' && classification) {
+    return `${subject} tiene la clasificación ${renderIdentity(classification)}.`
+  }
+  if (classification && categories.length > 0) {
+    const renderedCategories = joinSpanish(categories.map(renderIdentity))
+    return `${subject} está identificada como ${renderIdentity(classification)}, categoría ${renderedCategories}.`
+  }
+  if (categories.length > 0) {
+    return `${subject} tiene la categoría ${joinSpanish(categories.map(renderIdentity))}.`
+  }
+  return ''
+}
+
+function renderDistribution(categories: FactualComposerFact[], dominant?: FactualComposerFact) {
+  const shares = categories
+    .filter((fact) => fact.percentage !== undefined)
+    .sort((left, right) => (right.percentage ?? 0) - (left.percentage ?? 0))
+    .map((fact) => `un ${formatPercentage(fact.percentage!)} % como ${renderIdentity(fact)}`)
+  if (shares.length === 0) return ''
+  const dominance = dominant
+    ? `, por lo que ${renderIdentity(dominant)} es claramente la categoría predominante`
+    : ''
+  return `El análisis territorial identifica ${joinSpanish(shares)}${dominance}.`
+}
+
+function renderStateCaveat(plan: FactualComposerPlan) {
+  const kinds = new Set(plan.caveats.map((item) => item.kind))
+  const conflict = kinds.has('conflict')
+  const unresolved = kinds.has('unresolved')
+  const manualReview = kinds.has('manual_review_required')
+  const manualDetermination = kinds.has('manual_determination')
+
+  if (conflict && unresolved) {
+    return 'La información territorial presenta un conflicto y la determinación global permanece pendiente de resolución.'
+  }
+  if (conflict) return 'La información territorial presenta un conflicto pendiente de resolución.'
+  if (manualReview && manualDetermination) {
+    return 'La determinación procede de revisión manual y todavía requiere revisión o confirmación.'
+  }
+  if (manualReview) return 'El estado factual todavía requiere revisión o confirmación.'
+  if (manualDetermination) return 'La determinación procede de revisión manual.'
+  if (unresolved) return 'La determinación permanece pendiente de resolución.'
+  return ''
+}
+
+export function renderFactualComposerPlan(
+  plan: FactualComposerPlan,
+  evidence: FactualComposerEvidence
+): string {
+  const facts = new Map(evidence.validatedFacts.map((fact) => [fact.id, fact]))
+  const categories = evidence.validatedFacts.filter((fact) => fact.type === 'category')
+  const classification = evidence.validatedFacts.find((fact) => fact.type === 'classification')
+  const dominant = evidence.validatedFacts.find((fact) => fact.geometricDominance)
+  const paragraphs: string[] = []
+
+  if (plan.conclusion.kind === 'not_strictly_homogeneous') {
+    const target = plan.conclusion.targetFactId
+      ? facts.get(plan.conclusion.targetFactId)
+      : undefined
+    if (target) {
+      paragraphs.push(
+        `No puede considerarse estrictamente que el 100 % de la parcela sea ${renderIdentity(target)}.`
+      )
+    }
+  } else if (plan.conclusion.kind === 'strictly_homogeneous') {
+    const target = plan.conclusion.targetFactId
+      ? facts.get(plan.conclusion.targetFactId)
+      : undefined
+    if (target) paragraphs.push(`La parcela completa se identifica íntegramente como ${renderIdentity(target)}.`)
+  } else if (plan.conclusion.kind === 'category_distribution') {
+    const count = categories.length
+    paragraphs.push(
+      `${scopeSubject(evidence.scope)} presenta ${count === 1 ? 'una categoría urbanística' : `${count} categorías urbanísticas`}.`
+    )
+  } else if (
+    plan.conclusion.kind === 'category_identity' ||
+    plan.conclusion.kind === 'classification_identity'
+  ) {
+    paragraphs.push(renderIdentityConclusion(evidence, classification, categories))
+  } else if (plan.conclusion.kind === 'state_summary') {
+    paragraphs.push(`El estado territorial de ${scopeSubject(evidence.scope).toLocaleLowerCase('es')} requiere una lectura matizada.`)
+  }
+
+  if (
+    plan.conclusion.kind === 'not_strictly_homogeneous' ||
+    plan.conclusion.kind === 'strictly_homogeneous' ||
+    plan.conclusion.kind === 'category_distribution'
+  ) {
+    paragraphs.push(renderDistribution(categories, dominant))
+  }
+
+  paragraphs.push(renderStateCaveat(plan))
+  if (plan.recommendedChecks.includes('verify_minority_area')) {
+    paragraphs.push('Conviene verificar la porción minoritaria antes de tratar la parcela como urbanísticamente homogénea.')
+  } else if (plan.recommendedChecks.includes('confirm_pending_determination')) {
+    paragraphs.push('Conviene confirmar la determinación pendiente antes de adoptar una conclusión definitiva.')
+  }
+
+  return paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean).join('\n\n')
+}

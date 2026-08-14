@@ -45,6 +45,11 @@ import {
   isSynchronousFactualEnabled,
   shouldRunVisibleFactual,
 } from '@/application/parcel-context/shadow/visibleFactualRouting';
+import {
+  composeValidatedFactualAnswer,
+  factualComposerModel,
+  isFactualComposerEnabled,
+} from '@/application/parcel-context/shadow/factualComposer';
 
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -272,11 +277,39 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
             openai
           );
           const assessment = assessVisibleFactualResult(factualResult);
-          const answer = assessment.answer;
+          let answer = assessment.answer;
           const pipelineMs = performance.now() - factualPipelineStartedAt;
           let persistMs = 0;
 
           if (answer) {
+            if (isFactualComposerEnabled()) {
+              const composerStartedAt = performance.now();
+              try {
+                const composerResult = await composeValidatedFactualAnswer({
+                  question: message,
+                  contract: factualContract,
+                  output: factualResult.structuredOutput!,
+                  fallbackAnswer: answer,
+                  client: openai,
+                  signal,
+                });
+                answer = composerResult.answer;
+                console.info('[ComposerPerf]', {
+                  expedienteId,
+                  ...composerResult.diagnostics,
+                });
+              } catch {
+                console.info('[ComposerPerf]', {
+                  expedienteId,
+                  totalMs: Math.round(performance.now() - composerStartedAt),
+                  providerMs: 0,
+                  status: 'fallback',
+                  fallbackUsed: true,
+                  fallbackReason: 'unexpected_error',
+                  model: factualComposerModel(),
+                });
+              }
+            }
             const operations = factualResult.structuredOutput!.operations;
             const hasConflict = operations.some(
               (operation) =>
@@ -318,7 +351,9 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
             });
             persistMs = performance.now() - persistStartedAt;
             scheduleFactualShadowResultPersistence({
-              result: factualResult,
+              result: answer === assessment.answer
+                ? factualResult
+                : { ...factualResult, renderedText: [answer] },
               query: message,
               expedienteId,
               municipalityIne: trustedMunicipioCodigo ?? null,

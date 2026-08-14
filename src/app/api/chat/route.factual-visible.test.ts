@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   abortSignal: vi.fn(),
   completionCreate: vi.fn(),
   runFactual: vi.fn(),
+  composeFactual: vi.fn(),
   scheduleShadow: vi.fn(),
   persistFactualResult: vi.fn(),
 }))
@@ -57,6 +58,10 @@ vi.mock('openai', () => ({
 vi.mock('@/application/parcel-context/shadow/shadowPipeline', () => ({
   runTerritorialFactualShadowPipeline: mocks.runFactual,
 }))
+vi.mock('@/application/parcel-context/shadow/factualComposer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/application/parcel-context/shadow/factualComposer')>()
+  return { ...actual, composeValidatedFactualAnswer: mocks.composeFactual }
+})
 vi.mock('@/application/parcel-context/shadow/shadowIntegration', () => ({
   scheduleFactualShadowPipeline: mocks.scheduleShadow,
   scheduleFactualShadowResultPersistence: mocks.persistFactualResult,
@@ -171,6 +176,7 @@ async function execute(message: string) {
 
 describe('POST /api/chat synchronous factual visibility', () => {
   const originalSyncFlag = process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED
+  const originalComposerFlag = process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -189,6 +195,14 @@ describe('POST /api/chat synchronous factual visibility', () => {
     mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
     mocks.abortSignal.mockResolvedValue({ data: [], error: null })
     mocks.completionCreate.mockResolvedValue({ choices: [{ message: { content: 'Primary Response' } }] })
+    mocks.composeFactual.mockResolvedValue({
+      answer: 'RESPUESTA COMPUESTA',
+      diagnostics: {
+        totalMs: 120, providerMs: 100, inputTokens: 300, outputTokens: 90,
+        status: 'composed', fallbackUsed: false, fallbackReason: null,
+        model: 'deepseek-v4-flash',
+      },
+    })
     vi.spyOn(console, 'info').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -196,6 +210,8 @@ describe('POST /api/chat synchronous factual visibility', () => {
   afterEach(() => {
     if (originalSyncFlag === undefined) delete process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED
     else process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = originalSyncFlag
+    if (originalComposerFlag === undefined) delete process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED
+    else process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = originalComposerFlag
     vi.restoreAllMocks()
   })
 
@@ -207,6 +223,22 @@ describe('POST /api/chat synchronous factual visibility', () => {
     expect(mocks.runFactual).not.toHaveBeenCalled()
     expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
     expect(payload.answer).not.toContain('RESPUESTA FACTUAL VISIBLE')
+  })
+
+  it.each(['false', 'TRUE', '1'])('keeps the factual renderer byte-for-byte when Composer flag is %s', async (flag) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = flag
+    const rendered = 'RESPUESTA FACTUAL EXACTA'
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [{
+      operation: 'state_label',
+      factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' },
+      label: 'Núcleo Rural Común',
+    }]))
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(payload.answer).toBe(rendered)
+    expect(mocks.composeFactual).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -463,5 +495,82 @@ describe('POST /api/chat synchronous factual visibility', () => {
     }))
     expect(JSON.stringify(factualPerfCall)).not.toContain(rendered)
     expect(JSON.stringify(factualPerfCall)).not.toContain('¿Qué categoría tiene')
+  })
+
+  it('persists and returns the composed answer without Primary, RAG or sources', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'true'
+    const mechanical = 'RESPUESTA MECÁNICA DEL RENDERER'
+    const composed = 'No puede considerarse estrictamente que el 100 % de la parcela sea SNRC.\n\nEl 98,53 % es SNRC y el 1,47 % es SNRT.'
+    mocks.composeFactual.mockResolvedValueOnce({
+      answer: composed,
+      diagnostics: {
+        totalMs: 121, providerMs: 103, inputTokens: 300, outputTokens: 88,
+        status: 'composed', fallbackUsed: false, fallbackReason: null,
+        model: 'composer-small',
+      },
+    })
+    mocks.runFactual.mockResolvedValueOnce(validResult(mechanical, [
+      { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, percentage: 98.53 },
+      { operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+      { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, percentage: 1.47 },
+      { operation: 'state_conflict', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+    ]))
+
+    const { payload } = await execute('¿Puedo considerar toda la parcela como SNRC?')
+
+    expect(payload).toMatchObject({ answer: composed, sources: [] })
+    expect(payload.answer).not.toContain(mechanical)
+    expect(mocks.composeFactual).toHaveBeenCalledWith(expect.objectContaining({
+      question: '¿Puedo considerar toda la parcela como SNRC?',
+      fallbackAnswer: mechanical,
+      signal: expect.any(AbortSignal),
+    }))
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    expect(mocks.values).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      role: 'assistant', content: composed, sources: [],
+    }))
+    expect(mocks.persistFactualResult).toHaveBeenCalledWith(expect.objectContaining({
+      result: expect.objectContaining({ renderedText: [composed] }),
+    }))
+    const composerPerfCall = vi.mocked(console.info).mock.calls.find(
+      ([label]) => label === '[ComposerPerf]'
+    )
+    expect(composerPerfCall?.[1]).toEqual({
+      expedienteId: 'exp-1', totalMs: 121, providerMs: 103,
+      inputTokens: 300, outputTokens: 88, status: 'composed',
+      fallbackUsed: false, fallbackReason: null, model: 'composer-small',
+    })
+    expect(JSON.stringify(composerPerfCall)).not.toContain(composed)
+    expect(JSON.stringify(composerPerfCall)).not.toContain('¿Puedo considerar')
+  })
+
+  it('keeps the validated factual renderer when Composer throws unexpectedly', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'true'
+    const rendered = 'RESPUESTA FACTUAL VALIDADA'
+    mocks.composeFactual.mockRejectedValueOnce(new Error('PRIVATE_COMPOSER_FAILURE'))
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [{
+      operation: 'state_label',
+      factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' },
+      label: 'Núcleo Rural Común',
+    }]))
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    const composerPerfCall = vi.mocked(console.info).mock.calls.find(
+      ([label]) => label === '[ComposerPerf]'
+    )
+    expect(composerPerfCall?.[1]).toEqual(expect.objectContaining({
+      status: 'fallback', fallbackUsed: true, fallbackReason: 'unexpected_error',
+    }))
+    expect(JSON.stringify(composerPerfCall)).not.toContain('PRIVATE_COMPOSER_FAILURE')
+    expect(JSON.stringify(composerPerfCall)).not.toContain('¿Qué categoría')
   })
 })
