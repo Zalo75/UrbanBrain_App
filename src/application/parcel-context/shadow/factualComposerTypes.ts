@@ -73,6 +73,39 @@ export interface FactualComposerPlan {
   recommendedChecks: FactualComposerRecommendedCheck[]
 }
 
+export type FactualComposerSchemaErrorCode =
+  | 'missing_required_field'
+  | 'additional_property'
+  | 'invalid_type'
+  | 'invalid_enum'
+  | 'invalid_literal'
+
+export interface FactualComposerSchemaError {
+  code: FactualComposerSchemaErrorCode
+  path: string
+  valueType?: 'array' | 'boolean' | 'null' | 'number' | 'object' | 'string' | 'undefined'
+  invalidEnum?: string
+}
+
+export type FactualComposerSafetyErrorCode =
+  | 'wrong_scope'
+  | 'unknown_fact_ref'
+  | 'duplicate_plan_item'
+  | 'wrong_conclusion'
+  | 'missing_target'
+  | 'categorical_totality'
+  | 'missing_material_category'
+  | 'missing_material_fact'
+  | 'unsupported_percentage'
+  | 'dominance_mismatch'
+  | 'missing_dominance'
+  | 'missing_conflict'
+  | 'missing_unresolved'
+  | 'missing_manual_state'
+  | 'missing_automatic_state'
+  | 'unsupported_caveat'
+  | 'unsupported_check'
+
 export type FactualComposerFallbackReason =
   | 'unsupported_intent'
   | 'evidence_invalid'
@@ -92,6 +125,12 @@ export interface FactualComposerDiagnostics {
   fallbackUsed: boolean
   fallbackReason: FactualComposerFallbackReason | null
   model: string
+  schemaErrorCount?: number
+  schemaErrorCodes?: FactualComposerSchemaErrorCode[]
+  schemaErrorPaths?: string[]
+  schemaErrorValueTypes?: string[]
+  schemaInvalidEnums?: string[]
+  safetyErrorCodes?: FactualComposerSafetyErrorCode[]
 }
 
 export interface FactualComposerResult {

@@ -5,6 +5,8 @@ import type {
   FactualComposerExplanation,
   FactualComposerPlan,
   FactualComposerRecommendedCheck,
+  FactualComposerSafetyErrorCode,
+  FactualComposerSchemaError,
 } from './factualComposerTypes'
 
 const CONCLUSION_KINDS = new Set<FactualComposerConclusionKind>([
@@ -37,45 +39,166 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function hasExactKeys(value: Record<string, unknown>, allowed: string[]) {
-  const keys = Object.keys(value)
-  return keys.length === allowed.length && keys.every((key) => allowed.includes(key))
+function valueType(value: unknown): NonNullable<FactualComposerSchemaError['valueType']> {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value as NonNullable<FactualComposerSchemaError['valueType']>
+}
+
+function safeInvalidEnum(value: unknown) {
+  return typeof value === 'string' && /^[a-z_]{1,48}$/.test(value) ? value : undefined
+}
+
+function safePropertyPath(path: string, key: string) {
+  return /^[A-Za-z][A-Za-z0-9_]{0,48}$/.test(key) ? `${path}.${key}` : `${path}.[additional]`
+}
+
+function additionalPropertyErrors(
+  value: Record<string, unknown>,
+  allowed: string[],
+  path: string,
+  errors: FactualComposerSchemaError[]
+) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      errors.push({ code: 'additional_property', path: safePropertyPath(path, key) })
+    }
+  }
+}
+
+function requiredField(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: FactualComposerSchemaError[]
+) {
+  if (!(key in value)) errors.push({ code: 'missing_required_field', path: `${path}.${key}` })
+}
+
+export type FactualComposerPlanParseResult =
+  | { success: true; plan: FactualComposerPlan }
+  | { success: false; errors: FactualComposerSchemaError[] }
+
+export function parseFactualComposerPlanDetailed(value: unknown): FactualComposerPlanParseResult {
+  const errors: FactualComposerSchemaError[] = []
+  if (!isRecord(value)) {
+    return { success: false, errors: [{ code: 'invalid_type', path: '$', valueType: valueType(value) }] }
+  }
+
+  additionalPropertyErrors(
+    value,
+    ['schemaVersion', 'conclusion', 'explanation', 'caveats', 'recommendedChecks'],
+    '$',
+    errors
+  )
+  requiredField(value, 'schemaVersion', '$', errors)
+  requiredField(value, 'conclusion', '$', errors)
+  if ('schemaVersion' in value && value.schemaVersion !== '1') {
+    errors.push({ code: 'invalid_literal', path: '$.schemaVersion', valueType: valueType(value.schemaVersion) })
+  }
+
+  if ('conclusion' in value) {
+    if (!isRecord(value.conclusion)) {
+      errors.push({ code: 'invalid_type', path: '$.conclusion', valueType: valueType(value.conclusion) })
+    } else {
+      additionalPropertyErrors(value.conclusion, ['kind', 'targetFactId'], '$.conclusion', errors)
+      requiredField(value.conclusion, 'kind', '$.conclusion', errors)
+      if (
+        'kind' in value.conclusion &&
+        !CONCLUSION_KINDS.has(value.conclusion.kind as FactualComposerConclusionKind)
+      ) {
+        errors.push({
+          code: typeof value.conclusion.kind === 'string' ? 'invalid_enum' : 'invalid_type',
+          path: '$.conclusion.kind',
+          valueType: valueType(value.conclusion.kind),
+          invalidEnum: safeInvalidEnum(value.conclusion.kind),
+        })
+      }
+      if (
+        'targetFactId' in value.conclusion &&
+        (typeof value.conclusion.targetFactId !== 'string' || value.conclusion.targetFactId.length > 100)
+      ) {
+        errors.push({ code: 'invalid_type', path: '$.conclusion.targetFactId', valueType: valueType(value.conclusion.targetFactId) })
+      }
+    }
+  }
+
+  const explanation = 'explanation' in value ? value.explanation : []
+  const caveats = 'caveats' in value ? value.caveats : []
+  const recommendedChecks = 'recommendedChecks' in value ? value.recommendedChecks : []
+  const validateFactItems = (
+    items: unknown,
+    path: '$.explanation' | '$.caveats',
+    kinds: Set<string>,
+    maximum: number
+  ) => {
+    if (!Array.isArray(items)) {
+      errors.push({ code: 'invalid_type', path, valueType: valueType(items) })
+      return
+    }
+    if (items.length > maximum) {
+      errors.push({ code: 'invalid_type', path, valueType: 'array' })
+    }
+    items.forEach((item, index) => {
+      const itemPath = `${path}[${index}]`
+      if (!isRecord(item)) {
+        errors.push({ code: 'invalid_type', path: itemPath, valueType: valueType(item) })
+        return
+      }
+      additionalPropertyErrors(item, ['kind', 'factId'], itemPath, errors)
+      requiredField(item, 'kind', itemPath, errors)
+      requiredField(item, 'factId', itemPath, errors)
+      if ('kind' in item && !kinds.has(item.kind as string)) {
+        errors.push({
+          code: typeof item.kind === 'string' ? 'invalid_enum' : 'invalid_type',
+          path: `${itemPath}.kind`,
+          valueType: valueType(item.kind),
+          invalidEnum: safeInvalidEnum(item.kind),
+        })
+      }
+      if ('factId' in item && (typeof item.factId !== 'string' || item.factId.length > 100)) {
+        errors.push({ code: 'invalid_type', path: `${itemPath}.factId`, valueType: valueType(item.factId) })
+      }
+    })
+  }
+  validateFactItems(explanation, '$.explanation', EXPLANATION_KINDS, 20)
+  validateFactItems(caveats, '$.caveats', CAVEAT_KINDS, 12)
+
+  if (!Array.isArray(recommendedChecks)) {
+    errors.push({ code: 'invalid_type', path: '$.recommendedChecks', valueType: valueType(recommendedChecks) })
+  } else {
+    if (recommendedChecks.length > 4) {
+      errors.push({ code: 'invalid_type', path: '$.recommendedChecks', valueType: 'array' })
+    }
+    recommendedChecks.forEach((item, index) => {
+      if (!CHECK_KINDS.has(item as FactualComposerRecommendedCheck)) {
+        errors.push({
+          code: typeof item === 'string' ? 'invalid_enum' : 'invalid_type',
+          path: `$.recommendedChecks[${index}]`,
+          valueType: valueType(item),
+          invalidEnum: safeInvalidEnum(item),
+        })
+      }
+    })
+  }
+
+  if (errors.length > 0) return { success: false, errors }
+
+  return {
+    success: true,
+    plan: {
+      schemaVersion: '1',
+      conclusion: value.conclusion as FactualComposerPlan['conclusion'],
+      explanation: explanation as FactualComposerExplanation[],
+      caveats: caveats as FactualComposerCaveat[],
+      recommendedChecks: recommendedChecks as FactualComposerRecommendedCheck[],
+    },
+  }
 }
 
 export function parseFactualComposerPlan(value: unknown): FactualComposerPlan | null {
-  if (!isRecord(value) || !hasExactKeys(value, [
-    'schemaVersion', 'conclusion', 'explanation', 'caveats', 'recommendedChecks',
-  ])) return null
-  if (value.schemaVersion !== '1') return null
-  if (!isRecord(value.conclusion)) return null
-  const conclusionKeys = value.conclusion.targetFactId === undefined
-    ? ['kind']
-    : ['kind', 'targetFactId']
-  if (!hasExactKeys(value.conclusion, conclusionKeys)) return null
-  if (!CONCLUSION_KINDS.has(value.conclusion.kind as FactualComposerConclusionKind)) return null
-  if (
-    value.conclusion.targetFactId !== undefined &&
-    (typeof value.conclusion.targetFactId !== 'string' || value.conclusion.targetFactId.length > 100)
-  ) return null
-  if (!Array.isArray(value.explanation) || value.explanation.length > 20) return null
-  if (!Array.isArray(value.caveats) || value.caveats.length > 12) return null
-  if (!Array.isArray(value.recommendedChecks) || value.recommendedChecks.length > 4) return null
-
-  for (const item of value.explanation) {
-    if (!isRecord(item) || !hasExactKeys(item, ['kind', 'factId'])) return null
-    if (!EXPLANATION_KINDS.has(item.kind as FactualComposerExplanation['kind'])) return null
-    if (typeof item.factId !== 'string' || item.factId.length > 100) return null
-  }
-  for (const item of value.caveats) {
-    if (!isRecord(item) || !hasExactKeys(item, ['kind', 'factId'])) return null
-    if (!CAVEAT_KINDS.has(item.kind as FactualComposerCaveat['kind'])) return null
-    if (typeof item.factId !== 'string' || item.factId.length > 100) return null
-  }
-  if (!value.recommendedChecks.every((item) => CHECK_KINDS.has(item as FactualComposerRecommendedCheck))) {
-    return null
-  }
-
-  return value as unknown as FactualComposerPlan
+  const result = parseFactualComposerPlanDetailed(value)
+  return result.success ? result.plan : null
 }
 
 function expectedConclusion(evidence: FactualComposerEvidence) {
@@ -102,7 +225,7 @@ function hasCaveat(plan: FactualComposerPlan, kind: FactualComposerCaveat['kind'
 
 export interface FactualComposerSafetyResult {
   safe: boolean
-  reason?: string
+  reason?: FactualComposerSafetyErrorCode
 }
 
 export function validateFactualComposerPlan(
@@ -111,7 +234,7 @@ export function validateFactualComposerPlan(
 ): FactualComposerSafetyResult {
   const facts = new Map(evidence.validatedFacts.map((fact) => [fact.id, fact]))
   if (evidence.validatedFacts.some((fact) => fact.scope !== evidence.scope)) {
-    return { safe: false, reason: 'scope_mismatch' }
+    return { safe: false, reason: 'wrong_scope' }
   }
 
   const refs = [
@@ -119,15 +242,20 @@ export function validateFactualComposerPlan(
     ...plan.caveats.map((item) => item.factId),
     ...(plan.conclusion.targetFactId ? [plan.conclusion.targetFactId] : []),
   ]
-  if (refs.some((id) => !facts.has(id))) return { safe: false, reason: 'unknown_fact' }
+  const hasWrongScopeRef = refs.some((id) => {
+    const scope = id.split(':')[1]
+    return (scope === 'parcel' || scope === 'actionArea') && scope !== evidence.scope
+  })
+  if (hasWrongScopeRef) return { safe: false, reason: 'wrong_scope' }
+  if (refs.some((id) => !facts.has(id))) return { safe: false, reason: 'unknown_fact_ref' }
   if (new Set(plan.explanation.map((item) => `${item.kind}:${item.factId}`)).size !== plan.explanation.length) {
-    return { safe: false, reason: 'duplicate_explanation' }
+    return { safe: false, reason: 'duplicate_plan_item' }
   }
   if (new Set(plan.caveats.map((item) => `${item.kind}:${item.factId}`)).size !== plan.caveats.length) {
-    return { safe: false, reason: 'duplicate_caveat' }
+    return { safe: false, reason: 'duplicate_plan_item' }
   }
   if (new Set(plan.recommendedChecks).size !== plan.recommendedChecks.length) {
-    return { safe: false, reason: 'duplicate_check' }
+    return { safe: false, reason: 'duplicate_plan_item' }
   }
 
   const expected = expectedConclusion(evidence)
@@ -145,7 +273,7 @@ export function validateFactualComposerPlan(
     const positiveCategories = categories.filter((fact) => (fact.percentage ?? 0) > 0)
     const notStrict = positiveCategories.length > 1 || target.percentage === undefined || target.percentage < 100
     const expectedKind = notStrict ? 'not_strictly_homogeneous' : 'strictly_homogeneous'
-    if (plan.conclusion.kind !== expectedKind) return { safe: false, reason: 'homogeneity_contradiction' }
+    if (plan.conclusion.kind !== expectedKind) return { safe: false, reason: 'categorical_totality' }
   }
 
   const materialFacts = evidence.questionIntent === 'classification_identity'
@@ -161,7 +289,7 @@ export function validateFactualComposerPlan(
       ? 'category_share'
       : 'fact_identity'
     if (!hasExplanation(plan, requiredKind, fact.id)) {
-      return { safe: false, reason: 'material_fact_omitted' }
+      return { safe: false, reason: fact.type === 'category' ? 'missing_material_category' : 'missing_material_fact' }
     }
   }
 
@@ -174,11 +302,11 @@ export function validateFactualComposerPlan(
     if (
       item.kind === 'geometric_dominance' &&
       (!fact.geometricDominance || fact.percentage === undefined || fact.percentage <= 50 || fact.percentage !== maximumPercentage)
-    ) return { safe: false, reason: 'invalid_dominance' }
+    ) return { safe: false, reason: 'dominance_mismatch' }
   }
   for (const fact of categories.filter((item) => item.geometricDominance)) {
     if (!hasExplanation(plan, 'geometric_dominance', fact.id)) {
-      return { safe: false, reason: 'dominance_omitted' }
+      return { safe: false, reason: 'missing_dominance' }
     }
   }
 
@@ -198,7 +326,14 @@ export function validateFactualComposerPlan(
   }
   for (const [kind, required] of Object.entries(materialStates)) {
     if (required && !hasCaveat(plan, kind as FactualComposerCaveat['kind'])) {
-      return { safe: false, reason: `${kind}_omitted` }
+      const reason: FactualComposerSafetyErrorCode = kind === 'conflict'
+        ? 'missing_conflict'
+        : kind === 'unresolved'
+          ? 'missing_unresolved'
+          : kind.startsWith('automatic_')
+            ? 'missing_automatic_state'
+            : 'missing_manual_state'
+      return { safe: false, reason }
     }
   }
   for (const caveat of plan.caveats) {
@@ -215,11 +350,11 @@ export function validateFactualComposerPlan(
 
   if (plan.recommendedChecks.includes('verify_minority_area')) {
     const positive = categories.filter((fact) => (fact.percentage ?? 0) > 0)
-    if (positive.length < 2) return { safe: false, reason: 'unsupported_minority_check' }
+    if (positive.length < 2) return { safe: false, reason: 'unsupported_check' }
   }
   if (plan.recommendedChecks.includes('confirm_pending_determination')) {
     if (!materialStates.conflict && !materialStates.unresolved && !materialStates.manual_review_required) {
-      return { safe: false, reason: 'unsupported_confirmation_check' }
+      return { safe: false, reason: 'unsupported_check' }
     }
   }
 

@@ -117,6 +117,89 @@ describe('factualComposer', () => {
     expect(result.answer).not.toContain('Conviene confirmar')
   })
 
+  it('composes actionArea category with its representable classification and manual state', async () => {
+    const contract = createSadaContract()
+    const classification = {
+      code: 'SNR', label: 'Suelo de Núcleo Rural', semanticCompleteness: 'complete' as const,
+      status: 'automatic_confirmed' as const, determination: 'automatic' as const,
+    }
+    const category = {
+      code: 'SNRC', label: 'Núcleo Rural Común', semanticCompleteness: 'complete' as const,
+      status: 'manual_review_required' as const, determination: 'manual' as const,
+    }
+    contract.scopes.actionArea = { hasGeometry: true }
+    contract.factsByScope!.actionArea = { classification, categories: [category] }
+    const output = {
+      operations: [
+        { operation: 'state_label' as const, factRef: { type: 'classification' as const, scope: 'actionArea' as const }, label: classification.label },
+        { operation: 'state_label' as const, factRef: { type: 'category' as const, scope: 'actionArea' as const, code: 'SNRC' }, label: category.label },
+        { operation: 'state_status' as const, factRef: { type: 'category' as const, scope: 'actionArea' as const, code: 'SNRC' }, status: 'manual_review_required' },
+        { operation: 'state_determination' as const, factRef: { type: 'category' as const, scope: 'actionArea' as const, code: 'SNRC' }, determination: 'manual' },
+      ],
+      abstentions: [],
+    }
+    const plan = {
+      schemaVersion: '1',
+      conclusion: { kind: 'category_identity' },
+      explanation: [
+        { kind: 'fact_identity', factId: 'classification:actionArea' },
+        { kind: 'fact_identity', factId: 'category:actionArea:SNRC' },
+      ],
+      caveats: [
+        { kind: 'manual_review_required', factId: 'category:actionArea:SNRC' },
+        { kind: 'manual_determination', factId: 'category:actionArea:SNRC' },
+      ],
+    }
+    const result = await composeValidatedFactualAnswer({
+      question: 'Que categoria tiene exactamente el area seleccionada?',
+      contract, output, fallbackAnswer: 'RESPUESTA MECÁNICA',
+      client: clientWith(JSON.stringify(plan)).client,
+    })
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({ status: 'composed', fallbackUsed: false }))
+    expect(result.answer).toContain('Suelo de Núcleo Rural (SNR)')
+    expect(result.answer).toContain('Núcleo Rural Común (SNRC)')
+    expect(result.answer.match(/manual/g)).toHaveLength(1)
+    expect(result.answer).not.toContain('SNRT')
+  })
+
+  it('reports exact safe schema diagnostics without retaining model prose', async () => {
+    const content = JSON.stringify({
+      schemaVersion: '1', conclusion: { kind: 'invented_conclusion' },
+      explanation: 'private model prose', extra: 'private question text',
+    })
+    const result = await composeValidatedFactualAnswer({
+      ...baseOptions(), client: clientWith(content).client,
+    })
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      fallbackReason: 'invalid_schema',
+      schemaErrorCount: 3,
+      schemaErrorCodes: expect.arrayContaining(['additional_property', 'invalid_enum', 'invalid_type']),
+      schemaErrorPaths: expect.arrayContaining(['$.extra', '$.conclusion.kind', '$.explanation']),
+      schemaErrorValueTypes: expect.arrayContaining(['$.conclusion.kind:string', '$.explanation:string']),
+      schemaInvalidEnums: ['invented_conclusion'],
+    }))
+    expect(JSON.stringify(result.diagnostics)).not.toContain('private')
+  })
+
+  it('reports the exact safety rejection code without exposing evidence', async () => {
+    const plan = {
+      ...sadaPlan,
+      explanation: sadaPlan.explanation.filter((item) => item.factId !== 'category:parcel:SNRT'),
+    }
+    const result = await composeValidatedFactualAnswer({
+      ...baseOptions(), client: clientWith(JSON.stringify(plan)).client,
+    })
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      fallbackReason: 'safety_rejected',
+      safetyErrorCodes: ['missing_material_category'],
+    }))
+    expect(JSON.stringify(result.diagnostics)).not.toContain('SNRT')
+    expect(JSON.stringify(result.diagnostics)).not.toContain(baseOptions().question)
+  })
+
   it.each([
     ['invalid JSON', 'not-json', 'invalid_json'],
     ['invalid schema', JSON.stringify({ conclusion: 'free prose' }), 'invalid_schema'],

@@ -139,6 +139,55 @@ describe('Territorial Factual Shadow Pipeline', () => {
     }))
   })
 
+  it('A3. mantiene visible categories parcel aunque classification auxiliar sea irrepresentable', async () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.classification = {
+      semanticCompleteness: 'partial',
+      status: 'unresolved',
+      determination: 'unresolved',
+    }
+    contract.classification = contract.factsByScope!.parcel!.classification
+    const llmOutput = {
+      operations: [{
+        operation: 'state_percentage',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+        percentage: 98.53,
+      }],
+      abstentions: [],
+    }
+
+    const result = await runTerritorialFactualShadowPipeline(
+      '¿Qué categorías existen en toda la parcela?',
+      contract,
+      mockClient(JSON.stringify(llmOutput))
+    )
+
+    expect(result.status).toBe('valid')
+    expect(result.diagnostics.metrics).toEqual(expect.objectContaining({
+      coverageComplete: true,
+      coverageReason: 'completed_deterministically',
+    }))
+    expect(result.structuredOutput?.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        operation: 'state_percentage', percentage: 98.53,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      }),
+      expect.objectContaining({
+        operation: 'state_percentage', percentage: 1.47,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRT' },
+      }),
+      expect.objectContaining({
+        operation: 'state_conflict',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      }),
+    ]))
+    expect(result.structuredOutput?.operations.some((operation) =>
+      operation.factRef.type === 'classification'
+    )).toBe(false)
+    expect(result.renderedText?.join(' ')).toContain('98,53 %')
+    expect(result.renderedText?.join(' ')).toContain('1,47 %')
+  })
+
   it('B. Output inválido (JSON malformado)', async () => {
     const client = mockClient('Esto no es un json')
     const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)

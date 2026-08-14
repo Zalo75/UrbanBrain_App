@@ -3,7 +3,7 @@ import type { TerritorialFactualContract } from '@/domain/parcel-context/factual
 import type { StructuredFactualOutput } from './structuredFactualOutput'
 import { buildFactualComposerEvidence } from './factualComposerEvidence'
 import { renderFactualComposerPlan } from './factualComposerRenderer'
-import { parseFactualComposerPlan, validateFactualComposerPlan } from './factualComposerSafety'
+import { parseFactualComposerPlanDetailed, validateFactualComposerPlan } from './factualComposerSafety'
 import type {
   FactualComposerDiagnostics,
   FactualComposerFallbackReason,
@@ -17,8 +17,9 @@ const COMPOSER_MAX_TOKENS = 320
 const FACTUAL_COMPOSER_SYSTEM_PROMPT = `Eres el Composer factual de UrbanBrain.
 Recibes exclusivamente hechos territoriales ya validados y devuelves un plan JSON, nunca prosa ni Markdown.
 Usa solo factId y enums presentes. No escribas categorías, códigos, porcentajes, causas, normativa ni consecuencias.
-Schema exacto:
+Schema permitido:
 {"schemaVersion":"1","conclusion":{"kind":"not_strictly_homogeneous|strictly_homogeneous|category_distribution|category_identity|classification_identity|state_summary","targetFactId":"opcional"},"explanation":[{"kind":"fact_identity|category_share|geometric_dominance","factId":"..."}],"caveats":[{"kind":"conflict|unresolved|manual_review_required|manual_determination|automatic_status|automatic_determination","factId":"..."}],"recommendedChecks":["verify_minority_area|confirm_pending_determination"]}
+schemaVersion y conclusion son obligatorios. explanation, caveats y recommendedChecks pueden omitirse solo cuando estarían vacíos; si contienen elementos, inclúyelos.
 Reglas:
 - strict_homogeneity: incluye todas las categorías con category_share, dominance si existe y targetFactId; si hay varias categorías positivas o el target no llega a 100, usa not_strictly_homogeneous.
 - category_distribution: incluye todas las categorías con category_share y dominance si existe.
@@ -59,7 +60,8 @@ function fallback(
   model: string,
   reason: FactualComposerFallbackReason,
   providerMs = 0,
-  usage?: { inputTokens?: number; outputTokens?: number }
+  usage?: { inputTokens?: number; outputTokens?: number },
+  details?: Partial<FactualComposerDiagnostics>
 ): FactualComposerResult {
   return {
     answer: fallbackAnswer,
@@ -72,6 +74,7 @@ function fallback(
       fallbackUsed: true,
       fallbackReason: reason,
       model,
+      ...details,
     },
   }
 }
@@ -134,13 +137,30 @@ export async function composeValidatedFactualAnswer(
     } catch {
       return fallback(options.fallbackAnswer, startedAt, model, 'invalid_json', providerMs, usage)
     }
-    const plan = parseFactualComposerPlan(parsed)
-    if (!plan) {
-      return fallback(options.fallbackAnswer, startedAt, model, 'invalid_schema', providerMs, usage)
+    const parseResult = parseFactualComposerPlanDetailed(parsed)
+    if (!parseResult.success) {
+      const schemaErrorCodes = [...new Set(parseResult.errors.map((error) => error.code))]
+      const schemaErrorPaths = [...new Set(parseResult.errors.map((error) => error.path))]
+      const schemaErrorValueTypes = [...new Set(parseResult.errors
+        .filter((error) => error.valueType)
+        .map((error) => `${error.path}:${error.valueType}`))]
+      const schemaInvalidEnums = [...new Set(parseResult.errors
+        .map((error) => error.invalidEnum)
+        .filter((value): value is string => Boolean(value)))]
+      return fallback(options.fallbackAnswer, startedAt, model, 'invalid_schema', providerMs, usage, {
+        schemaErrorCount: parseResult.errors.length,
+        schemaErrorCodes,
+        schemaErrorPaths,
+        schemaErrorValueTypes,
+        schemaInvalidEnums,
+      })
     }
+    const plan = parseResult.plan
     const safety = validateFactualComposerPlan(plan, evidence)
     if (!safety.safe) {
-      return fallback(options.fallbackAnswer, startedAt, model, 'safety_rejected', providerMs, usage)
+      return fallback(options.fallbackAnswer, startedAt, model, 'safety_rejected', providerMs, usage, {
+        safetyErrorCodes: safety.reason ? [safety.reason] : [],
+      })
     }
     const answer = renderFactualComposerPlan(plan, evidence)
     if (!answer.trim()) {

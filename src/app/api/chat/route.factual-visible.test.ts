@@ -595,6 +595,41 @@ describe('POST /api/chat synchronous factual visibility', () => {
     expect(JSON.stringify(composerPerfCall)).not.toContain('¿Puedo considerar')
   })
 
+  it.each([
+    [
+      '¿Qué categoría tiene exactamente el área seleccionada?',
+      'El área seleccionada está identificada como SNR, categoría SNRC. La determinación procede de revisión manual y todavía no está confirmada.',
+    ],
+    [
+      '¿Qué clasificación tiene el área seleccionada?',
+      'El área seleccionada está clasificada como SNR. La determinación procede de revisión manual y todavía no está confirmada.',
+    ],
+  ])('uses a valid Composer answer for the real actionArea case: %s', async (question, composed) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'true'
+    mocks.composeFactual.mockResolvedValueOnce({
+      answer: composed,
+      diagnostics: {
+        totalMs: 90, providerMs: 75, status: 'composed', fallbackUsed: false,
+        fallbackReason: null, model: 'composer-small',
+      },
+    })
+    mocks.runFactual.mockResolvedValueOnce(validResult('RESPUESTA MECÁNICA', [
+      { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' },
+      { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+      { operation: 'state_status', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, status: 'manual_review_required' },
+      { operation: 'state_determination', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, determination: 'manual' },
+    ]))
+
+    const { payload } = await execute(question)
+
+    expect(payload).toMatchObject({ answer: composed, sources: [] })
+    expect(mocks.composeFactual).toHaveBeenCalledTimes(1)
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('keeps the validated factual renderer when Composer throws unexpectedly', async () => {
     process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
     process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'true'

@@ -219,7 +219,7 @@ export function enforceFactualCoverage(
   const intent = analyzeVisibleFactualIntent(question, contract)
   const requiresCategoryCoverage =
     intent.asksCategory || intent.asksDistribution || intent.asksConfirmation
-  const requiresClassificationCoverage = intent.asksClassification || intent.asksCategory
+  const requiresClassificationCoverage = intent.asksClassification
 
   if (!requiresCategoryCoverage && !requiresClassificationCoverage) {
     return unchanged(output, true, 'not_required')
@@ -237,10 +237,19 @@ export function enforceFactualCoverage(
 
   const requirements: CoverageRequirement[] = []
 
-  if (requiresClassificationCoverage && scopeFacts.classification) {
+  if (requiresClassificationCoverage) {
+    if (!scopeFacts.classification) {
+      return unchanged(output, false, 'missing_required_facts')
+    }
     const requirement = classificationRequirement(scopeFacts.classification, intent.scope)
     if (!requirement) return unchanged(output, false, 'unrepresentable_classification')
     requirements.push(requirement)
+  } else if (intent.asksCategory && scopeFacts.classification) {
+    // Classification is useful context for category answers when representable, but it is
+    // not a semantic prerequisite: never block valid categories because this auxiliary fact
+    // lacks a safe label/code representation.
+    const auxiliaryRequirement = classificationRequirement(scopeFacts.classification, intent.scope)
+    if (auxiliaryRequirement) requirements.push(auxiliaryRequirement)
   }
 
   if (requiresCategoryCoverage) {

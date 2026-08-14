@@ -5,12 +5,12 @@ import type { TerritorialFactualContract } from '@/domain/parcel-context/factual
 import type OpenAI from 'openai'
 
 describe('shadowEvaluator', () => {
-  it('category query exige seleccionar classification y category del mismo scope', () => {
+  it('category query exige category y mantiene classification como apoyo representable del mismo scope', () => {
     expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('Ante preguntas sobre categoría o ámbito urbanístico')
-    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('incluye operaciones de identidad para classification Y para cada category pertinente')
-    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('dentro de ESE MISMO scope')
-    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('No omitas classification por preguntar por category')
-    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('ni cruces classification o category desde otro scope')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('incluye cada category pertinente dentro del scope solicitado')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('classification del MISMO scope solo cuando tenga label completo o code representable')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('su ausencia de representación NO debe causar abstention')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('No cruces classification o category desde otro scope')
   })
 
   it('distingue status unresolved de determination unresolved y exige JSON compacto', () => {
@@ -59,9 +59,9 @@ describe('shadowEvaluator', () => {
     expect(mockClient.chat.completions.create).toHaveBeenCalled()
     const callArgs = (mockClient.chat.completions.create as any).mock.calls[0][0]
     expect(callArgs.messages[0].content).toContain('SNR') // Verifica que el contrato se inyectó
-    expect(callArgs.messages[0].content).toContain('incluye operaciones de identidad para classification Y para cada category pertinente')
-    expect(callArgs.messages[0].content).toContain('dentro de ESE MISMO scope')
-    expect(callArgs.messages[0].content).toContain('No omitas classification por preguntar por category')
+    expect(callArgs.messages[0].content).toContain('incluye cada category pertinente dentro del scope solicitado')
+    expect(callArgs.messages[0].content).toContain('classification del MISMO scope solo cuando tenga label completo o code representable')
+    expect(callArgs.messages[0].content).toContain('su ausencia de representación NO debe causar abstention')
     expect(callArgs.response_format).toEqual({ type: 'json_object' })
     expect(callArgs.thinking).toEqual({ type: 'disabled' })
     expect(callArgs.max_tokens).toBeUndefined()

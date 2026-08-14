@@ -259,6 +259,88 @@ describe('deterministic factual coverage', () => {
     expect(new Set(categoryCodes)).toEqual(new Set(['SNRC', 'SNRT']))
   })
 
+  it('parcel categories remain complete when auxiliary classification is unrepresentable', () => {
+    const factualContract = contract()
+    factualContract.factsByScope!.parcel!.classification = {
+      semanticCompleteness: 'partial',
+      status: 'unresolved',
+      determination: 'unresolved',
+    }
+
+    const result = enforceFactualCoverage(
+      '¿Qué categorías existen en toda la parcela?',
+      factualContract,
+      output([])
+    )
+
+    expect(result.diagnostics.coverageComplete).toBe(true)
+    expect(result.diagnostics.coverageReason).toBe('completed_deterministically')
+    expect(result.output.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        operation: 'state_percentage',
+        percentage: 98.53,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      }),
+      expect.objectContaining({
+        operation: 'state_percentage',
+        percentage: 1.47,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRT' },
+      }),
+    ]))
+    expect(result.output.operations.some((operation) =>
+      operation.factRef.type === 'classification'
+    )).toBe(false)
+    expect(result.output.operations.every((operation) => operation.factRef.scope === 'parcel'))
+      .toBe(true)
+  })
+
+  it('classification question still fails safely when classification is unrepresentable', () => {
+    const factualContract = contract()
+    factualContract.factsByScope!.parcel!.classification = {
+      semanticCompleteness: 'partial',
+      status: 'unresolved',
+      determination: 'unresolved',
+    }
+
+    const result = enforceFactualCoverage(
+      '¿Qué clasificación tiene la parcela?',
+      factualContract,
+      output([])
+    )
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      coverageComplete: false,
+      coverageReason: 'unrepresentable_classification',
+    }))
+    expect(result.output.operations).toEqual([])
+  })
+
+  it('actionArea category is not blocked by unrepresentable auxiliary classification', () => {
+    const factualContract = contract()
+    factualContract.factsByScope!.actionArea!.classification = {
+      semanticCompleteness: 'partial',
+      status: 'manual_review_required',
+      determination: 'manual',
+    }
+
+    const result = enforceFactualCoverage(
+      '¿Qué categoría tiene exactamente el área seleccionada?',
+      factualContract,
+      output([])
+    )
+
+    expect(result.diagnostics.coverageComplete).toBe(true)
+    expect(result.output.operations).toContainEqual({
+      operation: 'state_label',
+      factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' },
+      label: 'Núcleo Rural Común',
+    })
+    expect(result.output.operations.some((operation) =>
+      operation.factRef.type === 'classification'
+    )).toBe(false)
+    expect(JSON.stringify(result.output)).not.toContain('SNRT')
+  })
+
   it('confirmation/homogeneity incluye la categoría residual', () => {
     const result = enforceFactualCoverage(sadaQuestion, contract(), output([
       {
