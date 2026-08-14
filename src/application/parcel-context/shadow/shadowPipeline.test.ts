@@ -22,7 +22,8 @@ describe('Territorial Factual Shadow Pipeline', () => {
       chat: {
         completions: {
           create: vi.fn().mockResolvedValue({
-            choices: [{ message: { content: mockResponse } }]
+            choices: [{ message: { content: mockResponse } }],
+            usage: { prompt_tokens: 456, completion_tokens: 32 },
           })
         }
       }
@@ -69,6 +70,23 @@ describe('Territorial Factual Shadow Pipeline', () => {
 
     expect(result.status).toBe('valid')
     expect(result.renderedText?.[0]).toContain('representa el 98,53 %')
+    expect(result.diagnostics.phases).toEqual(expect.objectContaining({
+      contractMs: expect.any(Number),
+      payloadMs: expect.any(Number),
+      providerMs: expect.any(Number),
+      parseMs: expect.any(Number),
+      validateMs: expect.any(Number),
+      renderMs: expect.any(Number),
+    }))
+    expect(result.diagnostics.metrics).toEqual(expect.objectContaining({
+      payloadChars: expect.any(Number),
+      inputTokens: 456,
+      outputTokens: 32,
+      factCount: 5,
+      candidateCount: 0,
+      operationCount: 1,
+      abstentionCount: 0,
+    }))
   })
 
   it('B. Output inválido (JSON malformado)', async () => {

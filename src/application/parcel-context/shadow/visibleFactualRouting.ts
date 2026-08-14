@@ -68,13 +68,32 @@ export function shouldRunVisibleFactual(
 }
 
 export function visibleFactualAnswer(result: TerritorialShadowResult): string | null {
-  if (result.status !== 'valid') return null
-  if (!result.structuredOutput?.operations.length) return null
-  if (result.structuredOutput.abstentions.length > 0) return null
+  return assessVisibleFactualResult(result).answer
+}
+
+export interface VisibleFactualAssessment {
+  answer: string | null
+  fallbackReason: string | null
+}
+
+export function assessVisibleFactualResult(
+  result: TerritorialShadowResult
+): VisibleFactualAssessment {
+  if (result.status !== 'valid') {
+    return { answer: null, fallbackReason: `pipeline_${result.status}` }
+  }
+  if (result.structuredOutput?.abstentions.length) {
+    const causes = [...new Set(result.structuredOutput.abstentions.map((item) => item.cause))]
+    return { answer: null, fallbackReason: `abstention:${causes.join(',')}` }
+  }
+  if (!result.structuredOutput?.operations.length) {
+    return { answer: null, fallbackReason: 'no_operations' }
+  }
 
   const rendered = result.renderedText
     ?.map((line) => line.trim())
     .filter(Boolean)
 
-  return rendered?.length ? rendered.join('\n\n') : null
+  if (!rendered?.length) return { answer: null, fallbackReason: 'rendered_empty' }
+  return { answer: rendered.join('\n\n'), fallbackReason: null }
 }

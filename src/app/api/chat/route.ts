@@ -41,9 +41,9 @@ import {
 import { buildTerritorialFactualContract } from '@/application/parcel-context/buildFactualContract';
 import { runTerritorialFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowPipeline';
 import {
+  assessVisibleFactualResult,
   isSynchronousFactualEnabled,
   shouldRunVisibleFactual,
-  visibleFactualAnswer,
 } from '@/application/parcel-context/shadow/visibleFactualRouting';
 
 // Init Gemini
@@ -213,15 +213,20 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       );
     }
     releaseChatSlot = slot.release;
+    const factualTotalStartedAt = performance.now();
+    const contextLoadStartedAt = performance.now();
     const parcelInputs = await loadAuthorizedParcelInputs(expedienteId, userId);
+    const contextLoadMs = performance.now() - contextLoadStartedAt;
     if (!parcelInputs) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
+    const contextBuildStartedAt = performance.now();
     const parcelContext = buildNormalizedParcelContext({
       ...parcelInputs,
       userMessages: [...parcelInputs.userMessages, message],
     });
+    const contextBuildMs = performance.now() - contextBuildStartedAt;
     // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
     const trustedMunicipioCodigo = trustedMunicipalityCodeFilter(parcelContext);
     const municipioCodigo =
@@ -241,28 +246,35 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       rawDetection: parcelInputs.latestDetectionRaw,
     });
     // Guardar mensaje del usuario
+    const userPersistStartedAt = performance.now();
     await db.insert(chatMessages).values({
       expedienteId,
       userId,
       role: 'user',
       content: message.trim(),
     });
+    const userPersistMs = performance.now() - userPersistStartedAt;
 
     if (synchronousFactualEnabled) {
+      const contractStartedAt = performance.now();
       const factualContract = buildTerritorialFactualContract(parcelContext);
+      const contractMs = performance.now() - contractStartedAt;
+      const routingStartedAt = performance.now();
       const shouldAttemptFactual = shouldRunVisibleFactual(message, factualContract);
+      const routingMs = performance.now() - routingStartedAt;
 
       if (shouldAttemptFactual) {
-        const factualStartedAt = performance.now();
-        console.info('[FactualSync] start', { expedienteId });
+        const factualPipelineStartedAt = performance.now();
         try {
           const factualResult = await runTerritorialFactualShadowPipeline(
             message,
             factualContract,
             openai
           );
-          const answer = visibleFactualAnswer(factualResult);
-          const latencyMs = Math.round(performance.now() - factualStartedAt);
+          const assessment = assessVisibleFactualResult(factualResult);
+          const answer = assessment.answer;
+          const pipelineMs = performance.now() - factualPipelineStartedAt;
+          let persistMs = 0;
 
           if (answer) {
             const operations = factualResult.structuredOutput!.operations;
@@ -296,6 +308,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               'answer'
             );
 
+            const persistStartedAt = performance.now();
             await db.insert(chatMessages).values({
               expedienteId,
               userId,
@@ -303,35 +316,93 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               content: answer,
               sources: [],
             });
+            persistMs = performance.now() - persistStartedAt;
             scheduleFactualShadowResultPersistence({
               result: factualResult,
               query: message,
               expedienteId,
               municipalityIne: trustedMunicipioCodigo ?? null,
               shadowModel: factualResult.diagnostics.model,
-              latencyMs,
+              latencyMs: Math.round(pipelineMs),
               pipelineVersion: 'L2.6-sync-visible-v1',
             });
-            console.info('[FactualSync] end', {
+            console.info('[FactualPerf]', {
               expedienteId,
+              totalMs: Math.round(performance.now() - factualTotalStartedAt),
+              contextMs: Math.round(contextLoadMs + contextBuildMs),
+              contextLoadMs: Math.round(contextLoadMs),
+              contextBuildMs: Math.round(contextBuildMs),
+              userPersistMs: Math.round(userPersistMs),
+              contractMs: Math.round(contractMs),
+              routingMs: Math.round(routingMs),
+              pipelineMs: Math.round(pipelineMs),
+              payloadMs: Math.round(factualResult.diagnostics.phases?.payloadMs ?? 0),
+              providerStartedAt: factualResult.diagnostics.phases?.providerStartedAt,
+              providerFinishedAt: factualResult.diagnostics.phases?.providerFinishedAt,
+              providerMs: Math.round(factualResult.diagnostics.phases?.providerMs ?? 0),
+              parseMs: Math.round(factualResult.diagnostics.phases?.parseMs ?? 0),
+              validateMs: Math.round(factualResult.diagnostics.phases?.validateMs ?? 0),
+              renderMs: Math.round(factualResult.diagnostics.phases?.renderMs ?? 0),
+              persistMs: Math.round(persistMs),
+              criticalRpcMs: 0,
               status: factualResult.status,
-              latencyMs,
               fallbackUsed: false,
+              fallbackReason: null,
+              requestAborted: signal.aborted,
+              model: factualResult.diagnostics.model,
+              ...factualResult.diagnostics.metrics,
             });
             return NextResponse.json({ answer, sources: [], safety: contract });
           }
 
-          console.info('[FactualSync] end', {
+          console.info('[FactualPerf]', {
             expedienteId,
+            totalMs: Math.round(performance.now() - factualTotalStartedAt),
+            contextMs: Math.round(contextLoadMs + contextBuildMs),
+            contextLoadMs: Math.round(contextLoadMs),
+            contextBuildMs: Math.round(contextBuildMs),
+            userPersistMs: Math.round(userPersistMs),
+            contractMs: Math.round(contractMs),
+            routingMs: Math.round(routingMs),
+            pipelineMs: Math.round(pipelineMs),
+            payloadMs: Math.round(factualResult.diagnostics.phases?.payloadMs ?? 0),
+            providerStartedAt: factualResult.diagnostics.phases?.providerStartedAt,
+            providerFinishedAt: factualResult.diagnostics.phases?.providerFinishedAt,
+            providerMs: Math.round(factualResult.diagnostics.phases?.providerMs ?? 0),
+            parseMs: Math.round(factualResult.diagnostics.phases?.parseMs ?? 0),
+            validateMs: Math.round(factualResult.diagnostics.phases?.validateMs ?? 0),
+            renderMs: Math.round(factualResult.diagnostics.phases?.renderMs ?? 0),
+            persistMs: 0,
+            criticalRpcMs: 0,
             status: factualResult.status,
-            latencyMs,
             fallbackUsed: true,
+            fallbackReason: assessment.fallbackReason,
+            requestAborted: signal.aborted,
+            model: factualResult.diagnostics.model,
+            ...factualResult.diagnostics.metrics,
           });
         } catch (factualError) {
-          console.warn('[FactualSync] pipeline error; using Primary fallback', {
+          console.info('[FactualPerf]', {
             expedienteId,
-            latencyMs: Math.round(performance.now() - factualStartedAt),
-            error: factualError instanceof Error ? factualError.name : 'UnknownError',
+            totalMs: Math.round(performance.now() - factualTotalStartedAt),
+            contextMs: Math.round(contextLoadMs + contextBuildMs),
+            contextLoadMs: Math.round(contextLoadMs),
+            contextBuildMs: Math.round(contextBuildMs),
+            userPersistMs: Math.round(userPersistMs),
+            contractMs: Math.round(contractMs),
+            routingMs: Math.round(routingMs),
+            pipelineMs: Math.round(performance.now() - factualPipelineStartedAt),
+            payloadMs: 0,
+            providerMs: 0,
+            parseMs: 0,
+            validateMs: 0,
+            renderMs: 0,
+            persistMs: 0,
+            criticalRpcMs: 0,
+            status: 'pipeline_threw',
+            fallbackUsed: true,
+            fallbackReason: `exception:${factualError instanceof Error ? factualError.name : 'UnknownError'}`,
+            requestAborted: signal.aborted,
           });
         }
       }
@@ -472,9 +543,24 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       : { data: [], error: null };
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);
+    console.info('[ChatRpcPerf]', {
+      expedienteId,
+      rpcName: supplementaryScope.retrieveMunicipal ? rpcName : 'not_executed',
+      rpcMs: v1_time_ms,
+      requestAborted: signal.aborted,
+      status: municipalRetrieval.error ? 'error' : 'completed',
+    });
 
     if (municipalRetrieval.error) {
-      console.error('Supabase RPC error:', municipalRetrieval.error);
+      console.error('Supabase RPC error:', {
+        expedienteId,
+        rpcName,
+        requestAborted: signal.aborted,
+        errorName:
+          typeof municipalRetrieval.error === 'object' && municipalRetrieval.error && 'name' in municipalRetrieval.error
+            ? String(municipalRetrieval.error.name)
+            : 'SupabaseRpcError',
+      });
       return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
     }
 
@@ -487,6 +573,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const supplementaryV1Candidates: ChatNormativeCandidate[] = [];
     for (const layer of supplementaryScope.layers) {
       if (layer.source !== 'v1_global_catalog' || !layer.documentNames?.length) continue;
+      const supplementaryRpcStartedAt = performance.now();
       const { data, error } = await supabase
         .rpc('match_normativa_chunks_scoped', {
           query_embedding,
@@ -496,8 +583,25 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
           filter_ordinance: null,
         })
         .abortSignal(signal);
+      console.info('[ChatRpcPerf]', {
+        expedienteId,
+        rpcName: 'match_normativa_chunks_scoped',
+        rpcMs: Math.round(performance.now() - supplementaryRpcStartedAt),
+        requestAborted: signal.aborted,
+        status: error ? 'error' : 'completed',
+        layer: layer.hierarchy,
+      });
       if (error) {
-        console.error('Supabase supplementary normative RPC error:', error);
+        console.error('Supabase supplementary normative RPC error:', {
+          expedienteId,
+          rpcName: 'match_normativa_chunks_scoped',
+          requestAborted: signal.aborted,
+          errorName:
+            typeof error === 'object' && error && 'name' in error
+              ? String(error.name)
+              : 'SupabaseRpcError',
+          layer: layer.hierarchy,
+        });
         return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
       }
       supplementaryV1Candidates.push(

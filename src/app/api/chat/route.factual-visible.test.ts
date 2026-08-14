@@ -298,6 +298,16 @@ describe('POST /api/chat synchronous factual visibility', () => {
 
     expect(payload.answer).not.toContain('RESPUESTA FACTUAL VISIBLE')
     expect(mocks.scheduleShadow).toHaveBeenCalledTimes(1)
+    if (_case === 'abstention') {
+      const factualPerfCall = vi.mocked(console.info).mock.calls.find(
+        ([label]) => label === '[FactualPerf]'
+      )
+      expect(factualPerfCall?.[1]).toEqual(expect.objectContaining({
+        status: 'valid',
+        fallbackUsed: true,
+        fallbackReason: 'abstention:unresolved_fact',
+      }))
+    }
   })
 
   it('falls back safely when the factual call throws', async () => {
@@ -348,5 +358,27 @@ describe('POST /api/chat synchronous factual visibility', () => {
     expect(mocks.values).toHaveBeenNthCalledWith(2, expect.objectContaining({
       role: 'assistant', content: rendered, sources: [],
     }))
+    const factualPerfCall = vi.mocked(console.info).mock.calls.find(
+      ([label]) => label === '[FactualPerf]'
+    )
+    expect(factualPerfCall?.[1]).toEqual(expect.objectContaining({
+      expedienteId: 'exp-1',
+      totalMs: expect.any(Number),
+      contextMs: expect.any(Number),
+      contractMs: expect.any(Number),
+      routingMs: expect.any(Number),
+      pipelineMs: expect.any(Number),
+      providerMs: expect.any(Number),
+      parseMs: expect.any(Number),
+      validateMs: expect.any(Number),
+      renderMs: expect.any(Number),
+      persistMs: expect.any(Number),
+      criticalRpcMs: 0,
+      status: 'valid',
+      fallbackUsed: false,
+      requestAborted: false,
+    }))
+    expect(JSON.stringify(factualPerfCall)).not.toContain(rendered)
+    expect(JSON.stringify(factualPerfCall)).not.toContain('¿Qué categoría tiene')
   })
 })

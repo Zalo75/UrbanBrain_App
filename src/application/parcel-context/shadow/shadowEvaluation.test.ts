@@ -14,11 +14,13 @@ describe('shadowEvaluator', () => {
   })
 
   it('envia el contrato serializado al modelo y retorna la respuesta', async () => {
+    const onDiagnostics = vi.fn()
     const mockClient = {
       chat: {
         completions: {
           create: vi.fn().mockResolvedValue({
-            choices: [{ message: { content: 'Respuesta simulada' } }]
+            choices: [{ message: { content: 'Respuesta simulada' } }],
+            usage: { prompt_tokens: 321, completion_tokens: 24 },
           })
         }
       }
@@ -35,7 +37,11 @@ describe('shadowEvaluator', () => {
       normativeReferences: {}
     }
 
-    const response = await runTerritorialFactualShadowEvaluation('¿Cual es la clasificacion?', contract, { client: mockClient })
+    const response = await runTerritorialFactualShadowEvaluation(
+      '¿Cual es la clasificacion?',
+      contract,
+      { client: mockClient, onDiagnostics }
+    )
 
     expect(response).toBe('Respuesta simulada')
     expect(mockClient.chat.completions.create).toHaveBeenCalled()
@@ -44,5 +50,14 @@ describe('shadowEvaluator', () => {
     expect(callArgs.messages[0].content).toContain('incluye operaciones de identidad para classification Y para cada category pertinente')
     expect(callArgs.messages[0].content).toContain('dentro de ESE MISMO scope')
     expect(callArgs.messages[0].content).toContain('No omitas classification por preguntar por category')
+    expect(onDiagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      payloadMs: expect.any(Number),
+      providerStartedAt: expect.any(Number),
+      providerFinishedAt: expect.any(Number),
+      providerMs: expect.any(Number),
+      payloadChars: expect.any(Number),
+      inputTokens: 321,
+      outputTokens: 24,
+    }))
   })
 })

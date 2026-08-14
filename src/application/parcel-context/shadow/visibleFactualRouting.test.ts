@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { TerritorialShadowResult } from './shadowPipeline'
 import {
+  assessVisibleFactualResult,
   isSynchronousFactualEnabled,
   shouldRunVisibleFactual,
   visibleFactualAnswer,
@@ -125,5 +126,18 @@ describe('visible factual routing', () => {
     expect(visibleFactualAnswer(result())).toBe(
       'La categoría SNRC representa el 98,53 % de la parcela.'
     )
+  })
+
+  it('explains exactly why a valid pipeline result still falls back', () => {
+    expect(assessVisibleFactualResult(result({
+      structuredOutput: {
+        operations: [{
+          operation: 'state_label',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+          label: 'Núcleo Rural Común',
+        }],
+        abstentions: [{ cause: 'scope_mismatch' }],
+      },
+    }))).toEqual({ answer: null, fallbackReason: 'abstention:scope_mismatch' })
   })
 })
