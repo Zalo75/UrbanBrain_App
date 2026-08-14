@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { TerritorialShadowResult } from './shadowPipeline'
 import {
+  analyzeVisibleFactualIntent,
   assessVisibleFactualResult,
   isSynchronousFactualEnabled,
   shouldRunVisibleFactual,
@@ -112,6 +113,31 @@ describe('visible factual routing', () => {
       .toBe(true)
   })
 
+  it('classifies broad distribution and homogeneity for deterministic coverage', () => {
+    expect(analyzeVisibleFactualIntent(
+      '¿Qué categorías urbanísticas existen en la parcela catastral completa?',
+      contract()
+    )).toEqual(expect.objectContaining({
+      scope: 'parcel',
+      asksCategory: true,
+      asksConfirmation: false,
+    }))
+    expect(analyzeVisibleFactualIntent(
+      '¿Puedo considerar toda la parcela como SNRC?',
+      contract()
+    )).toEqual(expect.objectContaining({
+      scope: 'parcel',
+      asksConfirmation: true,
+    }))
+    expect(analyzeVisibleFactualIntent(
+      '¿Qué categoría tiene el área seleccionada?',
+      contract()
+    )).toEqual(expect.objectContaining({
+      scope: 'actionArea',
+      asksCategory: true,
+    }))
+  })
+
   it.each([
     ['llm_failed', result({ status: 'llm_failed' })],
     ['validation_failed', result({ status: 'validation_failed' })],
@@ -139,5 +165,23 @@ describe('visible factual routing', () => {
         abstentions: [{ cause: 'scope_mismatch' }],
       },
     }))).toEqual({ answer: null, fallbackReason: 'abstention:scope_mismatch' })
+  })
+
+  it('rejects a valid but incomplete coverage result and preserves the fallback', () => {
+    expect(assessVisibleFactualResult(result({
+      diagnostics: {
+        latencyMs: 10,
+        model: 'deepseek-v4-flash',
+        metrics: {
+          factCount: 3,
+          candidateCount: 0,
+          coverageComplete: false,
+          coverageReason: 'scope_mismatch',
+        },
+      },
+    }))).toEqual({
+      answer: null,
+      fallbackReason: 'coverage:scope_mismatch',
+    })
   })
 })

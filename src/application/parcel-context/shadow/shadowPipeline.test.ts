@@ -86,6 +86,56 @@ describe('Territorial Factual Shadow Pipeline', () => {
       candidateCount: 0,
       operationCount: 1,
       abstentionCount: 0,
+      coverageComplete: true,
+    }))
+  })
+
+  it('A2. completa determinísticamente la cobertura Sada antes del renderer', async () => {
+    const llmOutput = {
+      operations: [
+        {
+          operation: 'state_percentage',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+          percentage: 98.53,
+        },
+        {
+          operation: 'state_geometric_dominance',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+        },
+      ],
+      abstentions: [],
+    }
+
+    const result = await runTerritorialFactualShadowPipeline(
+      '¿Puedo considerar toda la parcela como SNRC?',
+      createMockContract(),
+      mockClient(JSON.stringify(llmOutput))
+    )
+
+    expect(result.status).toBe('valid')
+    expect(result.structuredOutput?.operations).toContainEqual({
+      operation: 'state_percentage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRT' },
+      percentage: 1.47,
+    })
+    expect(result.structuredOutput?.operations).toContainEqual({
+      operation: 'state_conflict',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+    })
+    expect(result.structuredOutput?.operations).toContainEqual({
+      operation: 'state_determination',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      determination: 'unresolved',
+    })
+    expect(result.renderedText?.join(' ')).toContain('1,47 %')
+    expect(result.renderedText?.join(' ')).not.toContain('100 %')
+    expect(result.diagnostics.metrics).toEqual(expect.objectContaining({
+      operationCount: 2,
+      coverageRequiredCount: 4,
+      coverageSelectedCount: 1,
+      coverageAddedCount: 3,
+      coverageComplete: true,
+      coverageReason: 'completed_deterministically',
     }))
   })
 

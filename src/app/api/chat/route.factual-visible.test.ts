@@ -143,7 +143,19 @@ function validResult(answer: string, operations: NonNullable<TerritorialShadowRe
     structuredOutput: { operations, abstentions: [] },
     validation: { valid: true, errors: [] },
     renderedText: [answer],
-    diagnostics: { latencyMs: 20, model: 'deepseek-v4-flash' },
+    diagnostics: {
+      latencyMs: 20,
+      model: 'deepseek-v4-flash',
+      metrics: {
+        factCount: operations.length,
+        candidateCount: 0,
+        coverageRequiredCount: operations.length,
+        coverageSelectedCount: operations.length,
+        coverageAddedCount: 0,
+        coverageComplete: true,
+        coverageReason: 'already_complete',
+      },
+    },
   }
 }
 
@@ -287,6 +299,23 @@ describe('POST /api/chat synchronous factual visibility', () => {
     ['validation_failed', { status: 'validation_failed', diagnostics: { latencyMs: 10, model: 'deepseek-v4-flash' } }],
     ['abstention', validResult('', [])],
     ['empty rendering', validResult('   ', [{ operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' }])],
+    ['coverage incomplete', {
+      ...validResult('Respuesta factual incompleta', [{
+        operation: 'state_label',
+        factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' },
+        label: 'Núcleo Rural Común',
+      }]),
+      diagnostics: {
+        latencyMs: 10,
+        model: 'deepseek-v4-flash',
+        metrics: {
+          factCount: 2,
+          candidateCount: 0,
+          coverageComplete: false,
+          coverageReason: 'scope_mismatch',
+        },
+      },
+    }],
   ] as const)('falls back to current Primary behavior on factual %s', async (_case, pipelineResult) => {
     process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
     const result = _case === 'abstention'
@@ -306,6 +335,16 @@ describe('POST /api/chat synchronous factual visibility', () => {
         status: 'valid',
         fallbackUsed: true,
         fallbackReason: 'abstention:unresolved_fact',
+      }))
+    }
+    if (_case === 'coverage incomplete') {
+      const factualPerfCall = vi.mocked(console.info).mock.calls.find(
+        ([label]) => label === '[FactualPerf]'
+      )
+      expect(factualPerfCall?.[1]).toEqual(expect.objectContaining({
+        status: 'valid',
+        fallbackUsed: true,
+        fallbackReason: 'coverage:scope_mismatch',
       }))
     }
   })

@@ -1,7 +1,17 @@
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { TerritorialShadowResult } from './shadowPipeline'
 
-type FactualScope = 'parcel' | 'actionArea'
+export type FactualScope = 'parcel' | 'actionArea'
+
+export interface VisibleFactualIntentAnalysis {
+  scope: FactualScope
+  asksCategory: boolean
+  asksClassification: boolean
+  asksGeometry: boolean
+  asksDistribution: boolean
+  asksConfirmation: boolean
+  asksState: boolean
+}
 
 const NORMATIVE_OR_PARAMETER_PATTERN =
   /\b(?:edificabilidad|ocupaci[oó]n(?:\s+m[aá]xima)?|retranqueos?|altura|n[uú]mero\s+de\s+plantas|plantas|parcela\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:permitidos?|compatibles?|prohibidos?)|materiales?|condiciones?\s+est[eé]ticas?|ordenanza|art[ií]culos?|normativa|regulaci[oó]n|cte|licencias?|consecuencias?\s+(?:jur[ií]dicas?|normativas?))\b/iu
@@ -24,26 +34,46 @@ const PARCEL_SCOPE_PATTERN =
 const ACTION_AREA_SCOPE_PATTERN =
   /(?:^|\s)(?:[aá]rea\s+(?:de\s+actuaci[oó]n\s+)?seleccionada|[aá]rea\s+que\s+(?:tengo|est[aá])\s+seleccionada|[aá]mbito\s+seleccionado|zona\s+de\s+trabajo)(?=\s|[?¿,.!:;]|$)/iu
 
-function requestedScope(question: string, contract: TerritorialFactualContract): FactualScope {
+export function requestedScope(question: string, contract: TerritorialFactualContract): FactualScope {
   if (PARCEL_SCOPE_PATTERN.test(question)) return 'parcel'
   if (ACTION_AREA_SCOPE_PATTERN.test(question)) return 'actionArea'
   return contract.factsByScope?.actionArea ? 'actionArea' : 'parcel'
 }
 
-function hasCoveredFacts(question: string, contract: TerritorialFactualContract) {
-  const scopeFacts = contract.factsByScope?.[requestedScope(question, contract)]
-  if (!scopeFacts) return false
-
-  const asksGeometry = TERRITORIAL_GEOMETRY_PATTERN.test(question)
+export function analyzeVisibleFactualIntent(
+  question: string,
+  contract: TerritorialFactualContract
+): VisibleFactualIntentAnalysis {
   const asksCategory = /\bcategor[ií]as?\b/iu.test(question)
   const asksClassification = /\bclasificaci[oó]n|clase\s+de\s+suelo|tipo\s+de\s+suelo\b/iu.test(question)
+  const asksGeometry = TERRITORIAL_GEOMETRY_PATTERN.test(question)
   const asksConfirmation = TERRITORIAL_CONFIRMATION_PATTERN.test(question)
+  const asksState = TERRITORIAL_STATE_PATTERN.test(question)
+  const asksDistribution =
+    /\b(?:porcentajes|distribuci[oó]n\s+geom[eé]trica|predomina|predominio|mayor\s+presencia\s+geom[eé]trica)\b/iu.test(question) ||
+    /\bqu[eé]\s+parte\b[\s\S]{0,80}\b(?:cada\s+categor[ií]a|categor[ií]as)\b/iu.test(question)
 
-  if (asksGeometry) {
+  return {
+    scope: requestedScope(question, contract),
+    asksCategory,
+    asksClassification,
+    asksGeometry,
+    asksDistribution,
+    asksConfirmation,
+    asksState,
+  }
+}
+
+function hasCoveredFacts(question: string, contract: TerritorialFactualContract) {
+  const intent = analyzeVisibleFactualIntent(question, contract)
+  const scopeFacts = contract.factsByScope?.[intent.scope]
+  if (!scopeFacts) return false
+
+  if (intent.asksGeometry) {
     return Boolean(scopeFacts.categories?.some((category) => category.parcelPercentage !== undefined))
   }
-  if (asksCategory || asksConfirmation) return Boolean(scopeFacts.categories?.length)
-  if (asksClassification) return Boolean(scopeFacts.classification)
+  if (intent.asksCategory || intent.asksConfirmation) return Boolean(scopeFacts.categories?.length)
+  if (intent.asksClassification) return Boolean(scopeFacts.classification)
 
   return Boolean(scopeFacts.classification || scopeFacts.categories?.length)
 }
@@ -81,6 +111,12 @@ export function assessVisibleFactualResult(
 ): VisibleFactualAssessment {
   if (result.status !== 'valid') {
     return { answer: null, fallbackReason: `pipeline_${result.status}` }
+  }
+  if (result.diagnostics.metrics?.coverageComplete === false) {
+    return {
+      answer: null,
+      fallbackReason: `coverage:${result.diagnostics.metrics.coverageReason ?? 'incomplete'}`,
+    }
   }
   if (result.structuredOutput?.abstentions.length) {
     const causes = [...new Set(result.structuredOutput.abstentions.map((item) => item.cause))]

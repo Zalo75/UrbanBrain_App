@@ -2,6 +2,7 @@ import { buildTerritorialFactualContract } from '../buildFactualContract'
 import { runTerritorialFactualShadowEvaluation } from './shadowEvaluator'
 import { validateStructuredFactualOutput } from './factualValidator'
 import { renderFactualOutput } from './factualRenderer'
+import { enforceFactualCoverage, type FactualCoverageDiagnostics } from './factualCoverage'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { StructuredFactualOutput } from './structuredFactualOutput'
@@ -28,6 +29,11 @@ export interface TerritorialShadowMetrics {
   candidateCount: number
   operationCount?: number
   abstentionCount?: number
+  coverageRequiredCount?: number
+  coverageSelectedCount?: number
+  coverageAddedCount?: number
+  coverageComplete?: boolean
+  coverageReason?: string
 }
 
 export interface TerritorialShadowResult {
@@ -97,6 +103,7 @@ export async function runTerritorialFactualShadowPipeline(
   let renderMs = 0
   let operationCount: number | undefined
   let abstentionCount: number | undefined
+  let coverageDiagnostics: FactualCoverageDiagnostics | undefined
   let rawLlmResponse = ''
 
   const diagnostics = (error?: string) => ({
@@ -121,6 +128,7 @@ export async function runTerritorialFactualShadowPipeline(
       outputTokens: evaluationDiagnostics?.outputTokens,
       operationCount,
       abstentionCount,
+      ...coverageDiagnostics,
     },
   })
 
@@ -153,7 +161,7 @@ export async function runTerritorialFactualShadowPipeline(
     parseMs = performance.now() - parseStartedAt
 
     const validateStartedAt = performance.now()
-    const validation = validateStructuredFactualOutput(structuredOutput, contract)
+    let validation = validateStructuredFactualOutput(structuredOutput, contract)
     validateMs = performance.now() - validateStartedAt
     if (!validation.valid) {
       return {
@@ -161,6 +169,24 @@ export async function runTerritorialFactualShadowPipeline(
         structuredOutput,
         validation,
         diagnostics: diagnostics('Validation rejected output')
+      }
+    }
+
+    const coverage = enforceFactualCoverage(question, contract, structuredOutput)
+    structuredOutput = coverage.output
+    coverageDiagnostics = coverage.diagnostics
+
+    if (coverage.diagnostics.coverageAddedCount > 0) {
+      const coverageValidationStartedAt = performance.now()
+      validation = validateStructuredFactualOutput(structuredOutput, contract)
+      validateMs += performance.now() - coverageValidationStartedAt
+      if (!validation.valid) {
+        return {
+          status: 'validation_failed',
+          structuredOutput,
+          validation,
+          diagnostics: diagnostics('Coverage operations rejected by validation')
+        }
       }
     }
 
