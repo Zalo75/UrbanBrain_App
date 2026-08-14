@@ -239,11 +239,17 @@ export function enforceFactualCoverage(
 
   if (requiresClassificationCoverage) {
     if (!scopeFacts.classification) {
-      return unchanged(output, false, 'missing_required_facts')
+      if (!requiresCategoryCoverage) return unchanged(output, false, 'missing_required_facts')
+    } else {
+      const requirement = classificationRequirement(scopeFacts.classification, intent.scope)
+      if (!requirement) {
+        if (!requiresCategoryCoverage) {
+          return unchanged(output, false, 'unrepresentable_classification')
+        }
+      } else {
+        requirements.push(requirement)
+      }
     }
-    const requirement = classificationRequirement(scopeFacts.classification, intent.scope)
-    if (!requirement) return unchanged(output, false, 'unrepresentable_classification')
-    requirements.push(requirement)
   } else if (intent.asksCategory && scopeFacts.classification) {
     // Classification is useful context for category answers when representable, but it is
     // not a semantic prerequisite: never block valid categories because this auxiliary fact

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
+import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
+import { buildTerritorialFactualContract } from '../buildFactualContract'
 import { validateStructuredFactualOutput } from './factualValidator'
 import { enforceFactualCoverage } from './factualCoverage'
 import type { StructuredFactualOutput } from './structuredFactualOutput'
+import { analyzeVisibleFactualIntent } from './visibleFactualRouting'
 
 function contract(): TerritorialFactualContract {
   const parcelClassification = {
@@ -63,9 +66,175 @@ function output(operations: StructuredFactualOutput['operations']): StructuredFa
   return { operations, abstentions: [] }
 }
 
+function realisticSadaContract() {
+  const common = {
+    confidence: 'high' as const,
+    evidence: [],
+    warnings: [],
+    discrepancies: [],
+  }
+  const context: NormalizedParcelContext = {
+    parcelUrbanisticFacts: {
+      classification: {
+        status: 'source_unavailable', confidence: 'unknown', evidence: [], warnings: [],
+        discrepancies: [], nextAction: 'retry_source',
+      },
+      category: {
+        ...common, status: 'conflict', origin: 'spatial_intersection',
+        nextAction: 'manual_selection',
+        candidates: [
+          {
+            value: { code: 'SNRC', label: 'Núcleo Rural Común' },
+            parcelPercentage: 98.53,
+          },
+          {
+            value: { code: 'SNRT', label: 'Núcleo Rural Tradicional' },
+            parcelPercentage: 1.47,
+          },
+        ],
+      },
+      consolidation: {
+        status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+        discrepancies: [], nextAction: 'none',
+      },
+    },
+    urbanisticFacts: {
+      classification: {
+        ...common, value: { code: 'SNR', label: 'Suelo de Núcleo Rural' },
+        label: 'Suelo de Núcleo Rural', status: 'manual_review_required',
+        origin: 'technician_selection', nextAction: 'manual_selection',
+      },
+      category: {
+        ...common, value: { code: 'SNRC', label: 'Núcleo Rural Común' },
+        label: 'Núcleo Rural Común', status: 'manual_review_required',
+        origin: 'technician_selection', nextAction: 'manual_selection',
+      },
+      consolidation: {
+        status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+        discrepancies: [], nextAction: 'none',
+      },
+    },
+    actionArea: {
+      value: {
+        id: 'sada-action-area', selectionType: 'detected_zone',
+        surfaceSquareMetres: 1764.22, parcelSurfaceSquareMetres: 1790.46,
+        geometry: { type: 'MultiPolygon', coordinates: [], crs: 'EPSG:4326' },
+        source: 'user_polygon', confidence: 'high', selectedBy: 'user',
+        selectedAt: '2026-08-14T10:00:00.000Z', verification: 'unverified',
+      },
+      source: 'manual', confidence: 1, verification: 'unverified',
+    },
+    parcelSurfaceSquareMetres: 1790.46,
+    knownConstraints: [], parcelKnownConstraints: [], conflicts: [], pendingValidation: [],
+  }
+
+  return buildTerritorialFactualContract(context)
+}
+
 const sadaQuestion = '¿Puedo considerar toda la parcela como Núcleo Rural Común (SNRC)?'
 
 describe('deterministic factual coverage', () => {
+  it('reproduce el contrato construido de Sada y completa category parcel sin classification representable', () => {
+    const factualContract = realisticSadaContract()
+    const question = '¿Qué categorías existen en toda la parcela?'
+
+    expect(factualContract.factsByScope?.parcel?.classification).toEqual(expect.objectContaining({
+      code: undefined,
+      label: undefined,
+      semanticCompleteness: undefined,
+      status: 'source_unavailable',
+      determination: 'unresolved',
+    }))
+    expect(factualContract.factsByScope?.actionArea).toEqual(expect.objectContaining({
+      classification: expect.objectContaining({
+        code: 'SNR', status: 'manual_review_required', determination: 'manual',
+      }),
+      categories: [expect.objectContaining({
+        code: 'SNRC', status: 'manual_review_required', determination: 'manual',
+      })],
+    }))
+    expect(analyzeVisibleFactualIntent(question, factualContract)).toEqual(expect.objectContaining({
+      scope: 'parcel', asksCategory: true, asksClassification: false, asksDistribution: true,
+    }))
+
+    const result = enforceFactualCoverage(question, factualContract, output([]))
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      coverageComplete: true,
+      coverageReason: 'completed_deterministically',
+    }))
+    expect(result.output.operations).toEqual(expect.arrayContaining([
+      {
+        operation: 'state_percentage', percentage: 98.53,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      },
+      {
+        operation: 'state_percentage', percentage: 1.47,
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRT' },
+      },
+      {
+        operation: 'state_conflict',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      },
+      {
+        operation: 'state_determination', determination: 'unresolved',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      },
+    ]))
+    expect(result.output.operations.every((operation) => operation.factRef.scope === 'parcel'))
+      .toBe(true)
+    expect(result.output.operations.some((operation) =>
+      operation.factRef.type === 'classification'
+    )).toBe(false)
+  })
+
+  it('no bloquea categories suficientes si el análisis también activa classification', () => {
+    const factualContract = realisticSadaContract()
+    const result = enforceFactualCoverage(
+      '¿Qué régimen urbanístico y categorías existen en toda la parcela?',
+      factualContract,
+      output([])
+    )
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      coverageComplete: true,
+      coverageReason: 'completed_deterministically',
+    }))
+    expect(result.output.operations.some((operation) =>
+      operation.factRef.type === 'classification'
+    )).toBe(false)
+  })
+
+  it('mantiene incompleta una petición classification-only con el contrato realista de Sada', () => {
+    const result = enforceFactualCoverage(
+      '¿Qué clasificación tiene toda la parcela?',
+      realisticSadaContract(),
+      output([])
+    )
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      coverageComplete: false,
+      coverageReason: 'unrepresentable_classification',
+    }))
+    expect(result.output.operations).toEqual([])
+  })
+
+  it('homogeneity sobre el contrato realista conserva las dos categories exactas', () => {
+    const result = enforceFactualCoverage(
+      '¿Toda la parcela tiene la misma categoría?',
+      realisticSadaContract(),
+      output([])
+    )
+
+    expect(result.diagnostics.coverageComplete).toBe(true)
+    expect(result.output.operations.filter((operation) =>
+      operation.operation === 'state_percentage'
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ percentage: 98.53, factRef: expect.objectContaining({ code: 'SNRC' }) }),
+      expect.objectContaining({ percentage: 1.47, factRef: expect.objectContaining({ code: 'SNRT' }) }),
+    ]))
+  })
+
   it('completa Sada con SNRT 1,47 cuando el LLM solo selecciona SNRC 98,53', () => {
     const initial = output([
       {
