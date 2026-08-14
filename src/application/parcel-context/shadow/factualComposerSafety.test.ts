@@ -4,6 +4,7 @@ import {
   validateFactualComposerPlan,
 } from './factualComposerSafety'
 import { sadaEvidence, sadaPlan } from './factualComposer.testFixtures'
+import type { FactualComposerEvidence, FactualComposerPlan } from './factualComposerTypes'
 
 describe('factualComposerSafety', () => {
   it('accepts the complete, scoped Sada semantic plan', () => {
@@ -64,5 +65,33 @@ describe('factualComposerSafety', () => {
       ...sadaPlan,
       explanation: [...sadaPlan.explanation, { kind: 'fact_identity', factId: 'category:actionArea:SNRC' }],
     }, sadaEvidence).safe).toBe(false)
+  })
+
+  it.each([
+    ['manual_review_required', 'manual', 'manual_review_required', 'manual_determination'],
+    ['automatic_confirmed', 'automatic', 'automatic_status', 'automatic_determination'],
+  ] as const)('keeps both material state dimensions for %s + %s', (
+    status, determination, statusKind, determinationKind
+  ) => {
+    const evidence: FactualComposerEvidence = {
+      schemaVersion: '1', questionIntent: 'classification_identity', scope: 'actionArea',
+      requestedFactTypes: ['classification', 'status', 'determination'],
+      validatedFacts: [{
+        id: 'classification:actionArea', type: 'classification', scope: 'actionArea',
+        code: 'SNR', status, determination, geometricDominance: false,
+      }],
+    }
+    const plan: FactualComposerPlan = {
+      schemaVersion: '1', conclusion: { kind: 'classification_identity' },
+      explanation: [{ kind: 'fact_identity', factId: 'classification:actionArea' }],
+      caveats: [
+        { kind: statusKind, factId: 'classification:actionArea' },
+        { kind: determinationKind, factId: 'classification:actionArea' },
+      ],
+      recommendedChecks: [],
+    }
+    expect(validateFactualComposerPlan(plan, evidence)).toEqual({ safe: true })
+    expect(validateFactualComposerPlan({ ...plan, caveats: plan.caveats.slice(0, 1) }, evidence).safe)
+      .toBe(false)
   })
 })

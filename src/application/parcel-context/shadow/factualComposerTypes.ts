@@ -58,6 +58,8 @@ export type FactualComposerCaveat =
   | { kind: 'unresolved'; factId: string }
   | { kind: 'manual_review_required'; factId: string }
   | { kind: 'manual_determination'; factId: string }
+  | { kind: 'automatic_status'; factId: string }
+  | { kind: 'automatic_determination'; factId: string }
 
 export type FactualComposerRecommendedCheck =
   | 'verify_minority_area'

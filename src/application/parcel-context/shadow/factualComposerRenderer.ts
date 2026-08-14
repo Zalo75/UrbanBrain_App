@@ -63,12 +63,14 @@ function renderDistribution(categories: FactualComposerFact[], dominant?: Factua
   return `El análisis territorial identifica ${joinSpanish(shares)}${dominance}.`
 }
 
-function renderStateCaveat(plan: FactualComposerPlan) {
+function renderStateCaveat(plan: FactualComposerPlan, evidence: FactualComposerEvidence) {
   const kinds = new Set(plan.caveats.map((item) => item.kind))
   const conflict = kinds.has('conflict')
   const unresolved = kinds.has('unresolved')
   const manualReview = kinds.has('manual_review_required')
   const manualDetermination = kinds.has('manual_determination')
+  const automaticStatus = kinds.has('automatic_status')
+  const automaticDetermination = kinds.has('automatic_determination')
 
   if (conflict && unresolved) {
     return 'La información territorial presenta un conflicto y la determinación global permanece pendiente de resolución.'
@@ -80,6 +82,22 @@ function renderStateCaveat(plan: FactualComposerPlan) {
   if (manualReview) return 'El estado factual todavía requiere revisión o confirmación.'
   if (manualDetermination) return 'La determinación procede de revisión manual.'
   if (unresolved) return 'La determinación permanece pendiente de resolución.'
+  if (automaticStatus && automaticDetermination) {
+    const facts = new Map(evidence.validatedFacts.map((fact) => [fact.id, fact]))
+    const automaticStatusFacts = plan.caveats
+      .filter((item) => item.kind === 'automatic_status')
+      .map((item) => facts.get(item.factId))
+      .filter((fact): fact is FactualComposerFact => Boolean(fact))
+    if (
+      automaticStatusFacts.length > 0 &&
+      automaticStatusFacts.every((fact) => fact.status === 'automatic_confirmed')
+    ) {
+      return 'La determinación se obtuvo automáticamente y consta confirmada.'
+    }
+    return 'La determinación se obtuvo automáticamente y todavía requiere confirmación.'
+  }
+  if (automaticDetermination) return 'La determinación se obtuvo automáticamente.'
+  if (automaticStatus) return 'El estado procede de una determinación automática.'
   return ''
 }
 
@@ -129,10 +147,11 @@ export function renderFactualComposerPlan(
     paragraphs.push(renderDistribution(categories, dominant))
   }
 
-  paragraphs.push(renderStateCaveat(plan))
+  const stateCaveat = renderStateCaveat(plan, evidence)
+  paragraphs.push(stateCaveat)
   if (plan.recommendedChecks.includes('verify_minority_area')) {
     paragraphs.push('Conviene verificar la porción minoritaria antes de tratar la parcela como urbanísticamente homogénea.')
-  } else if (plan.recommendedChecks.includes('confirm_pending_determination')) {
+  } else if (plan.recommendedChecks.includes('confirm_pending_determination') && !stateCaveat) {
     paragraphs.push('Conviene confirmar la determinación pendiente antes de adoptar una conclusión definitiva.')
   }
 

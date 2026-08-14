@@ -13,30 +13,58 @@ export interface VisibleFactualIntentAnalysis {
   asksState: boolean
 }
 
+function normalizeQuestion(question: string) {
+  return question
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('es')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
 const NORMATIVE_OR_PARAMETER_PATTERN =
-  /\b(?:edificabilidad|ocupaci[oó]n(?:\s+m[aá]xima)?|retranqueos?|altura|n[uú]mero\s+de\s+plantas|plantas|parcela\s+m[ií]nima|frente\s+m[ií]nimo|usos?\s+(?:permitidos?|compatibles?|prohibidos?)|materiales?|condiciones?\s+est[eé]ticas?|ordenanza|art[ií]culos?|normativa|regulaci[oó]n|cte|licencias?|consecuencias?\s+(?:jur[ií]dicas?|normativas?))\b/iu
+  /\b(?:edificabilidad|ocupacion|retranqueos?|alturas?|numero de plantas|plantas|parcela minima|frente minimo|usos?|materiales?|fachadas?|condiciones esteticas?|ordenanzas?|articulos?|normativa|regulacion|cte|licencias?|consecuencias juridicas?|consecuencias normativas?|interpretacion normativa)\b/u
 
-const TERRITORIAL_IDENTITY_PATTERN =
-  /\b(?:clasificaci[oó]n|categor[ií]as?|clase\s+de\s+suelo|tipo\s+de\s+suelo)\b/iu
-
+const CATEGORY_PATTERN = /\bcategor(?:ia|ias)\b/u
+const CLASSIFICATION_PATTERN = /\b(?:clasificacion|clase de suelo|tipo de suelo|regimen urbanistico)\b/u
+const TERRITORIAL_REGIME_PATTERN = /\bregimen\b/u
+const TERRITORIAL_SUBJECT_PATTERN =
+  /\b(?:categor(?:ia|ias)|clasificacion|clase de suelo|tipo de suelo|regimen|suelo|parcela|finca|area|zona|ambito)\b/u
 const TERRITORIAL_GEOMETRY_PATTERN =
-  /\b(?:porcentajes?|distribuci[oó]n\s+geom[eé]trica|predomina|predominio|mayor\s+presencia\s+geom[eé]trica|qu[eé]\s+parte\s+(?:corresponde|ocupa|representa))\b/iu
-
+  /\b(?:porcentaje|porcentajes|reparto|reparte|reparten|distribucion|distribuye|distribuyen|predomina|predominio|mayor presencia geometrica|que parte|cuanto corresponde)\b/u
+const TERRITORIAL_DISTRIBUTION_PATTERN =
+  /\b(?:porcentajes|reparto|reparte|reparten|distribucion|distribuye|distribuyen|predomina|predominio|mayor presencia geometrica)\b|\b(?:que parte|porcentaje|cuanto corresponde)\b.{0,80}\b(?:cada categoria|categorias)\b/u
 const TERRITORIAL_STATE_PATTERN =
-  /\b(?:conflicto|conflictiva?|sin\s+resolver|no\s+resuelt[ao]|unresolved|determinaci[oó]n|estado\s+(?:territorial|de\s+la\s+(?:clasificaci[oó]n|categor[ií]a)))\b/iu
-
+  /\b(?:estado|conflicto|conflictiva|confirmada|confirmado|confirmar|verificada|verificado|resuelta|resuelto|pendiente|sin resolver|no resuelta|no resuelto|unresolved|determinacion|revision)\b/u
 const TERRITORIAL_CONFIRMATION_PATTERN =
-  /\b(?:puedo\s+considerar|puede\s+considerarse|puede\s+confirmarse|confirmar)\b[\s\S]{0,100}\b(?:parcela|finca|[aá]rea|suelo|n[uú]cleo|urbano|r[uú]stico)\b|\b(?:toda\s+la\s+parcela|parcela\s+(?:catastral\s+)?completa|[aá]rea\s+(?:de\s+actuaci[oó]n\s+)?seleccionada)\b[\s\S]{0,80}\b(?:es|pertenece|se\s+clasifica)\b/iu
-
-const PARCEL_SCOPE_PATTERN =
-  /\b(?:toda\s+la\s+parcela|parcela\s+(?:catastral\s+)?completa|conjunto\s+de\s+la\s+parcela|toda\s+la\s+finca|finca\s+completa|independientemente\s+del\s+[aá]rea)\b/iu
-
+  /\b(?:puedo considerar|puede considerarse|puede confirmarse|misma categoria|mas de una categoria)\b|\b(?:parcela|finca|area|zona|ambito)\b.{0,80}\b(?:es|son|pertenece|pertenecen|se clasifica)\b.{0,40}\b(?:snr[a-z0-9]*|suelo|categoria|clasificacion)\b/u
+const PARCEL_SCOPE_PATTERN = /\b(?:parcela|finca)\b/u
 const ACTION_AREA_SCOPE_PATTERN =
-  /(?:^|\s)(?:[aá]rea\s+(?:de\s+actuaci[oó]n\s+)?seleccionada|[aá]rea\s+que\s+(?:tengo|est[aá])\s+seleccionada|[aá]mbito\s+seleccionado|zona\s+de\s+trabajo)(?=\s|[?¿,.!:;]|$)/iu
+  /\b(?:area|zona|ambito)\s+(?:de actuacion\s+)?(?:seleccionada|seleccionado|marcada|marcado)\b|\b(?:esta zona|esta area|(?:area|zona) que (?:he|tengo|esta) marcad[ao]|zona de trabajo)\b/u
+
+function asksTerritorialRegime(normalized: string) {
+  return TERRITORIAL_REGIME_PATTERN.test(normalized) &&
+    (PARCEL_SCOPE_PATTERN.test(normalized) || ACTION_AREA_SCOPE_PATTERN.test(normalized))
+}
+
+function hasPercentageFacts(contract: TerritorialFactualContract, scope: FactualScope) {
+  return Boolean(contract.factsByScope?.[scope]?.categories?.some(
+    (category) => category.parcelPercentage !== undefined
+  ))
+}
 
 export function requestedScope(question: string, contract: TerritorialFactualContract): FactualScope {
-  if (PARCEL_SCOPE_PATTERN.test(question)) return 'parcel'
-  if (ACTION_AREA_SCOPE_PATTERN.test(question)) return 'actionArea'
+  const normalized = normalizeQuestion(question)
+  if (PARCEL_SCOPE_PATTERN.test(normalized)) return 'parcel'
+  if (ACTION_AREA_SCOPE_PATTERN.test(normalized)) return 'actionArea'
+  if (TERRITORIAL_GEOMETRY_PATTERN.test(normalized)) {
+    const parcelHasPercentages = hasPercentageFacts(contract, 'parcel')
+    const actionAreaHasPercentages = hasPercentageFacts(contract, 'actionArea')
+    if (parcelHasPercentages !== actionAreaHasPercentages) {
+      return parcelHasPercentages ? 'parcel' : 'actionArea'
+    }
+  }
   return contract.factsByScope?.actionArea ? 'actionArea' : 'parcel'
 }
 
@@ -44,17 +72,19 @@ export function analyzeVisibleFactualIntent(
   question: string,
   contract: TerritorialFactualContract
 ): VisibleFactualIntentAnalysis {
-  const asksCategory = /\bcategor[ií]as?\b/iu.test(question)
-  const asksClassification = /\bclasificaci[oó]n|clase\s+de\s+suelo|tipo\s+de\s+suelo\b/iu.test(question)
-  const asksGeometry = TERRITORIAL_GEOMETRY_PATTERN.test(question)
-  const asksConfirmation = TERRITORIAL_CONFIRMATION_PATTERN.test(question)
-  const asksState = TERRITORIAL_STATE_PATTERN.test(question)
-  const asksDistribution =
-    /\b(?:porcentajes|distribuci[oó]n\s+geom[eé]trica|predomina|predominio|mayor\s+presencia\s+geom[eé]trica)\b/iu.test(question) ||
-    /\bqu[eé]\s+parte\b[\s\S]{0,80}\b(?:cada\s+categor[ií]a|categor[ií]as)\b/iu.test(question)
+  const normalized = normalizeQuestion(question)
+  const scope = requestedScope(question, contract)
+  const asksCategory = CATEGORY_PATTERN.test(normalized)
+  const asksClassification = CLASSIFICATION_PATTERN.test(normalized) || asksTerritorialRegime(normalized)
+  const asksGeometry = TERRITORIAL_GEOMETRY_PATTERN.test(normalized)
+  const asksConfirmation = TERRITORIAL_CONFIRMATION_PATTERN.test(normalized)
+  const asksState = TERRITORIAL_STATE_PATTERN.test(normalized)
+  const asksDistribution = TERRITORIAL_DISTRIBUTION_PATTERN.test(normalized) || (
+    scope === 'parcel' && /\bcategorias\b/u.test(normalized)
+  )
 
   return {
-    scope: requestedScope(question, contract),
+    scope,
     asksCategory,
     asksClassification,
     asksGeometry,
@@ -86,13 +116,16 @@ export function shouldRunVisibleFactual(
   question: string,
   contract: TerritorialFactualContract
 ) {
-  if (NORMATIVE_OR_PARAMETER_PATTERN.test(question)) return false
+  const normalized = normalizeQuestion(question)
+  if (NORMATIVE_OR_PARAMETER_PATTERN.test(normalized)) return false
 
   const hasFactualIntent =
-    TERRITORIAL_IDENTITY_PATTERN.test(question) ||
-    TERRITORIAL_GEOMETRY_PATTERN.test(question) ||
-    TERRITORIAL_STATE_PATTERN.test(question) ||
-    TERRITORIAL_CONFIRMATION_PATTERN.test(question)
+    CATEGORY_PATTERN.test(normalized) ||
+    CLASSIFICATION_PATTERN.test(normalized) ||
+    asksTerritorialRegime(normalized) ||
+    TERRITORIAL_GEOMETRY_PATTERN.test(normalized) ||
+    TERRITORIAL_CONFIRMATION_PATTERN.test(normalized) ||
+    (TERRITORIAL_STATE_PATTERN.test(normalized) && TERRITORIAL_SUBJECT_PATTERN.test(normalized))
 
   return hasFactualIntent && hasCoveredFacts(question, contract)
 }

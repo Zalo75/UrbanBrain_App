@@ -264,6 +264,28 @@ describe('POST /api/chat synchronous factual visibility', () => {
     expect(factType).toMatch(/category|classification/)
   })
 
+  it.each([
+    '¿Qué categoría tiene esta zona?',
+    '¿Cuál es la categoría del área marcada?',
+  ])('serves the short actionArea variant without Primary or parcel leakage: %s', async (message) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'false'
+    const rendered = 'El área seleccionada está identificada como SNR, categoría SNRC.'
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [
+      { operation: 'state_label', factRef: { type: 'classification', scope: 'actionArea' }, label: 'Suelo de núcleo rural' },
+      { operation: 'state_label', factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' }, label: 'Núcleo Rural Común' },
+    ]))
+
+    const { payload } = await execute(message)
+
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.runFactual).toHaveBeenCalledTimes(1)
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    expect(payload.answer).not.toContain('SNRT')
+  })
+
   it('serves parcel multicategory percentages without mixing actionArea or rounding dominance to 100', async () => {
     process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
     mocks.runFactual.mockResolvedValueOnce(validResult(
@@ -293,6 +315,30 @@ describe('POST /api/chat synchronous factual visibility', () => {
       .toEqual(['SNRC'])
   })
 
+  it.each([
+    '¿Qué categorías existen en toda la parcela?',
+    '¿Qué categorías tiene la parcela?',
+    '¿Toda la parcela tiene la misma categoría?',
+  ])('serves the short parcel variant without entering Primary: %s', async (message) => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'false'
+    const rendered = 'SNRC representa el 98,53 % de la parcela y predomina.\n\nSNRT representa el 1,47 %.'
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [
+      { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, percentage: 98.53 },
+      { operation: 'state_geometric_dominance', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+      { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRT' }, percentage: 1.47 },
+      { operation: 'state_conflict', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' } },
+    ]))
+
+    const { payload } = await execute(message)
+
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.runFactual).toHaveBeenCalledTimes(1)
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('does not turn parcel geometric dominance into a categorical yes', async () => {
     process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
     mocks.runFactual.mockResolvedValueOnce(validResult(
@@ -315,6 +361,8 @@ describe('POST /api/chat synchronous factual visibility', () => {
     '¿Cuál es la ocupación máxima de NRC-1?',
     '¿Qué retranqueos se aplican?',
     '¿Qué usos permitidos tiene SNRC?',
+    '¿Qué materiales puedo usar en fachada?',
+    '¿Qué artículo normativo se aplica?',
     'Resume este expediente de forma general.',
   ])('keeps the non-factual question in Primary: %s', async (message) => {
     process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'

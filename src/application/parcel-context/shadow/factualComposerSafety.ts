@@ -25,6 +25,8 @@ const CAVEAT_KINDS = new Set<FactualComposerCaveat['kind']>([
   'unresolved',
   'manual_review_required',
   'manual_determination',
+  'automatic_status',
+  'automatic_determination',
 ])
 const CHECK_KINDS = new Set<FactualComposerRecommendedCheck>([
   'verify_minority_area',
@@ -189,6 +191,10 @@ export function validateFactualComposerPlan(
       (fact) => fact.status === 'manual_review_required'
     ),
     manual_determination: evidence.validatedFacts.some((fact) => fact.determination === 'manual'),
+    automatic_status: evidence.validatedFacts.some((fact) => fact.status?.startsWith('automatic_')),
+    automatic_determination: evidence.validatedFacts.some(
+      (fact) => fact.determination === 'automatic'
+    ),
   }
   for (const [kind, required] of Object.entries(materialStates)) {
     if (required && !hasCaveat(plan, kind as FactualComposerCaveat['kind'])) {
@@ -201,7 +207,9 @@ export function validateFactualComposerPlan(
       (caveat.kind === 'conflict' && fact.status === 'conflict') ||
       (caveat.kind === 'unresolved' && (fact.status === 'unresolved' || fact.determination === 'unresolved')) ||
       (caveat.kind === 'manual_review_required' && fact.status === 'manual_review_required') ||
-      (caveat.kind === 'manual_determination' && fact.determination === 'manual')
+      (caveat.kind === 'manual_determination' && fact.determination === 'manual') ||
+      (caveat.kind === 'automatic_status' && fact.status?.startsWith('automatic_')) ||
+      (caveat.kind === 'automatic_determination' && fact.determination === 'automatic')
     if (!supported) return { safe: false, reason: 'unsupported_caveat' }
   }
 

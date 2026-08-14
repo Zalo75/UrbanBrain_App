@@ -77,6 +77,46 @@ describe('factualComposer', () => {
     expect(JSON.stringify(request)).not.toContain(baseOptions().question)
   })
 
+  it('composes actionArea classification manual state once instead of exposing mechanical duplicates', async () => {
+    const contract = createSadaContract()
+    const classification = {
+      code: 'SNR', label: 'Suelo de Núcleo Rural', semanticCompleteness: 'complete' as const,
+      status: 'manual_review_required' as const, determination: 'manual' as const,
+    }
+    contract.scopes.actionArea = { hasGeometry: true }
+    contract.factsByScope!.actionArea = { classification }
+    const output = {
+      operations: [
+        { operation: 'state_label' as const, factRef: { type: 'classification' as const, scope: 'actionArea' as const }, label: 'Suelo de Núcleo Rural' },
+        { operation: 'state_status' as const, factRef: { type: 'classification' as const, scope: 'actionArea' as const }, status: 'manual_review_required' },
+        { operation: 'state_determination' as const, factRef: { type: 'classification' as const, scope: 'actionArea' as const }, determination: 'manual' },
+      ],
+      abstentions: [],
+    }
+    const plan = {
+      schemaVersion: '1',
+      conclusion: { kind: 'classification_identity' },
+      explanation: [{ kind: 'fact_identity', factId: 'classification:actionArea' }],
+      caveats: [
+        { kind: 'manual_review_required', factId: 'classification:actionArea' },
+        { kind: 'manual_determination', factId: 'classification:actionArea' },
+      ],
+      recommendedChecks: ['confirm_pending_determination'],
+    }
+    const { client } = clientWith(JSON.stringify(plan))
+
+    const result = await composeValidatedFactualAnswer({
+      question: '¿Qué clasificación tiene el área seleccionada?',
+      contract, output, fallbackAnswer: 'RESPUESTA MECÁNICA DUPLICADA', client,
+    })
+
+    expect(result.diagnostics.status).toBe('composed')
+    expect(result.answer).toContain('clasificación Suelo de Núcleo Rural (SNR)')
+    expect(result.answer.match(/revisión manual/g)).toHaveLength(1)
+    expect(result.answer).not.toContain('RESPUESTA MECÁNICA')
+    expect(result.answer).not.toContain('Conviene confirmar')
+  })
+
   it.each([
     ['invalid JSON', 'not-json', 'invalid_json'],
     ['invalid schema', JSON.stringify({ conclusion: 'free prose' }), 'invalid_schema'],

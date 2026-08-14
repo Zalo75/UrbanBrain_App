@@ -93,14 +93,56 @@ describe('visible factual routing', () => {
   })
 
   it.each([
+    ['¿Qué categorías existen en toda la parcela?', 'parcel'],
+    ['¿Qué categorías tiene la parcela?', 'parcel'],
+    ['Dime las categorías de la parcela completa', 'parcel'],
+    ['¿Cómo se reparte urbanísticamente la parcela?', 'parcel'],
+    ['¿Qué parte de la parcela está en cada categoría?', 'parcel'],
+    ['¿Toda la parcela tiene la misma categoría?', 'parcel'],
+    ['¿Qué porcentaje de la parcela es SNRC?', 'parcel'],
+    ['¿Qué categoría tiene esta zona?', 'actionArea'],
+    ['¿Cuál es la categoría del área marcada?', 'actionArea'],
+    ['¿Qué clasificación tiene esta zona?', 'actionArea'],
+    ['¿Está confirmada la categoría?', 'actionArea'],
+    ['¿Hay conflicto en la clasificación?', 'actionArea'],
+    ['¿Esta zona es SNRC?', 'actionArea'],
+    ['¿Qué régimen tiene el área seleccionada?', 'actionArea'],
+  ] as const)('routes the natural variant in its resolved scope: %s', (question, scope) => {
+    expect(shouldRunVisibleFactual(question, contract())).toBe(true)
+    expect(analyzeVisibleFactualIntent(question, contract()).scope).toBe(scope)
+  })
+
+  it('normalizes case, accents, punctuation and whitespace before classification', () => {
+    const question = '  ¡DIME   LAS CATEGORÍAS DE LA PARCELA!  '
+    expect(shouldRunVisibleFactual(question, contract())).toBe(true)
+    expect(analyzeVisibleFactualIntent(question, contract())).toEqual(expect.objectContaining({
+      scope: 'parcel', asksCategory: true, asksDistribution: true,
+    }))
+  })
+
+  it.each([
     '¿Cuál es la ocupación máxima de NRC-1?',
     '¿Qué retranqueos se aplican?',
     '¿Qué usos permitidos tiene SNRC?',
     '¿Qué ordenanza y artículos se aplican?',
     '¿Qué exige el CTE?',
+    '¿Qué materiales puedo usar en fachada?',
+    '¿Qué artículo normativo regula la parcela?',
+    '¿Qué interpretación normativa corresponde?',
+    '¿Qué régimen fiscal tengo?',
     'Hola, ¿puedes ayudarme?',
   ])('keeps normative, parameter and general questions in Primary: %s', (question) => {
     expect(shouldRunVisibleFactual(question, contract())).toBe(false)
+  })
+
+  it('uses the only scope with percentages for distribution without an explicit scope', () => {
+    expect(analyzeVisibleFactualIntent('¿Qué porcentaje corresponde a cada categoría?', contract()).scope)
+      .toBe('parcel')
+  })
+
+  it('does not force an unqualified state or regime question into factual', () => {
+    expect(shouldRunVisibleFactual('¿Está confirmado?', contract())).toBe(false)
+    expect(shouldRunVisibleFactual('¿Qué régimen tengo?', contract())).toBe(false)
   })
 
   it('requires percentages in the requested parcel scope and never borrows actionArea facts', () => {
