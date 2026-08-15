@@ -35,6 +35,7 @@ export interface FactualComposerEvidence {
   scope: StructuredFactScope
   requestedFactTypes: FactualComposerRequestedFactType[]
   validatedFacts: FactualComposerFact[]
+  requiredPlan?: FactualComposerPlan
 }
 
 export type FactualComposerConclusionKind =

@@ -60,6 +60,56 @@ describe('factualComposer', () => {
   })
 
   it.each([
+    '¿Toda la parcela tiene la misma categoría urbanística?',
+    '¿Qué porcentaje de toda la parcela corresponde a SNRSC?',
+    '¿Qué categorías existen en toda la parcela?',
+  ])('composes the required complete Valdoviño plan for: %s', async (question) => {
+    const contract = createSadaContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'Categoría homogénea oficial SNRSC',
+      semanticCompleteness: 'complete', status: 'automatic_confirmed',
+      determination: 'automatic', coverage: 'full',
+    }]
+    const output = {
+      operations: [{
+        operation: 'state_coverage' as const, coverage: 'full' as const,
+        factRef: { type: 'category' as const, scope: 'parcel' as const, code: 'SNRSC' },
+      }],
+      abstentions: [],
+    }
+    const evidence = buildFactualComposerEvidence(question, contract, output)!
+    const result = await composeValidatedFactualAnswer({
+      question, contract, output, fallbackAnswer: 'RESPUESTA MECÁNICA',
+      client: clientWith(JSON.stringify(evidence.requiredPlan)).client,
+    })
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      status: 'composed', fallbackUsed: false,
+    }))
+    expect(result.answer).toContain('SNRSC')
+    expect(result.answer).toContain('100 %')
+    expect(result.answer).not.toContain('Categoría homogénea oficial')
+    expect(result.answer).not.toMatch(/scope|actionArea|coverage|factRef|semanticCompleteness/i)
+  })
+
+  it('composes Sada category distribution from the complete required plan', async () => {
+    const question = '¿Qué categorías existen en toda la parcela?'
+    const contract = createSadaContract()
+    const evidence = buildFactualComposerEvidence(question, contract, sadaOutput)!
+    const result = await composeValidatedFactualAnswer({
+      question, contract, output: sadaOutput, fallbackAnswer: 'RESPUESTA MECÁNICA',
+      client: clientWith(JSON.stringify(evidence.requiredPlan)).client,
+    })
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      status: 'composed', fallbackUsed: false,
+    }))
+    expect(result.answer).toContain('98,53 %')
+    expect(result.answer).toContain('1,47 %')
+    expect(result.answer).not.toContain('100 %')
+  })
+
+  it.each([
     [undefined, false], ['false', false], ['TRUE', false], ['1', false], ['true', true],
   ])('enables only the exact string true: %s', (value, expected) => {
     expect(isFactualComposerEnabled(value)).toBe(expected)
@@ -106,6 +156,8 @@ describe('factualComposer', () => {
     }), expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 2800 }))
     const request = create.mock.calls[0][0]
     expect(JSON.stringify(request)).not.toContain(baseOptions().question)
+    const evidencePayload = JSON.parse(request.messages[1].content)
+    expect(evidencePayload.requiredPlan).toEqual(sadaPlan)
   })
 
   it('composes actionArea classification manual state once instead of exposing mechanical duplicates', async () => {

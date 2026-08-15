@@ -211,6 +211,9 @@ describe('Territorial Factual Shadow Pipeline', () => {
     )).toBe(false)
     expect(result.renderedText?.join(' ')).toContain('100 %')
     expect(result.renderedText?.join(' ')).not.toMatch(/coverage|scope|automatic_confirmed/i)
+    expect(result.diagnostics.metrics?.territorialCoverageByCategory).toEqual({
+      'parcel:SNRSC': 'full',
+    })
   })
 
   it('B. Output inválido (JSON malformado)', async () => {

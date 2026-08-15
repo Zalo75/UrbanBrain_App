@@ -87,8 +87,18 @@ function normalizeIdentityValue(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
 }
 
+function isSyntheticCategoryLabel(label: string, code?: string) {
+  if (!code) return false
+  return normalizeIdentityValue(label) ===
+    normalizeIdentityValue(`Categoría homogénea oficial ${code}`)
+}
+
 function renderLabelAndCode(fact: ResolvedFact): string | undefined {
-  const { code, label } = getFactIdentity(fact)
+  const identity = getFactIdentity(fact)
+  const code = identity.code
+  const label = identity.label && !isSyntheticCategoryLabel(identity.label, code)
+    ? identity.label
+    : undefined
   if (label && code) {
     if (normalizeIdentityValue(label) === normalizeIdentityValue(code)) return code
     return `${label} (${code})`

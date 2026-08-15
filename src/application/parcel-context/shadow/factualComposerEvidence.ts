@@ -6,8 +6,84 @@ import type {
   FactualComposerEvidence,
   FactualComposerFact,
   FactualComposerIntent,
+  FactualComposerPlan,
   FactualComposerRequestedFactType,
 } from './factualComposerTypes'
+
+function buildRequiredPlan(
+  questionIntent: FactualComposerIntent,
+  facts: FactualComposerFact[]
+): FactualComposerPlan {
+  const categories = facts.filter((fact) => fact.type === 'category')
+  const classifications = facts.filter((fact) => fact.type === 'classification')
+  const target = categories.find((fact) => fact.geometricDominance) ??
+    [...categories].sort((left, right) => (right.percentage ?? -1) - (left.percentage ?? -1))[0]
+  const positiveCategories = categories.filter((fact) => (fact.percentage ?? 0) > 0)
+  const strictTotality = categories.length === 1 && Boolean(
+    target && (target.coverage === 'full' || target.percentage === 100)
+  )
+
+  const conclusion: FactualComposerPlan['conclusion'] = questionIntent === 'strict_homogeneity'
+    ? {
+        kind: strictTotality ? 'strictly_homogeneous' : 'not_strictly_homogeneous',
+        ...(target ? { targetFactId: target.id } : {}),
+      }
+    : questionIntent === 'category_distribution'
+      ? { kind: 'category_distribution' }
+      : questionIntent === 'category_identity'
+        ? { kind: 'category_identity' }
+        : questionIntent === 'classification_identity'
+          ? { kind: 'classification_identity' }
+          : { kind: 'state_summary' }
+
+  const materialFacts = questionIntent === 'classification_identity'
+    ? classifications
+    : questionIntent === 'category_identity'
+      ? [...classifications, ...categories]
+      : questionIntent === 'state_explanation'
+        ? facts
+        : categories
+  const extentRequested = questionIntent === 'category_distribution' ||
+    questionIntent === 'strict_homogeneity'
+  const explanation: FactualComposerPlan['explanation'] = materialFacts.map((fact) =>
+    fact.type === 'category' && extentRequested
+      ? fact.percentage !== undefined
+        ? { kind: 'category_share' as const, factId: fact.id }
+        : fact.coverage !== undefined
+          ? { kind: 'territorial_coverage' as const, factId: fact.id }
+          : { kind: 'fact_identity' as const, factId: fact.id }
+      : { kind: 'fact_identity' as const, factId: fact.id }
+  )
+  explanation.push(...materialFacts
+    .filter((fact) => fact.geometricDominance)
+    .map((fact) => ({ kind: 'geometric_dominance' as const, factId: fact.id })))
+
+  const caveats: FactualComposerPlan['caveats'] = []
+  const addFirstSupported = (
+    kind: FactualComposerPlan['caveats'][number]['kind'],
+    predicate: (fact: FactualComposerFact) => boolean
+  ) => {
+    const fact = facts.find(predicate)
+    if (fact) caveats.push({ kind, factId: fact.id } as FactualComposerPlan['caveats'][number])
+  }
+  addFirstSupported('conflict', (fact) => fact.status === 'conflict')
+  addFirstSupported('unresolved', (fact) => fact.status === 'unresolved' || fact.determination === 'unresolved')
+  addFirstSupported('manual_review_required', (fact) => fact.status === 'manual_review_required')
+  addFirstSupported('manual_determination', (fact) => fact.determination === 'manual')
+  addFirstSupported('automatic_status', (fact) => Boolean(fact.status?.startsWith('automatic_')))
+  addFirstSupported('automatic_determination', (fact) => fact.determination === 'automatic')
+
+  const hasPendingState = caveats.some((item) =>
+    item.kind === 'conflict' || item.kind === 'unresolved' || item.kind === 'manual_review_required'
+  )
+  const recommendedChecks: FactualComposerPlan['recommendedChecks'] = positiveCategories.length > 1
+    ? ['verify_minority_area']
+    : hasPendingState
+      ? ['confirm_pending_determination']
+      : []
+
+  return { schemaVersion: '1', conclusion, explanation, caveats, recommendedChecks }
+}
 
 function composerIntent(
   question: string,
@@ -143,5 +219,6 @@ export function buildFactualComposerEvidence(
     scope,
     requestedFactTypes: [...requestedFactTypes],
     validatedFacts,
+    requiredPlan: buildRequiredPlan(questionIntent, validatedFacts),
   }
 }

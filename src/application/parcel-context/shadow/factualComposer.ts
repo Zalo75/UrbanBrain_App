@@ -21,6 +21,8 @@ Schema permitido:
 {"schemaVersion":"1","conclusion":{"kind":"not_strictly_homogeneous|strictly_homogeneous|category_distribution|category_identity|classification_identity|state_summary","targetFactId":"opcional"},"explanation":[{"kind":"fact_identity|category_share|territorial_coverage|geometric_dominance","factId":"..."}],"caveats":[{"kind":"conflict|unresolved|manual_review_required|manual_determination|automatic_status|automatic_determination","factId":"..."}],"recommendedChecks":["verify_minority_area|confirm_pending_determination"]}
 schemaVersion y conclusion son obligatorios. explanation, caveats y recommendedChecks pueden omitirse solo cuando estarían vacíos; si contienen elementos, inclúyelos.
 Reglas:
+- El objeto requiredPlan del mensaje de usuario es la especificación material completa y ya está derivada de hechos validados. Devuélvelo sin omitir, mover ni añadir elementos.
+- Cada caveat debe conservar exactamente el factId de requiredPlan; un estado respaldado por otro factId no autoriza cambiar la referencia.
 - strict_homogeneity: incluye todas las categorías con category_share, dominance si existe y targetFactId; si hay varias categorías positivas o el target no llega a 100, usa not_strictly_homogeneous.
 - category_distribution: incluye todas las categorías con category_share y dominance si existe.
 - Si una categoría no tiene percentage pero sí coverage, usa territorial_coverage. Solo coverage full permite strictly_homogeneous; partial o unknown nunca equivalen al 100 %.

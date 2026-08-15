@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
 import { buildTerritorialFactualContract } from './buildFactualContract'
+import { buildNormalizedParcelContext } from './normalizeParcelContext'
 
 const geometry = {
   type: 'MultiPolygon' as const,
@@ -51,6 +52,37 @@ function valdovinoContext(): NormalizedParcelContext {
 }
 
 describe('territorial category coverage contract', () => {
+  it('derives full from the real normalized Valdoviño shape, including the stored synthetic label', () => {
+    const facts = singleCategoryFacts('SNRSC')
+    facts.category.label = 'Categoría homogénea oficial SNRSC'
+    facts.category.value!.label = 'Categoría homogénea oficial SNRSC'
+    const normalized = buildNormalizedParcelContext({
+      expediente: { refCatastral: '15088A034002230000HU' },
+      detected: {
+        cadastralReference: '15088A034002230000HU',
+        parcelGeometry: geometry,
+        urbanisticFacts: facts,
+        actionAreaSelection: {
+          history: [],
+          current: {
+            id: 'valdovino-real', geometry, surfaceSquareMetres: 854.78,
+            parcelSurfaceSquareMetres: 855, selectionType: 'whole_parcel',
+            source: 'catastro', confidence: 'high', selectedBy: 'system',
+            selectedAt: '2026-08-15T08:00:00.000Z', verification: 'unverified',
+          },
+        },
+      },
+    })
+    const contract = buildTerritorialFactualContract(normalized)
+
+    expect(normalized.parcelGeometry).toEqual(geometry)
+    expect(contract.factsByScope?.parcel?.categories?.[0]).toEqual(expect.objectContaining({
+      code: 'SNRSC', coverage: 'full',
+    }))
+    expect(contract.factsByScope?.parcel?.categories?.[0].parcelPercentage).toBeUndefined()
+    expect(contract.factsByScope?.actionArea?.categories?.[0].coverage).toBe('full')
+  })
+
   it('derives full for accredited Valdoviño whole-parcel SNRSC in each own scope', () => {
     const contract = buildTerritorialFactualContract(valdovinoContext())
 

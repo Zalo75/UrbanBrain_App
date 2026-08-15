@@ -4,7 +4,10 @@ import { validateStructuredFactualOutput } from './factualValidator'
 import { renderFactualOutput } from './factualRenderer'
 import { enforceFactualCoverage, type FactualCoverageDiagnostics } from './factualCoverage'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
-import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
+import type {
+  TerritorialCoverage,
+  TerritorialFactualContract,
+} from '@/domain/parcel-context/factualContract'
 import type { StructuredFactualOutput } from './structuredFactualOutput'
 import type { ValidationErrorCode, ValidationResult } from './factualValidator'
 import type OpenAI from 'openai'
@@ -38,6 +41,7 @@ export interface TerritorialShadowMetrics {
   validationErrorCount?: number
   validationErrorCodes?: ValidationErrorCode[]
   validationErrorOperations?: SafeValidationOperation[]
+  territorialCoverageByCategory?: Record<string, TerritorialCoverage>
 }
 
 export interface SafeValidationOperation {
@@ -63,6 +67,8 @@ export interface TerritorialShadowResult {
     metrics?: TerritorialShadowMetrics
   }
 }
+
+const SAFE_FACT_CODE = /^[A-Za-z0-9._/-]{1,64}$/
 
 function countContractFacts(contract: TerritorialFactualContract) {
   const scopes = contract.factsByScope
@@ -94,10 +100,22 @@ function countContractFacts(contract: TerritorialFactualContract) {
       factCount += 1 + scope.affects.items.length
     }
   }
-  return { factCount, candidateCount }
+  const territorialCoverageByCategory: Record<string, TerritorialCoverage> = {}
+  for (const [scope, facts] of Object.entries(contract.factsByScope ?? {})) {
+    for (const category of facts?.categories ?? []) {
+      if (category.code && SAFE_FACT_CODE.test(category.code) && category.coverage) {
+        territorialCoverageByCategory[`${scope}:${category.code}`] = category.coverage
+      }
+    }
+  }
+  return {
+    factCount,
+    candidateCount,
+    ...(Object.keys(territorialCoverageByCategory).length > 0
+      ? { territorialCoverageByCategory }
+      : {}),
+  }
 }
-
-const SAFE_FACT_CODE = /^[A-Za-z0-9._/-]{1,64}$/
 
 function safeValidationOperations(
   validation: ValidationResult

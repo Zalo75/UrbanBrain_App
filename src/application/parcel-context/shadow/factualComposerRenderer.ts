@@ -8,11 +8,19 @@ function normalized(value: string) {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
 }
 
+function presentableLabel(fact: FactualComposerFact) {
+  if (!fact.label || !fact.code) return fact.label
+  return normalized(fact.label) === normalized(`Categoría homogénea oficial ${fact.code}`)
+    ? undefined
+    : fact.label
+}
+
 function renderIdentity(fact: FactualComposerFact) {
-  if (fact.label && fact.code && normalized(fact.label) !== normalized(fact.code)) {
-    return `${fact.label} (${fact.code})`
+  const label = presentableLabel(fact)
+  if (label && fact.code && normalized(label) !== normalized(fact.code)) {
+    return `${label} (${fact.code})`
   }
-  return fact.label ?? fact.code ?? 'sin identificación disponible'
+  return label ?? fact.code ?? 'sin identificación disponible'
 }
 
 function formatPercentage(value: number) {

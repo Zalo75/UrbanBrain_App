@@ -113,6 +113,22 @@ describe('factualComposerSafety', () => {
     }, sadaEvidence)).toEqual({ safe: false, reason: 'missing_material_category' })
   })
 
+  it('reproduces Sada unsupported_caveat when a legitimate state is attached to the wrong fact', () => {
+    const evidence = {
+      ...sadaEvidence,
+      validatedFacts: sadaEvidence.validatedFacts.map((fact) => fact.code === 'SNRT'
+        ? { ...fact, status: undefined, determination: undefined }
+        : fact),
+    }
+    expect(validateFactualComposerPlan({
+      ...sadaPlan,
+      caveats: [
+        { kind: 'conflict', factId: 'category:parcel:SNRT' },
+        { kind: 'unresolved', factId: 'category:parcel:SNRT' },
+      ],
+    }, evidence)).toEqual({ safe: false, reason: 'unsupported_caveat' })
+  })
+
   it.each([
     ['conflict', sadaPlan.caveats.filter((item) => item.kind !== 'conflict')],
     ['unresolved', sadaPlan.caveats.filter((item) => item.kind !== 'unresolved')],

@@ -137,6 +137,7 @@ describe('deterministic factual coverage', () => {
   it.each([
     '¿Toda la parcela tiene la misma categoría urbanística?',
     '¿Qué porcentaje de toda la parcela corresponde a SNRSC?',
+    '¿Qué categorías existen en toda la parcela?',
   ])('selecciona coverage full acreditada para Valdoviño: %s', (question) => {
     const factualContract = contract()
     factualContract.factsByScope!.parcel!.classification = {

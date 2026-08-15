@@ -657,4 +657,23 @@ describe('Structured Factual Renderer', () => {
     expect(rendered).toContain('pendiente de verificación')
     expect(rendered).not.toContain('manual_unverified')
   })
+
+  it('51. no presenta como oficial el label sintético de una categoría desconocida', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'Categoría homogénea oficial SNRSC',
+      semanticCompleteness: 'complete', status: 'automatic_confirmed',
+      determination: 'automatic', coverage: 'full',
+    }]
+    const rendered = renderFactualOutput({
+      operations: [{
+        operation: 'state_coverage', coverage: 'full',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+      }],
+      abstentions: [],
+    }, contract).join(' ')
+
+    expect(rendered).toContain('La categoría SNRSC afecta a toda la parcela')
+    expect(rendered).not.toContain('Categoría homogénea oficial')
+  })
 })

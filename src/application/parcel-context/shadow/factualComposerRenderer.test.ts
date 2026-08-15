@@ -27,6 +27,27 @@ describe('factualComposerRenderer', () => {
     expect(answer).not.toMatch(/scope|actionArea|coverage|factRef|automatic_confirmed|determination/i)
   })
 
+  it('renders only the accredited code when the category label is synthetic', () => {
+    const evidence: FactualComposerEvidence = {
+      schemaVersion: '1', questionIntent: 'strict_homogeneity', scope: 'parcel',
+      requestedFactTypes: ['category', 'coverage'],
+      validatedFacts: [{
+        id: 'category:parcel:SNRSC', type: 'category', scope: 'parcel', code: 'SNRSC',
+        label: 'Categoría homogénea oficial SNRSC', coverage: 'full', geometricDominance: false,
+      }],
+    }
+    const plan: FactualComposerPlan = {
+      schemaVersion: '1',
+      conclusion: { kind: 'strictly_homogeneous', targetFactId: 'category:parcel:SNRSC' },
+      explanation: [{ kind: 'territorial_coverage', factId: 'category:parcel:SNRSC' }],
+      caveats: [], recommendedChecks: [],
+    }
+
+    const answer = renderFactualComposerPlan(plan, evidence)
+    expect(answer).toContain('categoría SNRSC')
+    expect(answer).not.toContain('Categoría homogénea oficial')
+  })
+
   it('renders the Sada conclusion first, exact shares, dominance and one synthesized state caveat', () => {
     const answer = renderFactualComposerPlan(sadaPlan, sadaEvidence)
 

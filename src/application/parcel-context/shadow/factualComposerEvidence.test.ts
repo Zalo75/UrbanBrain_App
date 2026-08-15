@@ -47,6 +47,13 @@ describe('buildFactualComposerEvidence', () => {
       questionIntent: 'strict_homogeneity',
       requestedFactTypes: ['category', 'coverage'],
       validatedFacts: [expect.objectContaining({ code: 'SNRSC', coverage: 'full' })],
+      requiredPlan: {
+        schemaVersion: '1',
+        conclusion: { kind: 'strictly_homogeneous', targetFactId: 'category:parcel:SNRSC' },
+        explanation: [{ kind: 'territorial_coverage', factId: 'category:parcel:SNRSC' }],
+        caveats: [],
+        recommendedChecks: [],
+      },
     }))
     expect(JSON.stringify(evidence)).not.toContain('automatic_confirmed')
   })
@@ -88,6 +95,13 @@ describe('buildFactualComposerEvidence', () => {
       'category:parcel:SNRC', 'category:parcel:SNRT',
     ])
     expect(JSON.stringify(evidence)).not.toContain('actionArea')
+    expect(evidence?.requiredPlan).toEqual(expect.objectContaining({
+      conclusion: { kind: 'category_distribution' },
+      explanation: expect.arrayContaining([
+        { kind: 'category_share', factId: 'category:parcel:SNRC' },
+        { kind: 'category_share', factId: 'category:parcel:SNRT' },
+      ]),
+    }))
   })
 
   it('classification-only excludes category operations even in the same scope', () => {
