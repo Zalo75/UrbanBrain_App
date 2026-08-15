@@ -11,6 +11,7 @@ import type {
   FactualConsolidation,
   FactualPlanningArea,
   FactualScopeFacts,
+  TerritorialCoverage,
 } from '@/domain/parcel-context/factualContract'
 import type {
   UrbanisticFactStatus,
@@ -220,6 +221,61 @@ function buildScopeFacts({ urbanisticFacts, planningArea, constraints, context }
   }
 }
 
+function areasRepresentSameWholeParcel(context: NormalizedParcelContext) {
+  const selection = context.actionArea?.value
+  if (
+    selection?.selectionType !== 'whole_parcel' ||
+    !selection.geometry ||
+    !context.parcelGeometry
+  ) return false
+
+  const referenceArea = selection.parcelSurfaceSquareMetres
+  if (!(referenceArea > 0)) return false
+  const tolerance = Math.max(0.5, referenceArea * 0.001)
+  return Math.abs(selection.surfaceSquareMetres - referenceArea) <= tolerance
+}
+
+function accreditedWholeParcelCategoryCode(
+  context: NormalizedParcelContext,
+  parcelFacts?: UrbanisticRegimeFacts,
+  actionAreaFacts?: UrbanisticRegimeFacts
+) {
+  if (!areasRepresentSameWholeParcel(context) || !parcelFacts || !actionAreaFacts) return undefined
+  const parcelCategory = parcelFacts.category
+  const actionAreaCategory = actionAreaFacts.category
+  const isAccredited = (fact: UrbanisticRegimeFacts['category']) =>
+    fact.status === 'automatic_confirmed' &&
+    fact.confidence === 'high' &&
+    Boolean(fact.value?.code) &&
+    !fact.candidates?.length
+
+  if (!isAccredited(parcelCategory) || !isAccredited(actionAreaCategory)) return undefined
+  return parcelCategory.value!.code === actionAreaCategory.value!.code
+    ? parcelCategory.value!.code
+    : undefined
+}
+
+function applyCategoryCoverage(
+  scopeFacts: FactualScopeFacts | undefined,
+  accreditedFullCode?: string
+) {
+  const categories = scopeFacts?.categories
+  if (!categories) return
+  const multipleCategories = categories.length !== 1
+
+  for (const category of categories) {
+    let coverage: TerritorialCoverage = 'unknown'
+    if (!multipleCategories && category.code === accreditedFullCode) {
+      coverage = 'full'
+    } else if (!multipleCategories && category.parcelPercentage === 100) {
+      coverage = 'full'
+    } else if (category.parcelPercentage !== undefined) {
+      coverage = 'partial'
+    }
+    category.coverage = coverage
+  }
+}
+
 export function buildTerritorialFactualContract(context: NormalizedParcelContext): TerritorialFactualContract {
   const parcelFacts = context.parcelUrbanisticFacts ?? (context.actionArea ? undefined : context.urbanisticFacts)
   const parcelConstraints = context.actionArea ? context.parcelKnownConstraints : (context.parcelKnownConstraints ?? context.knownConstraints)
@@ -242,6 +298,17 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
         })
       : undefined,
   }
+
+  const fullCategoryCode = accreditedWholeParcelCategoryCode(
+    context,
+    parcelFacts,
+    context.actionArea ? context.urbanisticFacts : undefined
+  )
+  applyCategoryCoverage(factsByScope.parcel, fullCategoryCode)
+  applyCategoryCoverage(
+    factsByScope.actionArea,
+    context.actionArea?.value.selectionType === 'whole_parcel' ? fullCategoryCode : undefined
+  )
 
   const activeFacts = context.actionArea ? factsByScope.actionArea : factsByScope.parcel
   const legacyClassification: FactualClassification = activeFacts?.classification ?? {

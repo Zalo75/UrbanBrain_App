@@ -4,6 +4,29 @@ import type { FactualComposerEvidence, FactualComposerPlan } from './factualComp
 import { sadaEvidence, sadaPlan } from './factualComposer.testFixtures'
 
 describe('factualComposerRenderer', () => {
+  it('renders Valdoviño full as totality without internal jargon', () => {
+    const evidence: FactualComposerEvidence = {
+      schemaVersion: '1', questionIntent: 'strict_homogeneity', scope: 'parcel',
+      requestedFactTypes: ['category', 'coverage'],
+      validatedFacts: [{
+        id: 'category:parcel:SNRSC', type: 'category', scope: 'parcel', code: 'SNRSC',
+        coverage: 'full', geometricDominance: false,
+      }],
+    }
+    const plan: FactualComposerPlan = {
+      schemaVersion: '1',
+      conclusion: { kind: 'strictly_homogeneous', targetFactId: 'category:parcel:SNRSC' },
+      explanation: [{ kind: 'territorial_coverage', factId: 'category:parcel:SNRSC' }],
+      caveats: [], recommendedChecks: [],
+    }
+
+    const answer = renderFactualComposerPlan(plan, evidence)
+
+    expect(answer).toContain('Sí. La categoría SNRSC afecta a toda la parcela.')
+    expect(answer).toContain('100 %')
+    expect(answer).not.toMatch(/scope|actionArea|coverage|factRef|automatic_confirmed|determination/i)
+  })
+
   it('renders the Sada conclusion first, exact shares, dominance and one synthesized state caveat', () => {
     const answer = renderFactualComposerPlan(sadaPlan, sadaEvidence)
 

@@ -40,11 +40,33 @@ function getFactName(ref: StructuredFactRef, capitalize = true): string {
 }
 
 function renderScope(scope: StructuredFactScope): string {
-  return scope === 'parcel' ? 'en toda la parcela' : 'en el área de actuación'
+  return scope === 'parcel' ? 'en toda la parcela' : 'en el área seleccionada'
 }
 
 function renderPercentageScope(scope: StructuredFactScope): string {
-  return scope === 'parcel' ? 'de la parcela' : 'del área de actuación'
+  return scope === 'parcel' ? 'de la parcela' : 'del área seleccionada'
+}
+
+function renderCoverage(
+  coverage: 'full' | 'partial' | 'unknown',
+  scope: StructuredFactScope,
+  fact: ResolvedFact
+) {
+  const identity = renderLabelAndCode(fact)
+  const category = identity ? `La categoría ${identity}` : 'La categoría indicada'
+  if (coverage === 'full') {
+    return scope === 'parcel'
+      ? `${category} afecta a toda la parcela: corresponde al 100 % de la superficie analizada.`
+      : `${category} afecta a toda el área seleccionada.`
+  }
+  if (coverage === 'partial') {
+    return scope === 'parcel'
+      ? `${category} afecta solo a una parte de la parcela.`
+      : `${category} afecta solo a una parte del área seleccionada.`
+  }
+  return scope === 'parcel'
+    ? `No puede determinarse qué extensión de la parcela corresponde a ${identity ?? 'la categoría indicada'}.`
+    : `No puede determinarse qué extensión del área seleccionada corresponde a ${identity ?? 'la categoría indicada'}.`
 }
 
 function getFactKey(ref: StructuredFactRef): string {
@@ -117,7 +139,7 @@ function renderIdentityGroup(group: IdentityGroup): string[] {
       .map(renderStandaloneIdentity)
   }
 
-  const subject = group.scope === 'parcel' ? 'La parcela' : 'El área de actuación seleccionada'
+  const subject = group.scope === 'parcel' ? 'La parcela' : 'El área seleccionada'
   const classificationIdentity = getFactIdentity(group.classification.fact)
   const classificationValue = group.classification.operation.operation === 'state_label' && classificationIdentity.label
     ? renderLabelAndCode(group.classification.fact)!
@@ -175,6 +197,8 @@ function renderStatus(status: string, factNameLower: string, scopeText: string):
       return `El estado de ${factNameLower} ${scopeText} requiere revisión manual antes de confirmarse.`
     case 'manual_confirmed':
       return `El estado de ${factNameLower} ${scopeText} ha sido confirmado mediante revisión manual.`
+    case 'manual_unverified':
+      return `El estado de ${factNameLower} ${scopeText} está pendiente de verificación.`
     case 'technician_validated':
       return `El estado de ${factNameLower} ${scopeText} ha sido validado por personal técnico.`
     case 'conflict':
@@ -307,6 +331,11 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
           } else if (code) {
             pushOperationLine(`${factNameCapitalized} con código ${code} representa el ${pct} % ${percentageScopeText}.`, op.factRef.scope)
           }
+        }
+        break
+      case 'state_coverage':
+        if ('coverage' in fact && fact.coverage === op.coverage) {
+          pushOperationLine(renderCoverage(fact.coverage, op.factRef.scope, fact), op.factRef.scope)
         }
         break
       case 'state_status':

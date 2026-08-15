@@ -25,6 +25,32 @@ function dualScopeContract() {
 }
 
 describe('buildFactualComposerEvidence', () => {
+  it('carries only validated territorial coverage into the Composer DTO', () => {
+    const contract = createSadaContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+    const evidence = buildFactualComposerEvidence(
+      '¿Toda la parcela tiene la misma categoría urbanística?',
+      contract,
+      {
+        operations: [{
+          operation: 'state_coverage', coverage: 'full',
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+        }],
+        abstentions: [],
+      }
+    )
+
+    expect(evidence).toEqual(expect.objectContaining({
+      questionIntent: 'strict_homogeneity',
+      requestedFactTypes: ['category', 'coverage'],
+      validatedFacts: [expect.objectContaining({ code: 'SNRSC', coverage: 'full' })],
+    }))
+    expect(JSON.stringify(evidence)).not.toContain('automatic_confirmed')
+  })
+
   it('builds actionArea category evidence without parcel facts', () => {
     const output: StructuredFactualOutput = {
       operations: [

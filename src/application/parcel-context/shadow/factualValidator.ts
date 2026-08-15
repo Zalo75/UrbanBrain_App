@@ -18,6 +18,7 @@ export type ValidationErrorCode =
   | 'LABEL_HALLUCINATION'
   | 'LABEL_MISMATCH'
   | 'PERCENTAGE_MISMATCH'
+  | 'COVERAGE_MISMATCH'
   | 'STATUS_MISMATCH'
   | 'DETERMINATION_MISMATCH'
   | 'GEOMETRY_TO_EFFECTIVE'
@@ -128,6 +129,18 @@ export function validateStructuredFactualOutput(
         errors.push({
           code: 'STATUS_MISMATCH',
           message: `Expected status ${actualStatus}, got ${op.status}`,
+          factRef: op.factRef,
+          operation: op.operation,
+        })
+      }
+    }
+
+    if (op.operation === 'state_coverage') {
+      const actualCoverage = 'coverage' in fact ? fact.coverage : undefined
+      if (actualCoverage !== op.coverage) {
+        errors.push({
+          code: 'COVERAGE_MISMATCH',
+          message: `Expected territorial coverage ${actualCoverage}, got ${op.coverage}`,
           factRef: op.factRef,
           operation: op.operation,
         })

@@ -99,7 +99,7 @@ describe('Structured Factual Renderer', () => {
     ], abstentions: [] }
     const result = renderFactualOutput(output, createMockContract())
     expect(result[0]).toContain('en toda la parcela')
-    expect(result[1]).toContain('en el área de actuación')
+    expect(result[1]).toContain('en el área seleccionada')
     expect(result[1]).not.toContain('en toda la parcela')
   })
 
@@ -189,7 +189,7 @@ describe('Structured Factual Renderer', () => {
     const output1: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'parcel', code: 'XX' }, status: 'automatic_confirmed' }], abstentions: [] }
     const output2: StructuredFactualOutput = { operations: [{ operation: 'state_status', factRef: { type: 'category', scope: 'actionArea', code: 'XX' }, status: 'manual_confirmed' }], abstentions: [] }
     expect(renderFactualOutput(output1, contract)[0]).toBe("El estado de la categoría en toda la parcela está confirmado automáticamente.")
-    expect(renderFactualOutput(output2, contract)[0]).toBe('El estado de la categoría en el área de actuación ha sido confirmado mediante revisión manual.')
+    expect(renderFactualOutput(output2, contract)[0]).toBe('El estado de la categoría en el área seleccionada ha sido confirmado mediante revisión manual.')
   })
 
   it('23. fact.percentage = 40, claim.value = 50: renderer usa 40', () => {
@@ -290,7 +290,7 @@ describe('Structured Factual Renderer', () => {
     }
 
     expect(renderFactualOutput(output, contract)).toEqual([
-      'El área de actuación seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).',
+      'El área seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).',
       'Esta conclusión se refiere al área seleccionada y no implica necesariamente que toda la parcela catastral tenga el mismo régimen.',
     ])
   })
@@ -476,7 +476,7 @@ describe('Structured Factual Renderer', () => {
     const rendered = renderFactualOutput(output, contract)
     const text = rendered.join(' ')
 
-    expect(rendered[0]).toBe('El área de actuación seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).')
+    expect(rendered[0]).toBe('El área seleccionada está identificada como Suelo de Núcleo Rural (SNR), categoría Núcleo Rural Común (SNRC).')
     expect(text).toContain('procede de revisión manual')
     expect(text).toContain('requiere revisión manual antes de confirmarse')
     expect(text).not.toContain('manual_review_required')
@@ -558,7 +558,7 @@ describe('Structured Factual Renderer', () => {
       abstentions: [],
     }, contract)
 
-    expect(result[0]).toBe('El área de actuación seleccionada está identificada como SNR, categoría SNRC.')
+    expect(result[0]).toBe('El área seleccionada está identificada como SNR, categoría SNRC.')
     expect(result[0]).not.toMatch(/SNR \(SNR\)|SNRC \(SNRC\)/)
   })
 
@@ -593,5 +593,68 @@ describe('Structured Factual Renderer', () => {
 
     expect(result).toEqual(['Se ha identificado que la categoría en toda la parcela incluye el código SNRC.'])
     expect(result.join(' ')).not.toContain('Label no acreditado')
+  })
+
+  it.each([
+    ['full', 'afecta a toda la parcela', '100 %'],
+    ['partial', 'afecta solo a una parte de la parcela', undefined],
+    ['unknown', 'No puede determinarse qué extensión de la parcela', undefined],
+  ] as const)('48. coverage %s usa lenguaje humano sin enums internos', (coverage, text, percentage) => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage,
+    }]
+    const rendered = renderFactualOutput({
+      operations: [{
+        operation: 'state_coverage',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+        coverage,
+      }],
+      abstentions: [],
+    }, contract).join(' ')
+
+    expect(rendered).toContain(text)
+    if (percentage) expect(rendered).toContain(percentage)
+    expect(rendered).not.toMatch(/scope|actionArea|coverage|factRef|semanticCompleteness|structured output/i)
+    expect(rendered).not.toContain(coverage)
+    expect(rendered).not.toContain('automatic_confirmed')
+  })
+
+  it('49. actionArea full permanece limitado al área seleccionada', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.actionArea = { categories: [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }] }
+    const rendered = renderFactualOutput({
+      operations: [{
+        operation: 'state_coverage',
+        factRef: { type: 'category', scope: 'actionArea', code: 'SNRSC' },
+        coverage: 'full',
+      }],
+      abstentions: [],
+    }, contract).join(' ')
+
+    expect(rendered).toContain('toda el área seleccionada')
+    expect(rendered).toContain('no implica necesariamente que toda la parcela')
+  })
+
+  it('50. manual_unverified se presenta como pendiente de verificación', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', status: 'manual_unverified', determination: 'manual', coverage: 'unknown',
+    }]
+    const rendered = renderFactualOutput({
+      operations: [{
+        operation: 'state_status',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+        status: 'manual_unverified',
+      }],
+      abstentions: [],
+    }, contract).join(' ')
+
+    expect(rendered).toContain('pendiente de verificación')
+    expect(rendered).not.toContain('manual_unverified')
   })
 })

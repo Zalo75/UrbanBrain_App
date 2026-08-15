@@ -11,6 +11,7 @@ export type FactualComposerRequestedFactType =
   | 'classification'
   | 'category'
   | 'percentage'
+  | 'coverage'
   | 'status'
   | 'determination'
   | 'geometricDominance'
@@ -22,6 +23,7 @@ export interface FactualComposerFact {
   code?: string
   label?: string
   percentage?: number
+  coverage?: 'full' | 'partial' | 'unknown'
   status?: string
   determination?: string
   geometricDominance: boolean
@@ -51,6 +53,7 @@ export interface FactualComposerConclusion {
 export type FactualComposerExplanation =
   | { kind: 'fact_identity'; factId: string }
   | { kind: 'category_share'; factId: string }
+  | { kind: 'territorial_coverage'; factId: string }
   | { kind: 'geometric_dominance'; factId: string }
 
 export type FactualComposerCaveat =
@@ -97,6 +100,7 @@ export type FactualComposerSafetyErrorCode =
   | 'missing_material_category'
   | 'missing_material_fact'
   | 'unsupported_percentage'
+  | 'unsupported_coverage'
   | 'dominance_mismatch'
   | 'missing_dominance'
   | 'missing_conflict'

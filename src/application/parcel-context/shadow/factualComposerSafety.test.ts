@@ -8,6 +8,39 @@ import { sadaEvidence, sadaPlan } from './factualComposer.testFixtures'
 import type { FactualComposerEvidence, FactualComposerPlan } from './factualComposerTypes'
 
 describe('factualComposerSafety', () => {
+  const valdovinoEvidence: FactualComposerEvidence = {
+    schemaVersion: '1', questionIntent: 'strict_homogeneity', scope: 'parcel',
+    requestedFactTypes: ['category', 'coverage'],
+    validatedFacts: [{
+      id: 'category:parcel:SNRSC', type: 'category', scope: 'parcel', code: 'SNRSC',
+      label: 'SNRSC', coverage: 'full', geometricDominance: false,
+    }],
+  }
+  const valdovinoPlan: FactualComposerPlan = {
+    schemaVersion: '1',
+    conclusion: { kind: 'strictly_homogeneous', targetFactId: 'category:parcel:SNRSC' },
+    explanation: [{ kind: 'territorial_coverage', factId: 'category:parcel:SNRSC' }],
+    caveats: [], recommendedChecks: [],
+  }
+
+  it('permite totalidad únicamente con coverage full acreditada', () => {
+    expect(validateFactualComposerPlan(valdovinoPlan, valdovinoEvidence)).toEqual({ safe: true })
+    expect(validateFactualComposerPlan(valdovinoPlan, {
+      ...valdovinoEvidence,
+      validatedFacts: [{ ...valdovinoEvidence.validatedFacts[0], coverage: 'unknown' }],
+    })).toEqual({ safe: false, reason: 'categorical_totality' })
+  })
+
+  it('no convierte geometric dominance en totalidad', () => {
+    expect(validateFactualComposerPlan(valdovinoPlan, {
+      ...valdovinoEvidence,
+      validatedFacts: [{
+        ...valdovinoEvidence.validatedFacts[0], coverage: 'partial',
+        percentage: 98.53, geometricDominance: true,
+      }],
+    })).toEqual({ safe: false, reason: 'categorical_totality' })
+  })
+
   it('accepts the complete, scoped Sada semantic plan', () => {
     expect(validateFactualComposerPlan(sadaPlan, sadaEvidence)).toEqual({ safe: true })
   })

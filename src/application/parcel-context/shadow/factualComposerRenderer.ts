@@ -51,11 +51,26 @@ function renderIdentityConclusion(
   return ''
 }
 
-function renderDistribution(categories: FactualComposerFact[], dominant?: FactualComposerFact) {
+function renderDistribution(
+  categories: FactualComposerFact[],
+  scope: FactualComposerEvidence['scope'],
+  dominant?: FactualComposerFact
+) {
   const shares = categories
-    .filter((fact) => fact.percentage !== undefined)
+    .filter((fact) => fact.percentage !== undefined || fact.coverage !== undefined)
     .sort((left, right) => (right.percentage ?? 0) - (left.percentage ?? 0))
-    .map((fact) => `un ${formatPercentage(fact.percentage!)} % como ${renderIdentity(fact)}`)
+    .map((fact) => {
+      if (fact.percentage !== undefined) {
+        return `un ${formatPercentage(fact.percentage)} % como ${renderIdentity(fact)}`
+      }
+      if (fact.coverage === 'full') {
+        return scope === 'parcel'
+          ? `un 100 % como ${renderIdentity(fact)}, que afecta a toda la parcela`
+          : `un 100 % como ${renderIdentity(fact)}, que afecta a toda el área seleccionada`
+      }
+      if (fact.coverage === 'partial') return `${renderIdentity(fact)} solo en una parte`
+      return `${renderIdentity(fact)} con extensión aún no determinada`
+    })
   if (shares.length === 0) return ''
   const dominance = dominant
     ? `, por lo que ${renderIdentity(dominant)} es claramente la categoría predominante`
@@ -124,7 +139,7 @@ export function renderFactualComposerPlan(
     const target = plan.conclusion.targetFactId
       ? facts.get(plan.conclusion.targetFactId)
       : undefined
-    if (target) paragraphs.push(`La parcela completa se identifica íntegramente como ${renderIdentity(target)}.`)
+    if (target) paragraphs.push(`Sí. La categoría ${renderIdentity(target)} afecta a toda la parcela.`)
   } else if (plan.conclusion.kind === 'category_distribution') {
     const count = categories.length
     paragraphs.push(
@@ -144,7 +159,7 @@ export function renderFactualComposerPlan(
     plan.conclusion.kind === 'strictly_homogeneous' ||
     plan.conclusion.kind === 'category_distribution'
   ) {
-    paragraphs.push(renderDistribution(categories, dominant))
+    paragraphs.push(renderDistribution(categories, evidence.scope, dominant))
   }
 
   const stateCaveat = renderStateCaveat(plan, evidence)

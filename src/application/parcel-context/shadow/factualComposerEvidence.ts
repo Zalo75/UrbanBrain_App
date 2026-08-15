@@ -16,6 +16,7 @@ function composerIntent(
   const intent = analyzeVisibleFactualIntent(question, contract)
   if (intent.asksConfirmation) return 'strict_homogeneity'
   if (intent.asksDistribution) return 'category_distribution'
+  if (intent.asksGeometry) return 'category_distribution'
   if (intent.asksCategory) return 'category_identity'
   if (intent.asksClassification) return 'classification_identity'
   if (intent.asksState) return 'state_explanation'
@@ -48,6 +49,7 @@ function addRequestedType(
 ) {
   requested.add(operation.factRef.type as 'classification' | 'category')
   if (operation.operation === 'state_percentage') requested.add('percentage')
+  if (operation.operation === 'state_coverage') requested.add('coverage')
   if (operation.operation === 'state_geometric_dominance') {
     requested.add('percentage')
     requested.add('geometricDominance')
@@ -102,6 +104,12 @@ export function buildFactualComposerEvidence(
       'parcelPercentage' in resolved &&
       resolved.parcelPercentage !== undefined
     ) current.percentage = resolved.parcelPercentage
+
+    if (
+      operation.operation === 'state_coverage' &&
+      'coverage' in resolved &&
+      resolved.coverage === operation.coverage
+    ) current.coverage = resolved.coverage
 
     if (
       (operation.operation === 'state_status' ||

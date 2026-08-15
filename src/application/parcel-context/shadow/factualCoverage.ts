@@ -44,6 +44,7 @@ const COVERAGE_OPERATION_TYPES = new Set<StructuredOperation['operation']>([
   'reference_code',
   'state_label',
   'state_percentage',
+  'state_coverage',
   'state_geometric_dominance',
 ])
 
@@ -76,9 +77,16 @@ function sameCategoryRef(
     operation.factRef.code === code
 }
 
+function questionMentionsCategoryCode(question: string, code: string) {
+  const normalizedQuestion = ` ${question.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()} `
+  const normalizedCode = code.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()
+  return normalizedCode.length > 0 && normalizedQuestion.includes(` ${normalizedCode} `)
+}
+
 function categoryRequirement(
   category: FactualCategory,
-  scope: FactualScope
+  scope: FactualScope,
+  requiresExtent: boolean
 ): CoverageRequirement | null {
   if (!category.code) return null
 
@@ -92,6 +100,20 @@ function categoryRequirement(
         operation: 'state_percentage',
         factRef,
         percentage: category.parcelPercentage!,
+      }),
+    }
+  }
+
+  if (requiresExtent && category.coverage) {
+    return {
+      isSatisfied: (operation) =>
+        sameCategoryRef(operation, scope, category.code!) &&
+        operation.operation === 'state_coverage' &&
+        operation.coverage === category.coverage,
+      buildOperation: () => ({
+        operation: 'state_coverage',
+        factRef,
+        coverage: category.coverage!,
       }),
     }
   }
@@ -218,7 +240,7 @@ export function enforceFactualCoverage(
 ): FactualCoverageResult {
   const intent = analyzeVisibleFactualIntent(question, contract)
   const requiresCategoryCoverage =
-    intent.asksCategory || intent.asksDistribution || intent.asksConfirmation
+    intent.asksCategory || intent.asksGeometry || intent.asksDistribution || intent.asksConfirmation
   const requiresClassificationCoverage = intent.asksClassification
 
   if (!requiresCategoryCoverage && !requiresClassificationCoverage) {
@@ -263,7 +285,17 @@ export function enforceFactualCoverage(
     if (categories.length === 0) return unchanged(output, false, 'missing_required_facts')
 
     const codeCounts = new Map<string, number>()
-    for (const category of categories) {
+    const explicitlyRequestedCategories = intent.asksGeometry
+      ? categories.filter((category) => category.code && (
+          questionMentionsCategoryCode(question, category.code) ||
+          output.operations.some((operation) => sameCategoryRef(operation, intent.scope, category.code!))
+        ))
+      : []
+    const categoriesToCover = explicitlyRequestedCategories.length > 0
+      ? explicitlyRequestedCategories
+      : categories
+
+    for (const category of categoriesToCover) {
       if (!category.code) return unchanged(output, false, 'unrepresentable_category')
       codeCounts.set(category.code, (codeCounts.get(category.code) ?? 0) + 1)
     }
@@ -271,12 +303,18 @@ export function enforceFactualCoverage(
       return unchanged(output, false, 'ambiguous_category')
     }
 
-    for (const category of categories) {
-      const requirement = categoryRequirement(category, intent.scope)
+    for (const category of categoriesToCover) {
+      const requirement = categoryRequirement(
+        category,
+        intent.scope,
+        intent.asksGeometry || intent.asksDistribution || intent.asksConfirmation
+      )
       if (!requirement) return unchanged(output, false, 'unrepresentable_category')
       requirements.push(requirement)
     }
-    requirements.push(...stateRequirements(categories, intent.scope))
+    if (!intent.asksGeometry || intent.asksCategory || intent.asksConfirmation) {
+      requirements.push(...stateRequirements(categoriesToCover, intent.scope))
+    }
   } else if (intent.asksState && scopeFacts.classification) {
     requirements.push(...classificationStateRequirements(scopeFacts.classification, intent.scope))
   }

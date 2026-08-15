@@ -19,6 +19,9 @@ describe('shadowEvaluator', () => {
     expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain("state_determination con 'unresolved'")
     expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('No muestres razonamiento')
     expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('Emite como máximo una operación')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain("'full' acredita todo el scope")
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain('No deduzcas full por ser una categoría única')
+    expect(SHADOW_FACTUAL_SYSTEM_PROMPT).toContain("operation: 'state_coverage'")
   })
 
   it('envia el contrato serializado al modelo y retorna la respuesta', async () => {

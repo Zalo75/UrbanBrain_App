@@ -20,6 +20,7 @@ const CONCLUSION_KINDS = new Set<FactualComposerConclusionKind>([
 const EXPLANATION_KINDS = new Set<FactualComposerExplanation['kind']>([
   'fact_identity',
   'category_share',
+  'territorial_coverage',
   'geometric_dominance',
 ])
 const CAVEAT_KINDS = new Set<FactualComposerCaveat['kind']>([
@@ -271,7 +272,8 @@ export function validateFactualComposerPlan(
       : undefined
     if (!target || target.type !== 'category') return { safe: false, reason: 'missing_target' }
     const positiveCategories = categories.filter((fact) => (fact.percentage ?? 0) > 0)
-    const notStrict = positiveCategories.length > 1 || target.percentage === undefined || target.percentage < 100
+    const hasAccreditedTotality = target.coverage === 'full' || target.percentage === 100
+    const notStrict = categories.length > 1 || positiveCategories.length > 1 || !hasAccreditedTotality
     const expectedKind = notStrict ? 'not_strictly_homogeneous' : 'strictly_homogeneous'
     if (plan.conclusion.kind !== expectedKind) return { safe: false, reason: 'categorical_totality' }
   }
@@ -284,9 +286,14 @@ export function validateFactualComposerPlan(
         ? evidence.validatedFacts
         : categories
   for (const fact of materialFacts) {
-    const requiredKind = fact.type === 'category' && fact.percentage !== undefined &&
-      (evidence.questionIntent === 'category_distribution' || evidence.questionIntent === 'strict_homogeneity')
-      ? 'category_share'
+    const extentRequested = evidence.questionIntent === 'category_distribution' ||
+      evidence.questionIntent === 'strict_homogeneity'
+    const requiredKind = fact.type === 'category' && extentRequested
+      ? fact.percentage !== undefined
+        ? 'category_share'
+        : fact.coverage !== undefined
+          ? 'territorial_coverage'
+          : 'fact_identity'
       : 'fact_identity'
     if (!hasExplanation(plan, requiredKind, fact.id)) {
       return { safe: false, reason: fact.type === 'category' ? 'missing_material_category' : 'missing_material_fact' }
@@ -298,6 +305,9 @@ export function validateFactualComposerPlan(
     const fact = facts.get(item.factId)!
     if (item.kind === 'category_share' && (fact.type !== 'category' || fact.percentage === undefined)) {
       return { safe: false, reason: 'unsupported_percentage' }
+    }
+    if (item.kind === 'territorial_coverage' && (fact.type !== 'category' || fact.coverage === undefined)) {
+      return { safe: false, reason: 'unsupported_coverage' }
     }
     if (
       item.kind === 'geometric_dominance' &&

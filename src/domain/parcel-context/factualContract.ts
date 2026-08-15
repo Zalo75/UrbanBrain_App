@@ -9,6 +9,8 @@ export type FactDeterminationType = 'automatic' | 'manual' | 'effective' | 'unre
 
 export type SemanticCompleteness = 'complete' | 'partial'
 
+export type TerritorialCoverage = 'full' | 'partial' | 'unknown'
+
 export interface FactualProvenance {
   sourceName?: string
   sourceType?: OfficialSource | ParcelContextSource | string
@@ -43,6 +45,8 @@ export interface FactualCategory {
   semanticCompleteness?: SemanticCompleteness
   status: UrbanisticFactStatus | 'unresolved'
   determination: FactDeterminationType
+  /** Extent accredited inside this fact's own scope; independent from status/confidence. */
+  coverage?: TerritorialCoverage
   parcelPercentage?: number
   intersectionAreaSquareMetres?: number
   provenance?: FactualProvenance

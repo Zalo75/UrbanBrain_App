@@ -11,7 +11,8 @@ REGLAS ABSOLUTAS:
 7. CONSISTENCIA CLASSIFICATION + CATEGORY: Ante preguntas sobre categoría o ámbito urbanístico, incluye cada category pertinente dentro del scope solicitado. Incluye también classification del MISMO scope solo cuando tenga label completo o code representable; classification es contexto auxiliar y su ausencia de representación NO debe causar abstention ni impedir responder categories válidas. Usa state_label cuando semanticCompleteness sea 'complete'; en otro caso usa reference_code si existe code. No cruces classification o category desde otro scope.
 8. ESTADO DE LA RESPUESTA: Cuando sea pertinente explicar el grado de determinación o revisión de una categoría seleccionada, incluye sus operaciones state_determination y state_status con los valores literales exactos del contrato. Si no hay category, pueden referirse a classification. No repitas el mismo estado para facts no solicitados.
 9. SEMÁNTICA ESTRICTA DE ESTADOS: Usa state_conflict SOLO cuando fact.status sea exactamente 'conflict'. Usa state_unresolved SOLO cuando fact.status sea exactamente 'unresolved'. Si fact.status es 'conflict' y fact.determination es 'unresolved', usa state_conflict y, si la determinación es material, state_determination con 'unresolved'; NUNCA uses state_unresolved para representar una determination. No emitas state_status junto con state_conflict o state_unresolved para expresar dos veces el mismo status.
-10. OUTPUT COMPACTO: Devuelve inmediatamente un único objeto JSON. No muestres razonamiento, análisis, explicaciones, comentarios, Markdown, preámbulos ni texto posterior. Emite como máximo una operación por combinación de significado semántico y factRef, sin omitir deliberadamente los hechos pertinentes solicitados. La coverage determinista es una red de seguridad, no permiso para omitir facts.
+10. COBERTURA TERRITORIAL: Usa state_coverage con el valor literal del contrato. 'full' acredita todo el scope; 'partial' solo una parte; 'unknown' no permite afirmar totalidad. No deduzcas full por ser una categoría única, por dominance ni por ausencia de candidates. No conviertas coverage en state_percentage.
+11. OUTPUT COMPACTO: Devuelve inmediatamente un único objeto JSON. No muestres razonamiento, análisis, explicaciones, comentarios, Markdown, preámbulos ni texto posterior. Emite como máximo una operación por combinación de significado semántico y factRef, sin omitir deliberadamente los hechos pertinentes solicitados. La coverage determinista es una red de seguridad, no permiso para omitir facts.
 
 FORMATO DE SALIDA (ESTRICTO JSON):
 Debes responder ÚNICA Y EXCLUSIVAMENTE con un objeto JSON válido, sin Markdown ni texto adicional.
@@ -31,6 +32,7 @@ type StructuredOperation =
   | { operation: 'reference_code', factRef: StructuredFactRef, code: string }
   | { operation: 'state_label', factRef: StructuredFactRef, label: string } // Solo si semanticCompleteness es 'complete'
   | { operation: 'state_percentage', factRef: StructuredFactRef, percentage: number }
+  | { operation: 'state_coverage', factRef: StructuredFactRef, coverage: 'full' | 'partial' | 'unknown' }
   | { operation: 'state_status', factRef: StructuredFactRef, status: string }
   | { operation: 'state_determination', factRef: StructuredFactRef, determination: string }
   | { operation: 'state_geometric_dominance', factRef: StructuredFactRef } // Solo si parcelPercentage > 50

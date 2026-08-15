@@ -28,6 +28,37 @@ const baseOptions = () => ({
 })
 
 describe('factualComposer', () => {
+  it('composes accredited Valdoviño totality without exposing internal enums', async () => {
+    const contract = createSadaContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+    const output = {
+      operations: [{
+        operation: 'state_coverage' as const, coverage: 'full' as const,
+        factRef: { type: 'category' as const, scope: 'parcel' as const, code: 'SNRSC' },
+      }],
+      abstentions: [],
+    }
+    const plan = {
+      schemaVersion: '1',
+      conclusion: { kind: 'strictly_homogeneous', targetFactId: 'category:parcel:SNRSC' },
+      explanation: [{ kind: 'territorial_coverage', factId: 'category:parcel:SNRSC' }],
+      caveats: [], recommendedChecks: [],
+    }
+    const result = await composeValidatedFactualAnswer({
+      question: '¿Toda la parcela tiene la misma categoría urbanística?',
+      contract, output, fallbackAnswer: 'RESPUESTA MECÁNICA',
+      client: clientWith(JSON.stringify(plan)).client,
+    })
+
+    expect(result.diagnostics.status).toBe('composed')
+    expect(result.answer).toContain('Sí. La categoría SNRSC afecta a toda la parcela.')
+    expect(result.answer).toContain('100 %')
+    expect(result.answer).not.toMatch(/scope|actionArea|coverage|automatic_confirmed|determination/i)
+  })
+
   it.each([
     [undefined, false], ['false', false], ['TRUE', false], ['1', false], ['true', true],
   ])('enables only the exact string true: %s', (value, expected) => {

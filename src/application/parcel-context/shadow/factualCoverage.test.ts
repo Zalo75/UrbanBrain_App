@@ -134,6 +134,50 @@ function realisticSadaContract() {
 const sadaQuestion = '¿Puedo considerar toda la parcela como Núcleo Rural Común (SNRC)?'
 
 describe('deterministic factual coverage', () => {
+  it.each([
+    '¿Toda la parcela tiene la misma categoría urbanística?',
+    '¿Qué porcentaje de toda la parcela corresponde a SNRSC?',
+  ])('selecciona coverage full acreditada para Valdoviño: %s', (question) => {
+    const factualContract = contract()
+    factualContract.factsByScope!.parcel!.classification = {
+      code: 'SNR', label: 'Suelo de Núcleo Rural', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic',
+    }
+    factualContract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'Suelo de Núcleo Rural de Sistema Costero',
+      semanticCompleteness: 'complete', status: 'automatic_confirmed',
+      determination: 'automatic', coverage: 'full',
+    }]
+
+    const result = enforceFactualCoverage(question, factualContract, output([]))
+
+    expect(result.diagnostics).toEqual(expect.objectContaining({
+      coverageComplete: true, coverageReason: 'completed_deterministically',
+    }))
+    expect(result.output.operations).toContainEqual({
+      operation: 'state_coverage', coverage: 'full',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+    })
+    expect(result.output.operations.some((operation) =>
+      operation.operation === 'state_percentage'
+    )).toBe(false)
+  })
+
+  it('mantiene 98,53 para la pregunta porcentual de Sada y nunca lo convierte en full o 100', () => {
+    const result = enforceFactualCoverage(
+      '¿Qué porcentaje de la parcela es SNRC?',
+      contract(),
+      output([])
+    )
+
+    expect(result.output.operations).toContainEqual({
+      operation: 'state_percentage', percentage: 98.53,
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+    })
+    expect(JSON.stringify(result.output)).not.toContain('100')
+    expect(JSON.stringify(result.output)).not.toContain('full')
+  })
+
   it('reproduce el contrato construido de Sada y completa category parcel sin classification representable', () => {
     const factualContract = realisticSadaContract()
     const question = '¿Qué categorías existen en toda la parcela?'
@@ -609,6 +653,6 @@ describe('deterministic factual coverage', () => {
     )
 
     expect(result.output).toBe(initial)
-    expect(result.diagnostics.coverageReason).toBe('not_required')
+    expect(result.diagnostics.coverageReason).toBe('already_complete')
   })
 })

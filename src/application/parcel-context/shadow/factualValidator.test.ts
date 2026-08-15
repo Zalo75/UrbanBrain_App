@@ -655,4 +655,34 @@ describe('Structured Factual Validator - scoped unique refs', () => {
 
     expect(result.errors[0].code).toBe('UNRESOLVED_AS_ABSENCE')
   })
+
+  it('valida state_coverage exclusivamente contra la cobertura acreditada del fact', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [{
+      ...parcel.categories![0], parcelPercentage: undefined, coverage: 'full',
+    }]
+    const contract = createContract({ parcel })
+
+    expect(validate(contract, [{
+      operation: 'state_coverage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      coverage: 'full',
+    }]).valid).toBe(true)
+    expect(validate(contract, [{
+      operation: 'state_coverage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      coverage: 'partial',
+    }]).errors[0].code).toBe('COVERAGE_MISMATCH')
+  })
+
+  it('geometric dominance no permite inventar coverage full', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories![0].coverage = 'partial'
+
+    expect(validate(createContract({ parcel }), [{
+      operation: 'state_coverage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      coverage: 'full',
+    }]).errors[0].code).toBe('COVERAGE_MISMATCH')
+  })
 })

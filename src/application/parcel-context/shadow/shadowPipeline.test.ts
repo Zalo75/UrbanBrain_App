@@ -188,6 +188,31 @@ describe('Territorial Factual Shadow Pipeline', () => {
     expect(result.renderedText?.join(' ')).toContain('1,47 %')
   })
 
+  it('A4. coverage full acreditada responde totalidad y 100 sin state_percentage inventado', async () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+    contract.categories = contract.factsByScope!.parcel!.categories
+    const result = await runTerritorialFactualShadowPipeline(
+      '¿Toda la parcela tiene la misma categoría urbanística?',
+      contract,
+      mockClient(JSON.stringify({ operations: [], abstentions: [] }))
+    )
+
+    expect(result.status).toBe('valid')
+    expect(result.structuredOutput?.operations).toContainEqual({
+      operation: 'state_coverage', coverage: 'full',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+    })
+    expect(result.structuredOutput?.operations.some((operation) =>
+      operation.operation === 'state_percentage'
+    )).toBe(false)
+    expect(result.renderedText?.join(' ')).toContain('100 %')
+    expect(result.renderedText?.join(' ')).not.toMatch(/coverage|scope|automatic_confirmed/i)
+  })
+
   it('B. Output inválido (JSON malformado)', async () => {
     const client = mockClient('Esto no es un json')
     const result = await runTerritorialFactualShadowPipeline('?', createMockContract(), client)

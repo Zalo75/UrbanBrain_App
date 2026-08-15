@@ -92,6 +92,18 @@ describe('visible factual routing', () => {
     expect(shouldRunVisibleFactual(question, contract())).toBe(true)
   })
 
+  it('routes a percentage question when full coverage exists without an explicit percentage', () => {
+    const fullCoverage = contract()
+    fullCoverage.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+
+    expect(shouldRunVisibleFactual(
+      '¿Qué porcentaje de toda la parcela corresponde a SNRSC?',
+      fullCoverage
+    )).toBe(true)
+  })
+
   it.each([
     ['¿Qué categorías existen en toda la parcela?', 'parcel'],
     ['¿Qué categorías tiene la parcela?', 'parcel'],

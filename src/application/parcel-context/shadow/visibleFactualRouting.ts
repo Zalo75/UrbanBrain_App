@@ -48,9 +48,9 @@ function asksTerritorialRegime(normalized: string) {
     (PARCEL_SCOPE_PATTERN.test(normalized) || ACTION_AREA_SCOPE_PATTERN.test(normalized))
 }
 
-function hasPercentageFacts(contract: TerritorialFactualContract, scope: FactualScope) {
+function hasExtentFacts(contract: TerritorialFactualContract, scope: FactualScope) {
   return Boolean(contract.factsByScope?.[scope]?.categories?.some(
-    (category) => category.parcelPercentage !== undefined
+    (category) => category.parcelPercentage !== undefined || category.coverage !== undefined
   ))
 }
 
@@ -59,10 +59,10 @@ export function requestedScope(question: string, contract: TerritorialFactualCon
   if (PARCEL_SCOPE_PATTERN.test(normalized)) return 'parcel'
   if (ACTION_AREA_SCOPE_PATTERN.test(normalized)) return 'actionArea'
   if (TERRITORIAL_GEOMETRY_PATTERN.test(normalized)) {
-    const parcelHasPercentages = hasPercentageFacts(contract, 'parcel')
-    const actionAreaHasPercentages = hasPercentageFacts(contract, 'actionArea')
-    if (parcelHasPercentages !== actionAreaHasPercentages) {
-      return parcelHasPercentages ? 'parcel' : 'actionArea'
+    const parcelHasExtent = hasExtentFacts(contract, 'parcel')
+    const actionAreaHasExtent = hasExtentFacts(contract, 'actionArea')
+    if (parcelHasExtent !== actionAreaHasExtent) {
+      return parcelHasExtent ? 'parcel' : 'actionArea'
     }
   }
   return contract.factsByScope?.actionArea ? 'actionArea' : 'parcel'
@@ -100,7 +100,9 @@ function hasCoveredFacts(question: string, contract: TerritorialFactualContract)
   if (!scopeFacts) return false
 
   if (intent.asksGeometry) {
-    return Boolean(scopeFacts.categories?.some((category) => category.parcelPercentage !== undefined))
+    return Boolean(scopeFacts.categories?.some(
+      (category) => category.parcelPercentage !== undefined || category.coverage !== undefined
+    ))
   }
   if (intent.asksCategory || intent.asksConfirmation) return Boolean(scopeFacts.categories?.length)
   if (intent.asksClassification) return Boolean(scopeFacts.classification)

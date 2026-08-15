@@ -315,6 +315,25 @@ describe('POST /api/chat synchronous factual visibility', () => {
       .toEqual(['SNRC'])
   })
 
+  it('serves Valdoviño full coverage percentage factually without Primary', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'false'
+    const rendered = 'La categoría SNRSC afecta a toda la parcela: corresponde al 100 % de la superficie analizada.'
+    mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [{
+      operation: 'state_coverage', coverage: 'full',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+    }]))
+
+    const { payload } = await execute('¿Qué porcentaje de toda la parcela corresponde a SNRSC?')
+
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.runFactual).toHaveBeenCalledTimes(1)
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+    expect(mocks.completionCreate).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    expect(payload.answer).not.toMatch(/scope|actionArea|coverage|automatic_confirmed/i)
+  })
+
   it.each([
     '¿Qué categorías existen en toda la parcela?',
     '¿Qué categorías tiene la parcela?',
