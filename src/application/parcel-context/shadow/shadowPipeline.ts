@@ -72,6 +72,11 @@ export interface TerritorialShadowResult {
   }
 }
 
+export interface TerritorialShadowPipelineOptions {
+  model?: string
+  territorialCoverageDiagnostics?: TerritorialCoverageDerivationDiagnostics
+}
+
 const SAFE_FACT_CODE = /^[A-Za-z0-9._/-]{1,64}$/
 
 function safeCoverageDerivationDiagnostics(
@@ -168,11 +173,17 @@ export async function runTerritorialFactualShadowPipeline(
   question: string,
   input: NormalizedParcelContext | TerritorialFactualContract,
   client: OpenAI,
-  model = 'deepseek-v4-flash'
+  modelOrOptions: string | TerritorialShadowPipelineOptions = 'deepseek-v4-flash'
 ): Promise<TerritorialShadowResult> {
+  const options = typeof modelOrOptions === 'string'
+    ? { model: modelOrOptions }
+    : modelOrOptions
+  const model = options.model ?? 'deepseek-v4-flash'
   const start = performance.now()
   const contractStartedAt = performance.now()
-  let territorialCoverageDiagnostics: TerritorialCoverageDerivationDiagnostics | undefined
+  let territorialCoverageDiagnostics = options.territorialCoverageDiagnostics
+    ? safeCoverageDerivationDiagnostics(options.territorialCoverageDiagnostics)
+    : undefined
   const contract = 'identity' in input && ('classification' in input || 'factsByScope' in input)
     ? (input as TerritorialFactualContract)
     : buildTerritorialFactualContract(input as NormalizedParcelContext, {

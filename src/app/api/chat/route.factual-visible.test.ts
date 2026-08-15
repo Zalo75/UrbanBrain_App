@@ -334,6 +334,50 @@ describe('POST /api/chat synchronous factual visibility', () => {
     expect(payload.answer).not.toMatch(/scope|actionArea|coverage|automatic_confirmed/i)
   })
 
+  it('propagates synchronous contract coverage diagnostics into FactualPerf metrics', async () => {
+    process.env.URBANBRAIN_SYNC_FACTUAL_ENABLED = 'true'
+    process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'false'
+    const rendered = 'El área seleccionada tiene la categoría SNRC.'
+    mocks.runFactual.mockImplementationOnce((_question, _contract, _client, options) => {
+      const result = validResult(rendered, [{
+        operation: 'state_label',
+        factRef: { type: 'category', scope: 'actionArea', code: 'SNRC' },
+        label: 'Núcleo Rural Común',
+      }])
+      result.diagnostics.metrics = {
+        ...result.diagnostics.metrics!,
+        territorialCoverageDiagnostics: options.territorialCoverageDiagnostics,
+      }
+      return Promise.resolve(result)
+    })
+
+    const { payload } = await execute('¿Qué categoría tiene el área seleccionada?')
+
+    const pipelineOptions = mocks.runFactual.mock.calls[0][3]
+    expect(pipelineOptions.territorialCoverageDiagnostics['actionArea:SNRC'])
+      .toEqual(expect.objectContaining({
+        result: 'unknown',
+        failedRequirements: expect.arrayContaining(['not_whole_parcel']),
+      }))
+    const pipelineContract = mocks.runFactual.mock.calls[0][1]
+    expect(pipelineContract).not.toHaveProperty('territorialCoverageDiagnostics')
+    const factualPerfCall = vi.mocked(console.info).mock.calls.find(
+      ([label]) => label === '[FactualPerf]'
+    )
+    expect(factualPerfCall?.[1]).toEqual(expect.objectContaining({
+      territorialCoverageDiagnostics: expect.objectContaining({
+        'actionArea:SNRC': expect.objectContaining({
+          result: 'unknown',
+          failedRequirements: expect.arrayContaining(['not_whole_parcel']),
+        }),
+      }),
+    }))
+    expect(payload).toMatchObject({ answer: rendered, sources: [] })
+    expect(mocks.runFactual).toHaveBeenCalledTimes(1)
+    expect(mocks.composeFactual).not.toHaveBeenCalled()
+    expect(mocks.embedContent).not.toHaveBeenCalled()
+  })
+
   it.each([
     '¿Qué categorías existen en toda la parcela?',
     '¿Qué categorías tiene la parcela?',

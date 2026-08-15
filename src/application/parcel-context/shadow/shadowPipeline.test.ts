@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { runTerritorialFactualShadowPipeline } from './shadowPipeline'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
+import {
+  buildTerritorialFactualContract,
+  type TerritorialCoverageDerivationDiagnostics,
+} from '../buildFactualContract'
 import type OpenAI from 'openai'
 
 vi.mock('./factualRenderer', async (importOriginal) => {
@@ -266,6 +270,23 @@ describe('Territorial Factual Shadow Pipeline', () => {
     expect(JSON.stringify(result.diagnostics)).not.toMatch(
       /15088A034002230000HU|coordinates|GeoJSON|¿Toda la parcela/
     )
+
+    let contractDiagnostics: TerritorialCoverageDerivationDiagnostics = {}
+    const contract = buildTerritorialFactualContract(context, {
+      onCoverageDiagnostics: (value) => { contractDiagnostics = value },
+    })
+    const contractResult = await runTerritorialFactualShadowPipeline(
+      '¿Toda la parcela tiene la misma categoría urbanística?',
+      contract,
+      mockClient(JSON.stringify({ operations: [], abstentions: [] })),
+      { territorialCoverageDiagnostics: contractDiagnostics }
+    )
+
+    expect(contractResult.status).toBe(result.status)
+    expect(contractResult.structuredOutput).toEqual(result.structuredOutput)
+    expect(contractResult.renderedText).toEqual(result.renderedText)
+    expect(contractResult.diagnostics.metrics?.territorialCoverageDiagnostics)
+      .toEqual(result.diagnostics.metrics?.territorialCoverageDiagnostics)
   })
 
   it('B. Output inválido (JSON malformado)', async () => {

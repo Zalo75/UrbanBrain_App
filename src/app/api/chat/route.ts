@@ -38,7 +38,10 @@ import {
   scheduleFactualShadowPipeline,
   scheduleFactualShadowResultPersistence,
 } from '@/application/parcel-context/shadow/shadowIntegration';
-import { buildTerritorialFactualContract } from '@/application/parcel-context/buildFactualContract';
+import {
+  buildTerritorialFactualContract,
+  type TerritorialCoverageDerivationDiagnostics,
+} from '@/application/parcel-context/buildFactualContract';
 import { runTerritorialFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowPipeline';
 import {
   assessVisibleFactualResult,
@@ -262,7 +265,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     if (synchronousFactualEnabled) {
       const contractStartedAt = performance.now();
-      const factualContract = buildTerritorialFactualContract(parcelContext);
+      let territorialCoverageDiagnostics: TerritorialCoverageDerivationDiagnostics = {};
+      const factualContract = buildTerritorialFactualContract(parcelContext, {
+        onCoverageDiagnostics: (value) => { territorialCoverageDiagnostics = value; },
+      });
       const contractMs = performance.now() - contractStartedAt;
       const routingStartedAt = performance.now();
       const shouldAttemptFactual = shouldRunVisibleFactual(message, factualContract);
@@ -274,7 +280,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
           const factualResult = await runTerritorialFactualShadowPipeline(
             message,
             factualContract,
-            openai
+            openai,
+            { territorialCoverageDiagnostics }
           );
           const assessment = assessVisibleFactualResult(factualResult);
           let answer = assessment.answer;
