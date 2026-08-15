@@ -96,6 +96,10 @@ function safeCoverageDerivationDiagnostics(
       actionAreaCategoryCode: diagnostic.actionAreaCategoryCode && SAFE_FACT_CODE.test(diagnostic.actionAreaCategoryCode)
         ? diagnostic.actionAreaCategoryCode
         : null,
+      candidateIdentities: diagnostic.candidateIdentities.map((candidate) => ({
+        ...candidate,
+        code: candidate.code && SAFE_FACT_CODE.test(candidate.code) ? candidate.code : null,
+      })),
     }
   }
   return safe

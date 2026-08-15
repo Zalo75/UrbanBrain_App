@@ -258,8 +258,20 @@ export interface TerritorialCoverageDerivationDiagnostic {
   actionAreaDetermination: FactDeterminationType | null
   actionAreaConfidence: UrbanisticRegimeFacts['category']['confidence'] | null
   actionAreaConfirmedHigh: boolean
+  rawCandidateCount: number
+  uniqueCandidateRecordCount: number
+  equivalentCandidateCount: number
+  competingSemanticCandidateCount: number
   competingCandidateCount: number
   noCompetingCandidates: boolean
+  candidateIdentities: Array<{
+    scope: 'parcel' | 'actionArea'
+    factType: 'category'
+    code: string | null
+    parcelPercentage: number | null
+    intersectionAreaSquareMetres: number | null
+    equivalentToAccreditedCategory: boolean
+  }>
   failedRequirements: TerritorialCoverageFailureCode[]
 }
 
@@ -312,11 +324,44 @@ function areasRepresentSameWholeParcel(context: NormalizedParcelContext) {
   return Math.abs(selection.surfaceSquareMetres - referenceArea) <= tolerance
 }
 
-function isAccreditedCategoryFact(fact: UrbanisticRegimeFacts['category']) {
+function normalizedCategoryCode(code?: string) {
+  return code?.normalize('NFKC').trim().toLocaleUpperCase('es') || undefined
+}
+
+function candidateIsEquivalentToCategory(
+  candidate: UrbanisticFactCandidate<{ code?: string; label?: string }>,
+  categoryCode: string | undefined,
+  context: NormalizedParcelContext
+) {
+  const candidateCode = normalizedCategoryCode(candidate.value?.code)
+  const resolvedCode = normalizedCategoryCode(categoryCode)
+  if (!candidateCode || !resolvedCode || candidateCode !== resolvedCode) return false
+  if (
+    candidate.parcelPercentage !== undefined &&
+    (!Number.isFinite(candidate.parcelPercentage) || candidate.parcelPercentage !== 100)
+  ) return false
+
+  if (candidate.intersectionAreaSquareMetres !== undefined) {
+    const parcelArea = context.actionArea?.value.parcelSurfaceSquareMetres
+    if (!(parcelArea && parcelArea > 0) || !Number.isFinite(candidate.intersectionAreaSquareMetres)) {
+      return false
+    }
+    const tolerance = Math.max(0.5, parcelArea * 0.001)
+    if (Math.abs(candidate.intersectionAreaSquareMetres - parcelArea) > tolerance) return false
+  }
+  return true
+}
+
+function isAccreditedCategoryFact(
+  fact: UrbanisticRegimeFacts['category'],
+  context: NormalizedParcelContext
+) {
   return fact.status === 'automatic_confirmed' &&
     fact.confidence === 'high' &&
     Boolean(fact.value?.code) &&
-    !fact.candidates?.length
+    (fact.candidates ?? []).every((candidate) =>
+      candidateIsEquivalentToCategory(candidate, fact.value?.code, context)
+    )
 }
 
 function accreditedWholeParcelCategoryCode(
@@ -328,7 +373,10 @@ function accreditedWholeParcelCategoryCode(
   const parcelCategory = parcelFacts.category
   const actionAreaCategory = actionAreaFacts.category
 
-  if (!isAccreditedCategoryFact(parcelCategory) || !isAccreditedCategoryFact(actionAreaCategory)) return undefined
+  if (
+    !isAccreditedCategoryFact(parcelCategory, context) ||
+    !isAccreditedCategoryFact(actionAreaCategory, context)
+  ) return undefined
   return parcelCategory.value!.code === actionAreaCategory.value!.code
     ? parcelCategory.value!.code
     : undefined
@@ -360,8 +408,49 @@ function buildCoverageDerivationDiagnostics(
   const actionAreaConfirmedHigh = Boolean(
     actionAreaCategory?.status === 'automatic_confirmed' && actionAreaCategory.confidence === 'high'
   )
-  const competingCandidateCount =
-    (parcelCategory?.candidates?.length ?? 0) + (actionAreaCategory?.candidates?.length ?? 0)
+  const candidateOccurrences = ([
+    ...((parcelCategory?.candidates ?? []).map((candidate) => ({
+      scope: 'parcel' as const,
+      candidate,
+      equivalent: candidateIsEquivalentToCategory(candidate, parcelCode ?? undefined, context),
+    }))),
+    ...((actionAreaCategory?.candidates ?? []).map((candidate) => ({
+      scope: 'actionArea' as const,
+      candidate,
+      equivalent: candidateIsEquivalentToCategory(candidate, actionAreaCode ?? undefined, context),
+    }))),
+  ])
+  const uniqueCandidates = new Set(candidateOccurrences.map((item) => item.candidate))
+  const equivalentCandidateCount = candidateOccurrences.filter((item) => item.equivalent).length
+  const competingKnownIdentities = new Set<string>()
+  const competingUnknownRecords = new Set<UrbanisticFactCandidate<{ code?: string; label?: string }>>()
+  for (const { candidate, equivalent } of candidateOccurrences) {
+    if (equivalent) continue
+    const code = normalizedCategoryCode(candidate.value?.code)
+    if (!code) {
+      competingUnknownRecords.add(candidate)
+      continue
+    }
+    competingKnownIdentities.add([
+      code,
+      candidate.parcelPercentage ?? 'unspecified-percentage',
+      candidate.intersectionAreaSquareMetres ?? 'unspecified-area',
+    ].join('|'))
+  }
+  const competingSemanticCandidateCount =
+    competingKnownIdentities.size + competingUnknownRecords.size
+  const candidateIdentities = candidateOccurrences.map(({ scope, candidate, equivalent }) => ({
+    scope,
+    factType: 'category' as const,
+    code: candidate.value?.code ?? null,
+    parcelPercentage: Number.isFinite(candidate.parcelPercentage)
+      ? candidate.parcelPercentage!
+      : null,
+    intersectionAreaSquareMetres: Number.isFinite(candidate.intersectionAreaSquareMetres)
+      ? candidate.intersectionAreaSquareMetres!
+      : null,
+    equivalentToAccreditedCategory: equivalent,
+  }))
   const common = {
     wholeParcel: selection?.selectionType === 'whole_parcel',
     parcelGeometryPresent: Boolean(context.parcelGeometry),
@@ -386,8 +475,13 @@ function buildCoverageDerivationDiagnostics(
       : null,
     actionAreaConfidence: safeFactConfidence(actionAreaCategory?.confidence),
     actionAreaConfirmedHigh,
-    competingCandidateCount,
-    noCompetingCandidates: competingCandidateCount === 0,
+    rawCandidateCount: candidateOccurrences.length,
+    uniqueCandidateRecordCount: uniqueCandidates.size,
+    equivalentCandidateCount,
+    competingSemanticCandidateCount,
+    competingCandidateCount: competingSemanticCandidateCount,
+    noCompetingCandidates: competingSemanticCandidateCount === 0,
+    candidateIdentities,
   }
 
   const failedRequirements = (): TerritorialCoverageFailureCode[] => {
@@ -406,7 +500,7 @@ function buildCoverageDerivationDiagnostics(
     if (parcelCode && actionAreaCode && !sameCategory) failed.push('category_mismatch')
     if (!parcelConfirmedHigh) failed.push('parcel_not_confirmed_high')
     if (!actionAreaConfirmedHigh) failed.push('action_area_not_confirmed_high')
-    if (competingCandidateCount > 0) failed.push('competing_candidates')
+    if (competingSemanticCandidateCount > 0) failed.push('competing_candidates')
     return failed.length > 0 ? failed : ['other_explicit_reason']
   }
 

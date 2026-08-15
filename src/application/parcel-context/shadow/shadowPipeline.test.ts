@@ -236,6 +236,7 @@ describe('Territorial Factual Shadow Pipeline', () => {
       category: {
         value: { code: 'SNRSC' }, status: 'automatic_confirmed' as const,
         origin: 'spatial_intersection' as const, confidence: 'high' as const,
+        candidates: [{ value: { code: 'SNRSC' } }],
         evidence: [], warnings: [], discrepancies: [], nextAction: 'none' as const,
       },
       consolidation: {
@@ -266,7 +267,15 @@ describe('Territorial Factual Shadow Pipeline', () => {
     expect(result.status).toBe('valid')
     expect(result.renderedText?.join(' ')).toContain('100 %')
     expect(result.diagnostics.metrics?.territorialCoverageDiagnostics?.['parcel:SNRSC'])
-      .toEqual(expect.objectContaining({ result: 'full', failedRequirements: [] }))
+      .toEqual(expect.objectContaining({
+        result: 'full',
+        rawCandidateCount: 2,
+        uniqueCandidateRecordCount: 1,
+        equivalentCandidateCount: 2,
+        competingSemanticCandidateCount: 0,
+        failedRequirements: [],
+      }))
+    expect(result.diagnostics.metrics).toEqual(expect.objectContaining({ candidateCount: 0 }))
     expect(JSON.stringify(result.diagnostics)).not.toMatch(
       /15088A034002230000HU|coordinates|GeoJSON|¿Toda la parcela/
     )

@@ -68,6 +68,9 @@ describe('territorial category coverage contract', () => {
     const facts = singleCategoryFacts('SNRSC')
     facts.category.label = 'Categoría homogénea oficial SNRSC'
     facts.category.value!.label = 'Categoría homogénea oficial SNRSC'
+    facts.category.candidates = [{
+      value: { code: 'SNRSC', label: 'Categoría homogénea oficial SNRSC' },
+    }]
     const normalized = buildNormalizedParcelContext({
       expediente: { refCatastral: '15088A034002230000HU' },
       detected: {
@@ -85,7 +88,7 @@ describe('territorial category coverage contract', () => {
         },
       },
     })
-    const contract = buildTerritorialFactualContract(normalized)
+    const { contract, diagnostics } = buildWithDiagnostics(normalized)
 
     expect(normalized.parcelGeometry).toEqual(geometry)
     expect(contract.factsByScope?.parcel?.categories?.[0]).toEqual(expect.objectContaining({
@@ -93,6 +96,17 @@ describe('territorial category coverage contract', () => {
     }))
     expect(contract.factsByScope?.parcel?.categories?.[0].parcelPercentage).toBeUndefined()
     expect(contract.factsByScope?.actionArea?.categories?.[0].coverage).toBe('full')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      rawCandidateCount: 2,
+      uniqueCandidateRecordCount: 1,
+      equivalentCandidateCount: 2,
+      competingSemanticCandidateCount: 0,
+      failedRequirements: [],
+    }))
+    expect(diagnostics['parcel:SNRSC'].candidateIdentities).toEqual([
+      expect.objectContaining({ scope: 'parcel', code: 'SNRSC', equivalentToAccreditedCategory: true }),
+      expect.objectContaining({ scope: 'actionArea', code: 'SNRSC', equivalentToAccreditedCategory: true }),
+    ])
   })
 
   it('derives full for accredited Valdoviño whole-parcel SNRSC in each own scope', () => {
@@ -184,8 +198,96 @@ describe('territorial category coverage contract', () => {
     expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('unknown')
     expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
       competingCandidateCount: 1,
+      competingSemanticCandidateCount: 1,
       noCompetingCandidates: false,
       failedRequirements: expect.arrayContaining(['competing_candidates']),
+    }))
+  })
+
+  it('treats separate equivalent SNRSC source records as evidence, not semantic competition', () => {
+    const context = valdovinoContext()
+    context.parcelUrbanisticFacts!.category.candidates = [{
+      value: { code: 'SNRSC', label: 'Categoría homogénea oficial SNRSC' },
+      parcelPercentage: 100,
+    }]
+    context.urbanisticFacts!.category.candidates = [{
+      value: { code: ' snrsc ', label: 'SNRSC' },
+      intersectionAreaSquareMetres: 854.78,
+    }]
+
+    const { contract, diagnostics } = buildWithDiagnostics(context)
+
+    expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('full')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      rawCandidateCount: 2,
+      uniqueCandidateRecordCount: 2,
+      equivalentCandidateCount: 2,
+      competingSemanticCandidateCount: 0,
+      noCompetingCandidates: true,
+      failedRequirements: [],
+    }))
+  })
+
+  it('keeps a genuinely different semantic candidate blocking full coverage', () => {
+    const context = valdovinoContext()
+    context.parcelUrbanisticFacts!.category.candidates = [
+      { value: { code: 'SNRSC' } },
+      { value: { code: 'SNRT' } },
+      { value: { code: 'snrt' } },
+    ]
+
+    const { contract, diagnostics } = buildWithDiagnostics(context)
+
+    expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('unknown')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      equivalentCandidateCount: 1,
+      competingSemanticCandidateCount: 1,
+      failedRequirements: expect.arrayContaining(['competing_candidates']),
+    }))
+  })
+
+  it('keeps candidates without a category code blocking full coverage', () => {
+    const context = valdovinoContext()
+    context.parcelUrbanisticFacts!.category.candidates = [{ value: { label: 'Sin código' } }]
+
+    const { contract, diagnostics } = buildWithDiagnostics(context)
+
+    expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('unknown')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      equivalentCandidateCount: 0,
+      competingSemanticCandidateCount: 1,
+      failedRequirements: expect.arrayContaining(['competing_candidates']),
+    }))
+  })
+
+  it('keeps a same-code candidate with partial coverage blocking full coverage', () => {
+    const context = valdovinoContext()
+    context.parcelUrbanisticFacts!.category.candidates = [{
+      value: { code: 'SNRSC' }, parcelPercentage: 99.5,
+    }]
+
+    const { contract, diagnostics } = buildWithDiagnostics(context)
+
+    expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('unknown')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      equivalentCandidateCount: 0,
+      competingSemanticCandidateCount: 1,
+      failedRequirements: expect.arrayContaining(['competing_candidates']),
+    }))
+  })
+
+  it('does not let equivalent candidates compensate for missing whole-parcel geometry', () => {
+    const context = valdovinoContext()
+    context.parcelUrbanisticFacts!.category.candidates = [{ value: { code: 'SNRSC' } }]
+    context.urbanisticFacts!.category.candidates = [{ value: { code: 'SNRSC' } }]
+    context.parcelGeometry = undefined
+
+    const { contract, diagnostics } = buildWithDiagnostics(context)
+
+    expect(contract.factsByScope?.parcel?.categories?.[0].coverage).toBe('unknown')
+    expect(diagnostics['parcel:SNRSC']).toEqual(expect.objectContaining({
+      competingSemanticCandidateCount: 0,
+      failedRequirements: expect.arrayContaining(['missing_parcel_geometry']),
     }))
   })
 

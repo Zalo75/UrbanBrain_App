@@ -15,6 +15,7 @@ import {
   loadAuthorizedParcelInputs,
   urbanisticFactsFromRaw,
 } from './parcelContextRepository'
+import { buildTerritorialFactualContract } from '@/application/parcel-context/buildFactualContract'
 
 describe('parcelContextRepository multitenancy', () => {
   beforeEach(() => {
@@ -163,5 +164,59 @@ describe('urbanisticFactsFromRaw backwards compatibility', () => {
     expect(facts.classification.candidates![0].value.code).toBe('SNR')
     expect(facts.category.candidates![0].value.code).toBe('SNRC')
     expect(facts.category.candidates![1].value.code).toBe('SNRT')
+  })
+
+  it('F. hidrata duplicados legacy equivalentes sin convertirlos en competencia semántica', () => {
+    const rawLegacy = {
+      planning: {
+        classificationResolution: {
+          status: 'clear',
+          candidates: [
+            {
+              id: 'legacy-source-1', kind: 'official_classification',
+              classification: { code: 'SNR', categoryCode: 'SNRSC' },
+              evidenceBasis: 'parcel_geometry', confidence: 'high', evidence: [],
+            },
+            {
+              id: 'legacy-source-2', kind: 'official_classification',
+              classification: { code: 'SNR', categoryCode: 'SNRSC' },
+              evidenceBasis: 'parcel_geometry', confidence: 'high', evidence: [],
+            },
+          ],
+          discrepancies: [], reviewReasons: [], evidence: [],
+        },
+      },
+    }
+    const facts = urbanisticFactsFromRaw(rawLegacy)!
+    const geometry = {
+      type: 'MultiPolygon' as const,
+      coordinates: [[[[-8.1, 43.6], [-8.09, 43.6], [-8.1, 43.61], [-8.1, 43.6]]]],
+      crs: 'EPSG:4326' as const,
+    }
+
+    const contract = buildTerritorialFactualContract({
+      parcelGeometry: geometry,
+      parcelSurfaceSquareMetres: 854.78,
+      parcelUrbanisticFacts: facts,
+      urbanisticFacts: facts,
+      actionArea: {
+        value: {
+          id: 'whole', geometry, surfaceSquareMetres: 854.78,
+          parcelSurfaceSquareMetres: 854.78, selectionType: 'whole_parcel',
+          source: 'catastro', confidence: 'high', selectedBy: 'system',
+          selectedAt: '2026-08-15T08:00:00.000Z', verification: 'unverified',
+        },
+        source: 'urbanbrain', confidence: 1, verification: 'confirmed',
+      },
+      knownConstraints: [], parcelKnownConstraints: [], conflicts: [], pendingValidation: [],
+    })
+
+    expect(facts.category.status).toBe('automatic_confirmed')
+    expect(facts.category.candidates?.map((candidate) => candidate.value.code)).toEqual([
+      'SNRSC', 'SNRSC',
+    ])
+    expect(contract.factsByScope?.parcel?.categories?.[0]).toEqual(expect.objectContaining({
+      code: 'SNRSC', coverage: 'full',
+    }))
   })
 })
