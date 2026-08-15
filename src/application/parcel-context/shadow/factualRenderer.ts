@@ -333,16 +333,21 @@ export function renderFactualOutput(output: StructuredFactualOutput, contract: T
       case 'state_label':
         pushOperationLine(renderStandaloneIdentity(entry), op.factRef.scope)
         break
-      case 'state_percentage':
-        if ('parcelPercentage' in fact && fact.parcelPercentage !== undefined) {
-          const pct = String(fact.parcelPercentage).replace('.', ',')
-          if (label) {
-            pushOperationLine(`${factNameCapitalized} ${labelText} representa el ${pct} % ${percentageScopeText}.`, op.factRef.scope)
-          } else if (code) {
-            pushOperationLine(`${factNameCapitalized} con código ${code} representa el ${pct} % ${percentageScopeText}.`, op.factRef.scope)
-          }
+      case 'state_percentage': {
+        const percentage = 'parcelPercentage' in fact && fact.parcelPercentage !== undefined
+          ? fact.parcelPercentage
+          : 'coverage' in fact && fact.coverage === 'full' && op.percentage === 100
+            ? op.percentage
+            : undefined
+        if (percentage === undefined) break
+        const pct = String(percentage).replace('.', ',')
+        if (label) {
+          pushOperationLine(`${factNameCapitalized} ${labelText} representa el ${pct} % ${percentageScopeText}.`, op.factRef.scope)
+        } else if (code) {
+          pushOperationLine(`${factNameCapitalized} con código ${code} representa el ${pct} % ${percentageScopeText}.`, op.factRef.scope)
         }
         break
+      }
       case 'state_coverage':
         if ('coverage' in fact && fact.coverage === op.coverage) {
           pushOperationLine(renderCoverage(fact.coverage, op.factRef.scope, fact), op.factRef.scope)

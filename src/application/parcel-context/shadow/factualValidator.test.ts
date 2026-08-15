@@ -675,6 +675,59 @@ describe('Structured Factual Validator - scoped unique refs', () => {
     }]).errors[0].code).toBe('COVERAGE_MISMATCH')
   })
 
+  it('acepta 100 como representación porcentual de coverage full sin porcentaje sintético', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [{
+      ...parcel.categories![0], parcelPercentage: undefined, coverage: 'full',
+    }]
+
+    const result = validate(createContract({ parcel }), [{
+      operation: 'state_percentage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      percentage: 100,
+    }])
+
+    expect(result.valid).toBe(true)
+  })
+
+  it.each([
+    ['full', 99],
+    ['partial', 100],
+    ['unknown', 100],
+  ] as const)('rechaza state_percentage %s/%s sin porcentaje explícito compatible', (coverage, percentage) => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [{
+      ...parcel.categories![0], parcelPercentage: undefined, coverage,
+    }]
+
+    const result = validate(createContract({ parcel }), [{
+      operation: 'state_percentage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      percentage,
+    }])
+
+    expect(result.errors[0].code).toBe('PERCENTAGE_MISMATCH')
+  })
+
+  it('mantiene el porcentaje explícito como autoridad aunque coverage sea full', () => {
+    const parcel = baseParcelFacts()
+    parcel.categories = [{
+      ...parcel.categories![0], parcelPercentage: 98.53, coverage: 'full',
+    }]
+    const contract = createContract({ parcel })
+
+    expect(validate(contract, [{
+      operation: 'state_percentage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      percentage: 98.53,
+    }]).valid).toBe(true)
+    expect(validate(contract, [{
+      operation: 'state_percentage',
+      factRef: { type: 'category', scope: 'parcel', code: 'SNRC' },
+      percentage: 100,
+    }]).errors[0].code).toBe('PERCENTAGE_MISMATCH')
+  })
+
   it('geometric dominance no permite inventar coverage full', () => {
     const parcel = baseParcelFacts()
     parcel.categories![0].coverage = 'partial'

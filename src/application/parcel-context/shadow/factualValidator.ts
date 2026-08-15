@@ -109,7 +109,16 @@ export function validateStructuredFactualOutput(
 
     if (op.operation === 'state_percentage') {
       if (!('parcelPercentage' in fact) || fact.parcelPercentage === undefined) {
-        errors.push({ code: 'PERCENTAGE_MISMATCH', message: 'Fact does not have a percentage', factRef: op.factRef, operation: op.operation })
+        const representsAccreditedFullCoverage =
+          'coverage' in fact && fact.coverage === 'full' && op.percentage === 100
+        if (!representsAccreditedFullCoverage) {
+          errors.push({
+            code: 'PERCENTAGE_MISMATCH',
+            message: 'Fact does not have a compatible percentage',
+            factRef: op.factRef,
+            operation: op.operation,
+          })
+        }
       } else {
         const diff = Math.abs(fact.parcelPercentage - op.percentage)
         if (diff > 0.01) {

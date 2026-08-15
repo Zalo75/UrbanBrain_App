@@ -51,6 +51,26 @@ describe('Structured Factual Renderer', () => {
     expect(result[0]).not.toContain('100 %')
   })
 
+  it('3b. renderiza el 100 validado cuando coverage full no materializa parcelPercentage', () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+    const output: StructuredFactualOutput = {
+      operations: [{
+        operation: 'state_percentage',
+        factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+        percentage: 100,
+      }],
+      abstentions: [],
+    }
+
+    expect(renderFactualOutput(output, contract)).toEqual([
+      'La categoría SNRSC representa el 100 % de la parcela.',
+    ])
+  })
+
   it('4. multiple categories', () => {
     const output: StructuredFactualOutput = { operations: [
       { operation: 'state_percentage', factRef: { type: 'category', scope: 'parcel', code: 'SNRC' }, percentage: 98.53 },

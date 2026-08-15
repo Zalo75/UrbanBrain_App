@@ -221,6 +221,31 @@ describe('Territorial Factual Shadow Pipeline', () => {
     })
   })
 
+  it('A4b. Valdoviño responde 100 por state_percentage acreditado por coverage full', async () => {
+    const contract = createMockContract()
+    contract.factsByScope!.parcel!.categories = [{
+      code: 'SNRSC', label: 'SNRSC', semanticCompleteness: 'complete',
+      status: 'automatic_confirmed', determination: 'automatic', coverage: 'full',
+    }]
+    contract.categories = contract.factsByScope!.parcel!.categories
+    const result = await runTerritorialFactualShadowPipeline(
+      '¿Qué porcentaje de toda la parcela corresponde a SNRSC?',
+      contract,
+      mockClient(JSON.stringify({
+        operations: [{
+          operation: 'state_percentage', percentage: 100,
+          factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
+        }],
+        abstentions: [],
+      }))
+    )
+
+    expect(result.status).toBe('valid')
+    expect(result.validation?.valid).toBe(true)
+    expect(result.renderedText?.join(' ')).toContain('100 %')
+    expect(result.renderedText?.join(' ')).toContain('SNRSC')
+  })
+
   it('A5. publishes safe derivation diagnostics without changing the factual result', async () => {
     const geometry = {
       type: 'MultiPolygon' as const,

@@ -320,7 +320,7 @@ describe('POST /api/chat synchronous factual visibility', () => {
     process.env.URBANBRAIN_FACTUAL_COMPOSER_ENABLED = 'false'
     const rendered = 'La categoría SNRSC afecta a toda la parcela: corresponde al 100 % de la superficie analizada.'
     mocks.runFactual.mockResolvedValueOnce(validResult(rendered, [{
-      operation: 'state_coverage', coverage: 'full',
+      operation: 'state_percentage', percentage: 100,
       factRef: { type: 'category', scope: 'parcel', code: 'SNRSC' },
     }]))
 
