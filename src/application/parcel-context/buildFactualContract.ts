@@ -221,6 +221,83 @@ function buildScopeFacts({ urbanisticFacts, planningArea, constraints, context }
   }
 }
 
+export type TerritorialCoverageFailureCode =
+  | 'not_whole_parcel'
+  | 'missing_parcel_geometry'
+  | 'missing_action_area_geometry'
+  | 'missing_parcel_area'
+  | 'missing_action_area_area'
+  | 'areas_not_concordant'
+  | 'missing_parcel_category'
+  | 'missing_action_area_category'
+  | 'category_mismatch'
+  | 'parcel_not_confirmed_high'
+  | 'action_area_not_confirmed_high'
+  | 'competing_candidates'
+  | 'missing_required_context'
+  | 'other_explicit_reason'
+
+export interface TerritorialCoverageDerivationDiagnostic {
+  result: TerritorialCoverage
+  wholeParcel: boolean
+  parcelGeometryPresent: boolean
+  actionAreaGeometryPresent: boolean
+  parcelAreaSquareMetres: number | null
+  actionAreaSquareMetres: number | null
+  areaDifferenceSquareMetres: number | null
+  allowedAreaToleranceSquareMetres: number | null
+  areasConcordant: boolean
+  parcelCategoryCode: string | null
+  actionAreaCategoryCode: string | null
+  sameCategory: boolean
+  parcelStatus: UrbanisticFactStatus | null
+  parcelDetermination: FactDeterminationType | null
+  parcelConfidence: UrbanisticRegimeFacts['category']['confidence'] | null
+  parcelConfirmedHigh: boolean
+  actionAreaStatus: UrbanisticFactStatus | null
+  actionAreaDetermination: FactDeterminationType | null
+  actionAreaConfidence: UrbanisticRegimeFacts['category']['confidence'] | null
+  actionAreaConfirmedHigh: boolean
+  competingCandidateCount: number
+  noCompetingCandidates: boolean
+  failedRequirements: TerritorialCoverageFailureCode[]
+}
+
+export type TerritorialCoverageDerivationDiagnostics = Record<
+  string,
+  TerritorialCoverageDerivationDiagnostic
+>
+
+interface BuildFactualContractOptions {
+  onCoverageDiagnostics?: (diagnostics: TerritorialCoverageDerivationDiagnostics) => void
+}
+
+const SAFE_URBANISTIC_FACT_STATUSES = new Set<UrbanisticFactStatus>([
+  'automatic_confirmed',
+  'automatic_probable',
+  'manual_review_required',
+  'technician_validated',
+  'not_available',
+  'source_unavailable',
+  'conflict',
+  'not_applicable',
+])
+const SAFE_FACT_CONFIDENCES = new Set(['high', 'medium', 'low', 'unknown'])
+
+function safeFactStatus(value: unknown): UrbanisticFactStatus | null {
+  return SAFE_URBANISTIC_FACT_STATUSES.has(value as UrbanisticFactStatus)
+    ? value as UrbanisticFactStatus
+    : null
+}
+
+function safeFactConfidence(
+  value: unknown
+): UrbanisticRegimeFacts['category']['confidence'] | null {
+  return typeof value === 'string' && SAFE_FACT_CONFIDENCES.has(value)
+    ? value as UrbanisticRegimeFacts['category']['confidence']
+    : null
+}
+
 function areasRepresentSameWholeParcel(context: NormalizedParcelContext) {
   const selection = context.actionArea?.value
   if (
@@ -235,6 +312,13 @@ function areasRepresentSameWholeParcel(context: NormalizedParcelContext) {
   return Math.abs(selection.surfaceSquareMetres - referenceArea) <= tolerance
 }
 
+function isAccreditedCategoryFact(fact: UrbanisticRegimeFacts['category']) {
+  return fact.status === 'automatic_confirmed' &&
+    fact.confidence === 'high' &&
+    Boolean(fact.value?.code) &&
+    !fact.candidates?.length
+}
+
 function accreditedWholeParcelCategoryCode(
   context: NormalizedParcelContext,
   parcelFacts?: UrbanisticRegimeFacts,
@@ -243,16 +327,101 @@ function accreditedWholeParcelCategoryCode(
   if (!areasRepresentSameWholeParcel(context) || !parcelFacts || !actionAreaFacts) return undefined
   const parcelCategory = parcelFacts.category
   const actionAreaCategory = actionAreaFacts.category
-  const isAccredited = (fact: UrbanisticRegimeFacts['category']) =>
-    fact.status === 'automatic_confirmed' &&
-    fact.confidence === 'high' &&
-    Boolean(fact.value?.code) &&
-    !fact.candidates?.length
 
-  if (!isAccredited(parcelCategory) || !isAccredited(actionAreaCategory)) return undefined
+  if (!isAccreditedCategoryFact(parcelCategory) || !isAccreditedCategoryFact(actionAreaCategory)) return undefined
   return parcelCategory.value!.code === actionAreaCategory.value!.code
     ? parcelCategory.value!.code
     : undefined
+}
+
+function buildCoverageDerivationDiagnostics(
+  context: NormalizedParcelContext,
+  parcelFacts: UrbanisticRegimeFacts | undefined,
+  actionAreaFacts: UrbanisticRegimeFacts | undefined,
+  factsByScope: { parcel?: FactualScopeFacts; actionArea?: FactualScopeFacts }
+): TerritorialCoverageDerivationDiagnostics {
+  const selection = context.actionArea?.value
+  const parcelCategory = parcelFacts?.category
+  const actionAreaCategory = actionAreaFacts?.category
+  const parcelArea = selection?.parcelSurfaceSquareMetres
+  const actionArea = selection?.surfaceSquareMetres
+  const parcelAreaPresent = typeof parcelArea === 'number' && parcelArea > 0
+  const actionAreaPresent = typeof actionArea === 'number' && actionArea > 0
+  const tolerance = parcelAreaPresent ? Math.max(0.5, parcelArea * 0.001) : null
+  const areaDifference = parcelAreaPresent && actionAreaPresent
+    ? Math.abs(actionArea - parcelArea)
+    : null
+  const parcelCode = parcelCategory?.value?.code ?? null
+  const actionAreaCode = actionAreaCategory?.value?.code ?? null
+  const sameCategory = Boolean(parcelCode && actionAreaCode && parcelCode === actionAreaCode)
+  const parcelConfirmedHigh = Boolean(
+    parcelCategory?.status === 'automatic_confirmed' && parcelCategory.confidence === 'high'
+  )
+  const actionAreaConfirmedHigh = Boolean(
+    actionAreaCategory?.status === 'automatic_confirmed' && actionAreaCategory.confidence === 'high'
+  )
+  const competingCandidateCount =
+    (parcelCategory?.candidates?.length ?? 0) + (actionAreaCategory?.candidates?.length ?? 0)
+  const common = {
+    wholeParcel: selection?.selectionType === 'whole_parcel',
+    parcelGeometryPresent: Boolean(context.parcelGeometry),
+    actionAreaGeometryPresent: Boolean(selection?.geometry),
+    parcelAreaSquareMetres: parcelAreaPresent ? parcelArea : null,
+    actionAreaSquareMetres: actionAreaPresent ? actionArea : null,
+    areaDifferenceSquareMetres: areaDifference,
+    allowedAreaToleranceSquareMetres: tolerance,
+    areasConcordant: areasRepresentSameWholeParcel(context),
+    parcelCategoryCode: parcelCode,
+    actionAreaCategoryCode: actionAreaCode,
+    sameCategory,
+    parcelStatus: safeFactStatus(parcelCategory?.status),
+    parcelDetermination: parcelCategory
+      ? mapDetermination(parcelCategory.origin, parcelCategory.status)
+      : null,
+    parcelConfidence: safeFactConfidence(parcelCategory?.confidence),
+    parcelConfirmedHigh,
+    actionAreaStatus: safeFactStatus(actionAreaCategory?.status),
+    actionAreaDetermination: actionAreaCategory
+      ? mapDetermination(actionAreaCategory.origin, actionAreaCategory.status)
+      : null,
+    actionAreaConfidence: safeFactConfidence(actionAreaCategory?.confidence),
+    actionAreaConfirmedHigh,
+    competingCandidateCount,
+    noCompetingCandidates: competingCandidateCount === 0,
+  }
+
+  const failedRequirements = (): TerritorialCoverageFailureCode[] => {
+    const failed: TerritorialCoverageFailureCode[] = []
+    if (!selection || !parcelFacts || !actionAreaFacts) failed.push('missing_required_context')
+    if (selection?.selectionType !== 'whole_parcel') failed.push('not_whole_parcel')
+    if (!context.parcelGeometry) failed.push('missing_parcel_geometry')
+    if (!selection?.geometry) failed.push('missing_action_area_geometry')
+    if (!parcelAreaPresent) failed.push('missing_parcel_area')
+    if (!actionAreaPresent) failed.push('missing_action_area_area')
+    if (parcelAreaPresent && actionAreaPresent && !common.areasConcordant) {
+      failed.push('areas_not_concordant')
+    }
+    if (!parcelCode) failed.push('missing_parcel_category')
+    if (!actionAreaCode) failed.push('missing_action_area_category')
+    if (parcelCode && actionAreaCode && !sameCategory) failed.push('category_mismatch')
+    if (!parcelConfirmedHigh) failed.push('parcel_not_confirmed_high')
+    if (!actionAreaConfirmedHigh) failed.push('action_area_not_confirmed_high')
+    if (competingCandidateCount > 0) failed.push('competing_candidates')
+    return failed.length > 0 ? failed : ['other_explicit_reason']
+  }
+
+  const diagnostics: TerritorialCoverageDerivationDiagnostics = {}
+  for (const [scope, facts] of Object.entries(factsByScope)) {
+    for (const category of facts?.categories ?? []) {
+      if (!category.code) continue
+      diagnostics[`${scope}:${category.code}`] = {
+        result: category.coverage ?? 'unknown',
+        ...common,
+        failedRequirements: category.coverage === 'unknown' ? failedRequirements() : [],
+      }
+    }
+  }
+  return diagnostics
 }
 
 function applyCategoryCoverage(
@@ -276,7 +445,10 @@ function applyCategoryCoverage(
   }
 }
 
-export function buildTerritorialFactualContract(context: NormalizedParcelContext): TerritorialFactualContract {
+export function buildTerritorialFactualContract(
+  context: NormalizedParcelContext,
+  options: BuildFactualContractOptions = {}
+): TerritorialFactualContract {
   const parcelFacts = context.parcelUrbanisticFacts ?? (context.actionArea ? undefined : context.urbanisticFacts)
   const parcelConstraints = context.actionArea ? context.parcelKnownConstraints : (context.parcelKnownConstraints ?? context.knownConstraints)
   // NormalizedParcelContext does not retain a parcel planningArea once an action area replaces it.
@@ -308,6 +480,14 @@ export function buildTerritorialFactualContract(context: NormalizedParcelContext
   applyCategoryCoverage(
     factsByScope.actionArea,
     context.actionArea?.value.selectionType === 'whole_parcel' ? fullCategoryCode : undefined
+  )
+  options.onCoverageDiagnostics?.(
+    buildCoverageDerivationDiagnostics(
+      context,
+      parcelFacts,
+      context.actionArea ? context.urbanisticFacts : undefined,
+      factsByScope
+    )
   )
 
   const activeFacts = context.actionArea ? factsByScope.actionArea : factsByScope.parcel

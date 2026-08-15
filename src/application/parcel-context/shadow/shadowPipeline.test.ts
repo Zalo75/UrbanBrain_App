@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runTerritorialFactualShadowPipeline } from './shadowPipeline'
 import type { TerritorialFactualContract } from '@/domain/parcel-context/factualContract'
+import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type OpenAI from 'openai'
 
 vi.mock('./factualRenderer', async (importOriginal) => {
@@ -214,6 +215,57 @@ describe('Territorial Factual Shadow Pipeline', () => {
     expect(result.diagnostics.metrics?.territorialCoverageByCategory).toEqual({
       'parcel:SNRSC': 'full',
     })
+  })
+
+  it('A5. publishes safe derivation diagnostics without changing the factual result', async () => {
+    const geometry = {
+      type: 'MultiPolygon' as const,
+      coordinates: [[[[-8.1, 43.6], [-8.09, 43.6], [-8.1, 43.61], [-8.1, 43.6]]]],
+      crs: 'EPSG:4326' as const,
+    }
+    const facts = {
+      classification: {
+        value: { code: 'SNR' }, status: 'automatic_confirmed' as const,
+        origin: 'spatial_intersection' as const, confidence: 'high' as const,
+        evidence: [], warnings: [], discrepancies: [], nextAction: 'none' as const,
+      },
+      category: {
+        value: { code: 'SNRSC' }, status: 'automatic_confirmed' as const,
+        origin: 'spatial_intersection' as const, confidence: 'high' as const,
+        evidence: [], warnings: [], discrepancies: [], nextAction: 'none' as const,
+      },
+      consolidation: {
+        status: 'not_available' as const, confidence: 'unknown' as const,
+        evidence: [], warnings: [], discrepancies: [], nextAction: 'none' as const,
+      },
+    }
+    const context: NormalizedParcelContext = {
+      parcelGeometry: geometry, parcelSurfaceSquareMetres: 854.78,
+      parcelUrbanisticFacts: facts, urbanisticFacts: facts,
+      actionArea: {
+        value: {
+          id: 'whole', geometry, surfaceSquareMetres: 854.78,
+          parcelSurfaceSquareMetres: 854.78, selectionType: 'whole_parcel',
+          source: 'catastro', confidence: 'high', selectedBy: 'system',
+          selectedAt: '2026-08-15T08:00:00.000Z', verification: 'unverified',
+        },
+        source: 'urbanbrain', confidence: 1, verification: 'confirmed',
+      },
+      knownConstraints: [], parcelKnownConstraints: [], conflicts: [], pendingValidation: [],
+    }
+    const result = await runTerritorialFactualShadowPipeline(
+      '¿Toda la parcela tiene la misma categoría urbanística?',
+      context,
+      mockClient(JSON.stringify({ operations: [], abstentions: [] }))
+    )
+
+    expect(result.status).toBe('valid')
+    expect(result.renderedText?.join(' ')).toContain('100 %')
+    expect(result.diagnostics.metrics?.territorialCoverageDiagnostics?.['parcel:SNRSC'])
+      .toEqual(expect.objectContaining({ result: 'full', failedRequirements: [] }))
+    expect(JSON.stringify(result.diagnostics)).not.toMatch(
+      /15088A034002230000HU|coordinates|GeoJSON|¿Toda la parcela/
+    )
   })
 
   it('B. Output inválido (JSON malformado)', async () => {

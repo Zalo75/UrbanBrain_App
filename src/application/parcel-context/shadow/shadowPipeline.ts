@@ -1,4 +1,7 @@
-import { buildTerritorialFactualContract } from '../buildFactualContract'
+import {
+  buildTerritorialFactualContract,
+  type TerritorialCoverageDerivationDiagnostics,
+} from '../buildFactualContract'
 import { runTerritorialFactualShadowEvaluation } from './shadowEvaluator'
 import { validateStructuredFactualOutput } from './factualValidator'
 import { renderFactualOutput } from './factualRenderer'
@@ -42,6 +45,7 @@ export interface TerritorialShadowMetrics {
   validationErrorCodes?: ValidationErrorCode[]
   validationErrorOperations?: SafeValidationOperation[]
   territorialCoverageByCategory?: Record<string, TerritorialCoverage>
+  territorialCoverageDiagnostics?: TerritorialCoverageDerivationDiagnostics
 }
 
 export interface SafeValidationOperation {
@@ -69,6 +73,28 @@ export interface TerritorialShadowResult {
 }
 
 const SAFE_FACT_CODE = /^[A-Za-z0-9._/-]{1,64}$/
+
+function safeCoverageDerivationDiagnostics(
+  diagnostics: TerritorialCoverageDerivationDiagnostics
+): TerritorialCoverageDerivationDiagnostics {
+  const safe: TerritorialCoverageDerivationDiagnostics = {}
+  for (const [key, diagnostic] of Object.entries(diagnostics)) {
+    const separator = key.indexOf(':')
+    const scope = key.slice(0, separator)
+    const code = key.slice(separator + 1)
+    if ((scope !== 'parcel' && scope !== 'actionArea') || !SAFE_FACT_CODE.test(code)) continue
+    safe[key] = {
+      ...diagnostic,
+      parcelCategoryCode: diagnostic.parcelCategoryCode && SAFE_FACT_CODE.test(diagnostic.parcelCategoryCode)
+        ? diagnostic.parcelCategoryCode
+        : null,
+      actionAreaCategoryCode: diagnostic.actionAreaCategoryCode && SAFE_FACT_CODE.test(diagnostic.actionAreaCategoryCode)
+        ? diagnostic.actionAreaCategoryCode
+        : null,
+    }
+  }
+  return safe
+}
 
 function countContractFacts(contract: TerritorialFactualContract) {
   const scopes = contract.factsByScope
@@ -146,9 +172,14 @@ export async function runTerritorialFactualShadowPipeline(
 ): Promise<TerritorialShadowResult> {
   const start = performance.now()
   const contractStartedAt = performance.now()
+  let territorialCoverageDiagnostics: TerritorialCoverageDerivationDiagnostics | undefined
   const contract = 'identity' in input && ('classification' in input || 'factsByScope' in input)
     ? (input as TerritorialFactualContract)
-    : buildTerritorialFactualContract(input as NormalizedParcelContext)
+    : buildTerritorialFactualContract(input as NormalizedParcelContext, {
+        onCoverageDiagnostics: (value) => {
+          territorialCoverageDiagnostics = safeCoverageDerivationDiagnostics(value)
+        },
+      })
   const contractMs = performance.now() - contractStartedAt
   const contractMetrics = countContractFacts(contract)
   let evaluationDiagnostics: ShadowEvaluationDiagnostics | undefined
@@ -181,6 +212,7 @@ export async function runTerritorialFactualShadowPipeline(
     },
     metrics: {
       ...contractMetrics,
+      ...(territorialCoverageDiagnostics ? { territorialCoverageDiagnostics } : {}),
       payloadChars: evaluationDiagnostics?.payloadChars,
       inputTokens: evaluationDiagnostics?.inputTokens,
       outputTokens: evaluationDiagnostics?.outputTokens,
