@@ -622,7 +622,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         .rpc('match_normativa_chunks_scoped', {
           query_embedding,
           match_count: 8,
-          filter_municipio_codigo: '',
+          filter_municipio_codigo: null,
           filter_document_names: [...layer.documentNames],
           filter_ordinance: null,
         })

@@ -691,7 +691,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks_scoped',
       expect.objectContaining({
-        filter_municipio_codigo: '',
+        filter_municipio_codigo: null,
         filter_document_names: expect.arrayContaining(['LSG CONSOLIDADA ENERO 2026- V2.pdf']),
       })
     )
@@ -700,6 +700,61 @@ describe('POST /api/chat parcel context boundary', () => {
       .find((request) => request.messages?.[0]?.content?.includes('FRAGMENTOS AUTORIZADOS'))
     expect(finalRequest.messages[0].content).toContain('valoración general condicionada')
     expect(finalRequest.messages[0].content).toContain('no concluyas que la parcela es o no es edificable')
+  })
+
+  it('consulta la normativa sectorial V1 sin restringirla al municipio', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15009A01300255',
+        municipalityName: 'Betanzos',
+        municipalityId: 'betanzos',
+        municipalityCode: '15009',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningCanAnswerConcreteParameters: false,
+      },
+      userMessages: [],
+      constraints: [{
+        name: 'Carreteras: zona de protección',
+        source: 'ideg',
+        confidence: 0.95,
+        confirmed: true,
+      }],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [{
+        chunk_id: 'chunk-sectorial-carreteras',
+        texto: 'La normativa de carreteras regula las zonas de protección [Fuente 1].',
+        municipio_nombre: null,
+        nombre_pdf: 'Lei_8_2013_Estradas_Galicia.pdf',
+      }],
+      error: null,
+    })
+    mocks.completionCreate.mockResolvedValue({
+      choices: [{ message: {
+        content: 'La normativa de carreteras regula las zonas de protección [Fuente 1].',
+      } }],
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Qué régimen de carreteras resulta aplicable?',
+      }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'match_normativa_chunks_scoped',
+      expect.objectContaining({
+        filter_municipio_codigo: null,
+        filter_document_names: expect.arrayContaining(['Lei_8_2013_Estradas_Galicia.pdf']),
+      })
+    )
   })
 
   it('keeps Betanzos parameter abstention without labelling general chunks as another area', async () => {
