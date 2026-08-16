@@ -15,6 +15,10 @@ begin
 end;
 $block$;
 
+-- Loading the pgvector library in this session registers its user-settable
+-- HNSW parameters before CREATE FUNCTION validates the per-function SET clauses.
+select '[1]'::vector <=> '[1]'::vector;
+
 create or replace function public.match_normativa_chunks_scoped(
   query_embedding vector(768),
   match_count integer default 10,

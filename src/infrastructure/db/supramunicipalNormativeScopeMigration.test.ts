@@ -73,6 +73,13 @@ describe('supramunicipal normativa retrieval migration', () => {
   })
 
   it('conserva la RPC server-only y sin cambios de firma', () => {
+    const vectorSettingsLoad = migration.indexOf("select '[1]'::vector <=> '[1]'::vector")
+    const functionCreation = migration.indexOf(
+      'create or replace function public.match_normativa_chunks_scoped('
+    )
+
+    expect(vectorSettingsLoad).toBeGreaterThan(0)
+    expect(functionCreation).toBeGreaterThan(vectorSettingsLoad)
     expect(migration).toContain('create or replace function public.match_normativa_chunks_scoped(')
     expect(migration).toContain('security invoker')
     expect(migration).toContain('from public, anon, authenticated')
