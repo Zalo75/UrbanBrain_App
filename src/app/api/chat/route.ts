@@ -870,7 +870,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
       console.info('[NormativeAnswerPerf]', {
         expedienteId,
-        concreteParameterRequested: questionScope === 'parameters',
+        concreteParameterRequested,
         municipalCandidateCount: v1Candidates.length,
         municipalDocumentCount: new Set(v1Candidates.map(c => c.documentName).filter(Boolean)).size,
         supplementaryV1CandidateCount: supplementaryV1Candidates.length,
