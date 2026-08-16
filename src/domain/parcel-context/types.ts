@@ -114,6 +114,8 @@ export interface ApplicabilityResult {
   missingData: string[]
   conflicts: string[]
   canAnswerConcreteParameters: boolean
+  canAnswerGeneralRegime?: boolean
+  canAnswerConditionalViability?: boolean
 }
 
 export interface SafeAnswerContract {

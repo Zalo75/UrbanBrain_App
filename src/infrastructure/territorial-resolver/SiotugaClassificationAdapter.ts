@@ -742,6 +742,14 @@ export class SiotugaClassificationAdapter implements PlanningPort {
           (candidate) => candidate.id === classificationResolution.automaticSelection?.candidateId
         )
       : undefined;
+    const implicitBackgroundAccredited = Boolean(
+      classificationResolution.status === 'clear' &&
+      selectedCandidate?.kind === 'official_classification' &&
+      selectedCandidate.evidenceBasis === 'implicit_planning_background'
+    );
+    const reconciledPlanningWarnings = implicitBackgroundAccredited
+      ? planning.warnings.filter((item) => item.code !== 'planning_classification_not_found')
+      : planning.warnings;
     const areas = candidates.flatMap((candidate) => candidate.areas);
     return {
       ...planning,
@@ -751,12 +759,12 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       evidence,
       sourceChecks,
       warnings: [
-        ...planning.warnings,
+        ...reconciledPlanningWarnings,
         ...traceabilityWarnings,
         ...applicableReviewScopes.map((scope) =>
           warning('planning_classification_update_scope_pending', scope.explanation)
         ),
-        ...(features.length
+        ...(features.length || implicitBackgroundAccredited
           ? []
           : [
               warning(

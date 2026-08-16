@@ -94,6 +94,22 @@ function sadaPlanning(): PlanningPort {
   };
 }
 
+function amesPlanning(): PlanningPort {
+  return {
+    findApplicablePlanning: vi.fn(async () => ({
+      status: 'determined',
+      instrument: 'Plan general de ordenación municipal',
+      approvalDate: '2002-06-28T00:00:00.000Z',
+      sourceUrl: 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=15002',
+      evidence: [],
+      warnings: [{
+        code: 'planning_classification_not_found',
+        message: 'La capa oficial no devolvió clasificación para la geometría consultada.',
+      }],
+    })),
+  };
+}
+
 function response(xml: string) {
   return vi.fn(async () => new Response(xml, { status: 200 }));
 }
@@ -565,6 +581,46 @@ describe('SiotugaClassificationAdapter', () => {
       nextAction: 'manual_selection',
     });
     expect(result.warnings.map((item) => item.code)).toContain('planning_classification_not_found');
+  });
+
+  it('reconcilia WFS vacío con el background implícito efectivo de Ames', async () => {
+    const result = await new SiotugaClassificationAdapter(
+      amesPlanning(),
+      response(gml()),
+      1_000,
+      () => NOW
+    ).findApplicablePlanning({ municipalityCode: '15002', geometry: geometry() });
+
+    expect(result.classificationResolution).toMatchObject({ status: 'clear' });
+    expect(result.classification).toMatchObject({ code: 'SR' });
+    expect(result.classificationResolution?.candidates).toEqual([
+      expect.objectContaining({ evidenceBasis: 'implicit_planning_background' }),
+    ]);
+    expect(result.warnings.map((item) => item.code)).not.toContain(
+      'planning_classification_not_found'
+    );
+  });
+
+  it('conserva la incertidumbre material cuando el background sólo completa una zona parcial', async () => {
+    const partialRing: Array<[number, number]> = [
+      [-8.414, 43.267], [-8.413, 43.267], [-8.413, 43.269],
+      [-8.414, 43.269], [-8.414, 43.267],
+    ];
+    const result = await new SiotugaClassificationAdapter(
+      amesPlanning(),
+      response(gml(feature('rural-nucleus', 'SNR', 'SNRC', partialRing))),
+      1_000,
+      () => NOW
+    ).findApplicablePlanning({ municipalityCode: '15002', geometry: geometry() });
+
+    expect(result.classificationResolution?.status).not.toBe('clear');
+    expect(result.classificationResolution?.candidates.map((candidate) =>
+      candidate.kind === 'official_classification' ? candidate.classification.code : 'unmapped'
+    )).toEqual(expect.arrayContaining(['SNR', 'SR']));
+    expect(result.classificationResolution?.reviewReasons).toContain('intra_source_disagreement');
+    expect(result.warnings.map((item) => item.code)).toContain(
+      'planning_classification_not_found'
+    );
   });
 
   it('conserva varios recintos reales sin tratarlos como conflicto', async () => {

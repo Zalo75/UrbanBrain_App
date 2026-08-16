@@ -12,6 +12,7 @@ import {
 import {
   classifyParcelQuestionScope,
   evaluateApplicability,
+  isConditionalViabilityQuestion,
   requiresDeterminedParcelRegime,
 } from '@/application/parcel-context/applicabilityEngine';
 import {
@@ -247,6 +248,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     const questionScope = classifyParcelQuestionScope(message);
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
+    const conditionalViabilityRequested = isConditionalViabilityQuestion(message);
     const normativeScope = buildNormativeSearchScope({
       context: parcelContext,
       municipioCodigo: trustedMunicipioCodigo,
@@ -779,7 +781,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         status: answerCandidates.length > 0 ? 'DETERMINADO' : 'NO_DETERMINADO',
       };
     } else {
-      retrievalApplicability = evaluateApplicability(parcelContext, v1Candidates, false);
+      retrievalApplicability = evaluateApplicability(
+        parcelContext,
+        v1Candidates,
+        false,
+        conditionalViabilityRequested
+      );
       const regimeApplicability = concreteParameterRequested
         ? evaluateApplicability(parcelContext, v1Candidates, true)
         : retrievalApplicability;
@@ -801,7 +808,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     // Las fuentes supramunicipales se añaden como candidatos de su propio nivel,
     // nunca se someten al filtro de ordenanza ni sustituyen los municipales.
     const layeredCandidates = [...v1Candidates, ...supplementaryV1Candidates, ...v2Candidates];
-    const layeredRetrievalApplicability = evaluateApplicability(parcelContext, layeredCandidates, false);
+    const layeredRetrievalApplicability = evaluateApplicability(
+      parcelContext,
+      layeredCandidates,
+      false,
+      conditionalViabilityRequested
+    );
     const layeredRegimeApplicability = concreteParameterRequested
       ? evaluateApplicability(parcelContext, layeredCandidates, true)
       : layeredRetrievalApplicability;
@@ -828,10 +840,18 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       questionScope === 'regime' &&
       applicability.status === 'PARCIAL' &&
       applicability.review.length > 0;
+    const hasConditionalRegimeEvidence =
+      conditionalViabilityRequested &&
+      applicability.canAnswerConditionalViability === true &&
+      answerCandidates.length > 0;
     const mustAbstain =
       answerCandidates.length === 0 ||
       retrievalApplicability.status === 'CONFLICTIVO' ||
-      (questionScope === 'regime' && regimeUnavailable && !hasReviewableRegimeEvidence);
+      (conditionalViabilityRequested && !hasConditionalRegimeEvidence) ||
+      (questionScope === 'regime' &&
+        regimeUnavailable &&
+        !hasReviewableRegimeEvidence &&
+        !hasConditionalRegimeEvidence);
 
     if (mustAbstain) {
       const answer = buildSafeAbstention(applicability, parcelContext, message);

@@ -66,4 +66,59 @@ describe('resolveSupplementaryNormativeScope', () => {
     expect(scope.retrieveMunicipal).toBe(true)
     expect(scope.layers[0]?.hierarchy).toBe('autonomico')
   })
+
+  it('activa la normativa autonómica declarada por la evidencia territorial aunque la pregunta no la nombre', () => {
+    const amesContext: NormalizedParcelContext = {
+      ...context,
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SR', label: 'Suelo rústico' },
+          status: 'automatic_confirmed', origin: 'automatic_source', confidence: 'high',
+          evidence: [{
+            source: 'siotuga', sourceUrl: '', retrievedAt: '2026-08-16T00:00:00.000Z',
+            method: 'DT 1ª L2/2016 (LSG): Suelo Rústico por defecto ante planeamiento disperso',
+            scope: 'planning_classification',
+          }],
+          warnings: [], discrepancies: [], nextAction: 'none',
+        },
+        category: {
+          status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+          discrepancies: [], nextAction: 'manual_selection',
+        },
+        consolidation: {
+          status: 'not_applicable', confidence: 'high', evidence: [], warnings: [],
+          discrepancies: [], nextAction: 'none',
+        },
+      },
+    }
+
+    const scope = resolveSupplementaryNormativeScope('¿Se puede construir en esta parcela?', amesContext)
+
+    expect(scope.layers).toContainEqual(expect.objectContaining({ hierarchy: 'autonomico' }))
+  })
+
+  it('no introduce normativa autonómica por una clasificación sin dependencia declarada', () => {
+    const unrelatedContext: NormalizedParcelContext = {
+      ...context,
+      urbanisticFacts: {
+        classification: {
+          value: { code: 'SR', label: 'Suelo rústico' },
+          status: 'automatic_confirmed', origin: 'spatial_intersection', confidence: 'high',
+          evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
+        },
+        category: {
+          status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+          discrepancies: [], nextAction: 'manual_selection',
+        },
+        consolidation: {
+          status: 'not_applicable', confidence: 'high', evidence: [], warnings: [],
+          discrepancies: [], nextAction: 'none',
+        },
+      },
+    }
+
+    expect(resolveSupplementaryNormativeScope(
+      '¿Se puede construir en esta parcela?', unrelatedContext
+    ).layers).toEqual([])
+  })
 })

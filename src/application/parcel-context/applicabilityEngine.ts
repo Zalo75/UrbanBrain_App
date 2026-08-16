@@ -140,6 +140,12 @@ export function requiresDeterminedParcelRegime(question: string): boolean {
   return urbanParameter && !conceptual && !cteTechnicalParameter
 }
 
+export function isConditionalViabilityQuestion(question: string): boolean {
+  return /\b(?:se\s+puede\s+construir|puedo\s+construir|es\s+edificable|viabilidad\s+urban[ií]stica)\b/i.test(
+    question
+  )
+}
+
 export function classifyParcelQuestionScope(question: string): ParcelQuestionScope {
   const isDocumentaryQuery = /\b(?:qu[eé]\s+(?:normativa|documentos?|fuentes?|regulaci[oó]n)\s+(?:has\s+(?:localizado|encontrado|utilizado)|aparece)|mu[eé]strame\s+la\s+normativa\s+relacionada)\b/i.test(
     question
@@ -162,7 +168,8 @@ export function classifyParcelQuestionScope(question: string): ParcelQuestionSco
 export function evaluateApplicability(
   context: NormalizedParcelContext,
   candidates: NormativeCandidate[],
-  concreteParameterRequested: boolean
+  concreteParameterRequested: boolean,
+  conditionalViabilityRequested = false
 ): ApplicabilityResult {
   const result: ApplicabilityResult = {
     status: 'NO_DETERMINADO',
@@ -181,6 +188,8 @@ export function evaluateApplicability(
       )
       .map((conflict) => conflict.reason),
     canAnswerConcreteParameters: false,
+    canAnswerGeneralRegime: false,
+    canAnswerConditionalViability: false,
   }
 
   const municipalityMap = new Map<string, string>()
@@ -244,6 +253,13 @@ export function evaluateApplicability(
     if (!expectedLandClass) result.missingData.push('clasificación del suelo')
     if (!expectedQualification && !expectedArea) {
       result.missingData.push('calificación, ordenanza, ámbito o ficha')
+    }
+    if (!context.planningInstrument) result.missingData.push('instrumento de planeamiento')
+    if (!context.validity) result.missingData.push('vigencia del instrumento')
+  } else if (conditionalViabilityRequested) {
+    if (!expectedLandClass) result.missingData.push('clasificación del suelo')
+    if (!expectedQualification && !expectedArea) {
+      result.missingData.push('categoría, ordenanza, ámbito o ficha aplicable')
     }
     if (!context.planningInstrument) result.missingData.push('instrumento de planeamiento')
     if (!context.validity) result.missingData.push('vigencia del instrumento')
@@ -368,6 +384,11 @@ export function evaluateApplicability(
     return result
   }
 
+  result.canAnswerGeneralRegime = Boolean(expectedLandClass)
+  result.canAnswerConditionalViability = Boolean(
+    conditionalViabilityRequested && result.canAnswerGeneralRegime
+  )
+
   if (concreteParameterRequested) {
     if (result.missingData.length > 0) {
       result.status = 'PARCIAL'
@@ -375,6 +396,12 @@ export function evaluateApplicability(
     }
     result.status = 'DETERMINADO'
     result.canAnswerConcreteParameters = true
+    return result
+  }
+
+
+  if (conditionalViabilityRequested) {
+    result.status = result.canAnswerConditionalViability ? 'PARCIAL' : 'NO_DETERMINADO'
     return result
   }
 

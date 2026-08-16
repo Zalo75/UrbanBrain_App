@@ -525,9 +525,9 @@ describe('categorical territorial confirmations', () => {
       'regime'
     )
 
-    expect(prompt).toContain('Nunca extrapoles de actionArea a parcel ni de parcel a actionArea')
+    expect(prompt).toContain('Nunca extrapoles entre la parcela completa y el área seleccionada')
     expect(prompt).toContain('no comiences con "Sí"')
-    expect(prompt).toContain('automatic_confirmed o technician_validated')
+    expect(prompt).toContain('confirmado automáticamente o validado por técnico')
   })
 })
 
@@ -688,6 +688,43 @@ describe('structured facts in prompts', () => {
     expect(prompt).toContain('PXOM de Culleredo')
     expect(prompt).toContain('debe llevar literalmente [contexto]')
     expect(prompt).toContain('LEDOÃ‘O')
+  })
+
+  it('presenta el contexto territorial sin enums internos visibles', () => {
+    const contextWithFacts = confirmationContext({
+      actionAreaStatus: 'automatic_confirmed',
+      reliabilityMode: 'manual_unverified',
+    })
+    contextWithFacts.urbanisticFacts!.classification.origin = 'automatic_source'
+    const prompt = buildMunicipalSafetyPrompt(contextWithFacts, determined, [], 'regime')
+
+    expect(prompt).not.toMatch(
+      /whole_parcel|detected_zone|user_polygon|actionArea|unverified|manual_unverified|technician_validated|automatic_confirmed|automatic_probable|manual_review_required|automatic_source|spatial_intersection|implicit_planning_background|current_official|previous_official|coverageComplete|coverageReason|factRef|semanticCompleteness|\bhigh\b/
+    )
+  })
+
+  it('rechaza una conclusión definitiva de edificabilidad en modo condicionado', () => {
+    const partialConditional = {
+      ...determined,
+      status: 'PARCIAL' as const,
+      canAnswerConcreteParameters: false,
+      canAnswerGeneralRegime: true,
+      canAnswerConditionalViability: true,
+    } as ApplicabilityResult
+
+    const unsafe = validateGeneratedAnswer(
+      'Sí, se puede construir en esta parcela [Fuente 1].',
+      [source], partialConditional, 'regime', context, false,
+      '¿Se puede construir en esta parcela?'
+    )
+    const safe = validateGeneratedAnswer(
+      'Todavía no puede confirmarse que la parcela sea edificable. La documentación recuperada describe el régimen general aplicable [Fuente 1].',
+      [source], partialConditional, 'regime', context, false,
+      '¿Se puede construir en esta parcela?'
+    )
+
+    expect(unsafe.valid).toBe(false)
+    expect(safe.valid).toBe(true)
   })
 })
 

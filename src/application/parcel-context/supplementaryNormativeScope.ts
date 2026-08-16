@@ -85,6 +85,21 @@ function isAutonomicQuestion(question: string) {
   )
 }
 
+const DECLARED_AUTONOMIC_DEPENDENCIES = [
+  {
+    legalBasis: /\b(?:L\s*2\/2016|LSG|Lei\s+2\/2016)\b/i,
+    documentNames: GALICIAN_AUTONOMIC_URBANISTIC_DOCUMENTS,
+  },
+] as const
+
+function autonomicDocumentsRequiredByContext(context: NormalizedParcelContext) {
+  const evidence = context.urbanisticFacts?.classification.evidence ?? []
+  const declared = DECLARED_AUTONOMIC_DEPENDENCIES.find((dependency) =>
+    evidence.some((item) => dependency.legalBasis.test(item.method))
+  )
+  return declared?.documentNames
+}
+
 function isCteQuestion(question: string) {
   return /\b(?:cte|c[oó]digo\s+t[eé]cnico(?:\s+de\s+la\s+edificaci[oó]n)?)\b/i.test(question)
 }
@@ -94,7 +109,8 @@ export function resolveSupplementaryNormativeScope(
   context: NormalizedParcelContext
 ): SupplementaryNormativeScope {
   const layers: SupplementaryNormativeLayer[] = []
-  const autonomous = isAutonomicQuestion(question)
+  const contextualAutonomicDocuments = autonomicDocumentsRequiredByContext(context)
+  const autonomous = isAutonomicQuestion(question) || Boolean(contextualAutonomicDocuments)
   const cte = isCteQuestion(question)
   let sectorial = false
 
@@ -102,7 +118,7 @@ export function resolveSupplementaryNormativeScope(
     layers.push({
       hierarchy: 'autonomico',
       source: 'v1_global_catalog',
-      documentNames: GALICIAN_AUTONOMIC_URBANISTIC_DOCUMENTS,
+      documentNames: contextualAutonomicDocuments ?? GALICIAN_AUTONOMIC_URBANISTIC_DOCUMENTS,
     })
   }
 

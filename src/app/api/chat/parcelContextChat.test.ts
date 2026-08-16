@@ -591,6 +591,117 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).toContain('La norma permite licencia directa.')
   })
 
+  it('responde de forma condicionada para Ames y recupera la dependencia autonómica declarada', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: {
+        id: 'expediente-org-a', orgId: 'org-a',
+        refCatastral: '15002A076002700000ZO', municipio: 'ames',
+        landClass: 'rustico', planeamiento: 'Plan general de ordenación municipal',
+      },
+      detected: {
+        cadastralReference: '15002A076002700000ZO',
+        municipalityName: 'Ames', municipalityId: 'ames', municipalityCode: '15002',
+        locationSource: 'catastro', locationStatus: 'confirmed', locationConfidence: 'high',
+        landClass: 'rustico', planningInstrument: 'Plan general de ordenación municipal',
+        planningSource: 'siotuga', planningStatus: 'vigente',
+        planningApplicabilityStatus: 'partial', planningCanAnswerConcreteParameters: false,
+        urbanisticFacts: {
+          classification: {
+            value: { code: 'SR', label: 'Suelo rústico' },
+            status: 'automatic_confirmed', origin: 'automatic_source', confidence: 'high',
+            evidence: [{
+              source: 'siotuga', sourceUrl: '', retrievedAt: '2026-08-16T00:00:00.000Z',
+              method: 'DT 1ª L2/2016 (LSG): Suelo Rústico por defecto ante planeamiento disperso',
+              scope: 'planning_classification',
+            }],
+            warnings: [], discrepancies: [], nextAction: 'none',
+          },
+          category: {
+            status: 'not_available', confidence: 'unknown', evidence: [], warnings: [],
+            discrepancies: [], nextAction: 'manual_selection',
+          },
+          consolidation: {
+            status: 'not_applicable', confidence: 'high', evidence: [], warnings: [],
+            discrepancies: [], nextAction: 'none',
+          },
+        },
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{ id: '22184', status: 'current' }],
+          documents: [{
+            id: '10139', instrumentId: '22184', title: 'Normativa PXOM',
+            sourceUrl: 'https://siotuga.xunta.gal/siotuga/documentos/urbanismo/AMES/documents/0023no009.pdf',
+            binding: 'general', documentType: 'normative_text',
+          }],
+        },
+      },
+      userMessages: [], constraints: [],
+    })
+    mocks.abortSignal
+      .mockResolvedValueOnce({
+        data: [{
+          chunk_id: 'lsg-1',
+          texto: 'El régimen del suelo rústico exige comprobar la categoría y las autorizaciones sectoriales aplicables.',
+          nombre_pdf: 'LSG CONSOLIDADA ENERO 2026- V2.pdf',
+        }],
+        error: null,
+      })
+    mocks.completionCreate.mockImplementation(async (request) => {
+      const system = String(request.messages?.[0]?.content ?? '')
+      if (system.includes('FRAGMENTOS AUTORIZADOS')) {
+        return {
+          choices: [{ message: { content: [
+            'CONCLUSIÓN',
+            'Con la información disponible todavía no puede confirmarse que la parcela sea edificable.',
+            '',
+            'CONTEXTO DE PARCELA UTILIZADO',
+            'La parcela está clasificada como suelo rústico [contexto].',
+            '',
+            'FUNDAMENTO POR NIVEL NORMATIVO',
+            'La normativa general exige comprobar la categoría y las autorizaciones sectoriales aplicables [Fuente 1].',
+          ].join('\n') } }],
+        }
+      }
+      return {
+        choices: [{ message: { content: JSON.stringify({
+          intent: 'normativa_lookup', required_scopes: ['autonomico'],
+          required_categories: ['urbanismo_general'], needs_context: true,
+          needs_sources: true, extracted_parameters: {},
+        }) } }],
+      }
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a', message: '¿Se puede construir en esta parcela?',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.answer).toContain('todavía no puede confirmarse')
+    expect(payload.answer).toContain('suelo rústico')
+    expect(payload.safety).toMatchObject({ decision: 'answer', applicability: 'PARCIAL' })
+    expect(payload.answer).not.toMatch(/Sí, se puede construir|No, no se puede construir/i)
+    expect(payload.answer).not.toMatch(
+      /whole_parcel|detected_zone|user_polygon|actionArea|unverified|manual_unverified|technician_validated|automatic_confirmed|automatic_probable|manual_review_required|automatic_source|spatial_intersection|implicit_planning_background|current_official|previous_official|coverageComplete|coverageReason|factRef|semanticCompleteness|\bhigh\b/
+    )
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'match_normativa_chunks_scoped',
+      expect.objectContaining({
+        filter_municipio_codigo: '',
+        filter_document_names: expect.arrayContaining(['LSG CONSOLIDADA ENERO 2026- V2.pdf']),
+      })
+    )
+    const finalRequest = mocks.completionCreate.mock.calls
+      .map(([request]) => request)
+      .find((request) => request.messages?.[0]?.content?.includes('FRAGMENTOS AUTORIZADOS'))
+    expect(finalRequest.messages[0].content).toContain('valoración general condicionada')
+    expect(finalRequest.messages[0].content).toContain('no concluyas que la parcela es o no es edificable')
+  })
+
   it('keeps Betanzos parameter abstention without labelling general chunks as another area', async () => {
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expediente: {
@@ -680,9 +791,9 @@ FUENTES
     }))
     const payload = await response.json()
 
-    expect(payload.safety.decision).toBe('answer')
     expect(payload.answer).toContain('disposiciones sobre retranqueos')
     expect(payload.answer).toContain('\u00e1mbito CASCAS')
+    expect(payload.safety.decision).toBe('answer')
     expect(payload.answer).not.toContain('No se ha recuperado evidencia documental suficiente')
     expect(payload.answer).not.toMatch(/otro \u00e1mbito/i)
     expect(payload.answer).not.toMatch(/\b\d+(?:[.,]\d+)?\s*m\b/i)

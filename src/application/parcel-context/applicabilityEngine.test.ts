@@ -5,6 +5,7 @@ import { buildNormalizedParcelContext } from './normalizeParcelContext'
 import {
   classifyParcelQuestionScope,
   evaluateApplicability,
+  isConditionalViabilityQuestion,
   requiresDeterminedParcelRegime,
 } from './applicabilityEngine'
 
@@ -61,6 +62,9 @@ describe('requiresDeterminedParcelRegime', () => {
     expect(requiresDeterminedParcelRegime('¿Qué normativa has localizado para esta parcela?')).toBe(false)
     expect(requiresDeterminedParcelRegime('¿Qué documentos has encontrado?')).toBe(false)
     expect(requiresDeterminedParcelRegime('Resume las afecciones de carreteras y aguas')).toBe(false)
+    expect(requiresDeterminedParcelRegime('¿Se puede construir en esta parcela?')).toBe(false)
+    expect(isConditionalViabilityQuestion('¿Se puede construir en esta parcela?')).toBe(true)
+    expect(isConditionalViabilityQuestion('¿Cuál es la ocupación máxima?')).toBe(false)
   })
 })
 
@@ -74,6 +78,7 @@ describe('classifyParcelQuestionScope', () => {
   it('identifica las consultas que sí dependen de clasificación u ordenanza', () => {
     expect(classifyParcelQuestionScope('¿Qué retranqueo lateral se exige?')).toBe('regime')
     expect(classifyParcelQuestionScope('¿Qué ocupación máxima tiene la parcela?')).toBe('regime')
+    expect(classifyParcelQuestionScope('¿Se puede construir en esta parcela?')).toBe('independent')
   })
 
   it('separa las consultas mixtas para responder su parte independiente', () => {
@@ -112,6 +117,37 @@ describe('evaluateApplicability', () => {
     expect(result.status).toBe('PARCIAL')
     expect(result.missingData).toContain('calificación, ordenanza, ámbito o ficha')
     expect(result.canAnswerConcreteParameters).toBe(false)
+  })
+
+  it('permite explicar condicionalmente el régimen general sin habilitar parámetros', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: '15002A076002700000ZO', municipio: 'ames',
+        landClass: 'rustico', planeamiento: 'PXOM de Ames',
+      },
+      detected: {
+        municipalityName: 'Ames', municipalityId: 'ames', municipalityCode: '15002',
+        locationSource: 'catastro', locationStatus: 'confirmed', locationConfidence: 'high',
+        landClass: 'rustico', planningInstrument: 'PXOM de Ames', planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: false,
+      },
+    })
+    const generalSource = candidate({
+      municipalityName: null,
+      hierarchy: 'autonomico',
+      documentName: 'LSG consolidada',
+      title: 'Régimen general del suelo rústico',
+      content: 'La admisibilidad de usos en suelo rústico depende de sus condiciones legales.',
+      ordinance: null,
+    })
+
+    const result = evaluateApplicability(context, [generalSource], false, true)
+
+    expect(result.status).toBe('PARCIAL')
+    expect(result.canAnswerGeneralRegime).toBe(true)
+    expect(result.canAnswerConditionalViability).toBe(true)
+    expect(result.canAnswerConcreteParameters).toBe(false)
+    expect(result.missingData).toContain('categoría, ordenanza, ámbito o ficha aplicable')
   })
 
   it('un prompt no puede convertir una ordenanza no verificada en régimen determinado', () => {
