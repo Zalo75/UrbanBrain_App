@@ -623,7 +623,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         .rpc('match_normativa_chunks_scoped', {
           query_embedding,
           match_count: 8,
-          filter_municipio_codigo: null,
+          filter_municipio_codigo: '',
           filter_document_names: [...layer.documentNames],
           filter_ordinance: null,
         })
@@ -873,6 +873,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         concreteParameterRequested,
         municipalCandidateCount: v1Candidates.length,
         municipalDocumentCount: new Set(v1Candidates.map(c => c.documentName).filter(Boolean)).size,
+        municipalScopedRetrieval: !!scopedRetrieval,
+        municipalScopeDocumentNameCount: normativeScope?.documentNames?.length ?? 0,
+        municipalScopeHasOrdinance: !!normativeScope?.ordinance,
+        municipalScopeDiagnosticCode: (!normativeScope?.documentNames?.length && !normativeScope?.ordinance) ? 'NO_DOCUMENT_FILTER' :
+          (normativeScope?.documentNames?.length && !normativeScope?.ordinance) ? 'DOCUMENT_FILTER_PRESENT' :
+          (!normativeScope?.documentNames?.length && normativeScope?.ordinance) ? 'ORDINANCE_FILTER_PRESENT' : 'DOCUMENT_AND_ORDINANCE_FILTER_PRESENT',
         supplementaryV1CandidateCount: supplementaryV1Candidates.length,
         supplementaryCandidateCountsByLayer,
         v2CandidateCount: v2Candidates.length,

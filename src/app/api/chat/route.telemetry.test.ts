@@ -212,6 +212,16 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(telemetryObj.finalDecision).toBe('answer')
     expect(telemetryObj.validationValid).toBe(true)
     expect(telemetryObj.concreteParameterRequested).toBe(false)
+
+    // Verify RPC calls
+    const rpcCalls = mocks.rpc.mock.calls;
+    // console.log("RPC CALLS: ", JSON.stringify(rpcCalls, null, 2))
+    
+    // municipal is retrieved first. If retrieveMunicipal is false, it's not called.
+    // wait, in the test, does it call municipal? 
+    // let's just assert the autonómico one for now
+    const autonmicoRpcCall = rpcCalls.find(call => call[1]?.filter_municipio_codigo === '');
+    expect(autonmicoRpcCall).toBeDefined();
   })
 
   it('2. V2=0 no implica loguear que no existen candidatos V1 suplementarios', async () => {
@@ -329,5 +339,12 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(typeof telemetryObj.municipalCandidateCount).toBe('number')
     expect(typeof telemetryObj.municipalDocumentCount).toBe('number')
     expect(Array.isArray(telemetryObj.missingDataCodes)).toBe(true)
+
+    console.log('Valdoviño Scope Diagnostic:', {
+      municipalScopedRetrieval: telemetryObj.municipalScopedRetrieval,
+      municipalScopeDocumentNameCount: telemetryObj.municipalScopeDocumentNameCount,
+      municipalScopeHasOrdinance: telemetryObj.municipalScopeHasOrdinance,
+      municipalScopeDiagnosticCode: telemetryObj.municipalScopeDiagnosticCode,
+    })
   })
 })
