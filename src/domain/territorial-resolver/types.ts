@@ -210,6 +210,7 @@ export type ClassificationEvidenceBasis =
   | 'parcel_geometry'
   | 'representative_point'
   | 'official_document'
+  | 'implicit_planning_background'
 
 export type ClassificationInstrumentTraceability = 'verified' | 'pending' | 'mismatch'
 

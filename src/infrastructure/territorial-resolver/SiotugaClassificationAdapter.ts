@@ -546,12 +546,13 @@ export class SiotugaClassificationAdapter implements PlanningPort {
       };
     });
 
-    if (location.geometry && candidates.length > 0) {
+    if (location.geometry) {
       const complement = deriveComplementCandidate(
         location.geometry,
         candidates,
         layer.layerName,
-        retrievedAt
+        retrievedAt,
+        layer.implicitBackgroundClassification
       );
       if (complement.candidate) {
         candidates.push(complement.candidate);
@@ -639,7 +640,7 @@ export class SiotugaClassificationAdapter implements PlanningPort {
         })),
       });
     }
-    if (location.geometry) {
+    if (location.geometry && !layer.implicitBackgroundClassification) {
       const totalCoverage = parcelCoverage(location.geometry, features);
       if (!totalCoverage) {
         discrepancies.push({
@@ -1190,7 +1191,8 @@ function deriveComplementCandidate(
   geometry: ParcelGeometry,
   candidates: ClassificationCandidate[],
   layerName: string,
-  retrievedAt: string
+  retrievedAt: string,
+  implicitBackground?: SiotugaClassificationLayerRegistration['implicitBackgroundClassification']
 ): { candidate?: ClassificationCandidate; evidence?: TerritorialEvidence } {
   try {
     const parcelPolys: [number, number][][][] = [];
@@ -1209,9 +1211,12 @@ function deriveComplementCandidate(
         }
       }
     }
-    if (!intersectionPolys.length) return {};
+    if (!intersectionPolys.length && !implicitBackground) return {};
 
-    const clipped = polygonClipping.difference(parcelPolys, intersectionPolys);
+    const clipped = intersectionPolys.length > 0
+      ? polygonClipping.difference(parcelPolys, intersectionPolys)
+      : parcelPolys;
+
     if (!clipped || !clipped.length) return {};
 
     const outputCoords: [number, number][][][] = [];
@@ -1256,7 +1261,48 @@ function deriveComplementCandidate(
     const roundedArea = round(computedArea, 2);
 
     if (roundedArea >= 1.0) {
-      const parcelArea = candidates[0].parcelCoverage?.parcelAreaSquareMetres ?? 0;
+      const parcelArea = candidates.length > 0
+        ? (candidates[0].parcelCoverage?.parcelAreaSquareMetres ?? roundedArea)
+        : roundedArea;
+      const coverage: ClassificationParcelCoverage = {
+        parcelAreaSquareMetres: parcelArea,
+        intersectionAreaSquareMetres: roundedArea,
+        parcelPercentage: parcelArea > 0 ? round((roundedArea / parcelArea) * 100, 2) : 0,
+        method: 'polygon_intersection',
+        intersectionGeometry: complementGeometry,
+      };
+
+      if (implicitBackground) {
+        return {
+          candidate: {
+            id: `${layerName}:implicit_background`,
+            kind: 'official_classification',
+            sourceKey: layerName,
+            classification: {
+              code: implicitBackground.classificationCode,
+              label: classificationLabel(implicitBackground.classificationCode),
+              sourceFeatureIds: [],
+            },
+            areas: [],
+            source: 'siotuga',
+            evidence: [
+              {
+                source: 'siotuga',
+                sourceUrl: '',
+                retrievedAt,
+                method: implicitBackground.legalBasis ?? 'clasificación implícita por defecto',
+                scope: 'planning_classification',
+              },
+            ],
+            confidence: 'high',
+            evidenceBasis: implicitBackground.evidenceBasis,
+            instrumentTraceability: 'verified',
+            normalizationStatus: 'mapped',
+            parcelCoverage: coverage,
+          },
+        };
+      }
+
       return {
         candidate: {
           id: `${layerName}:derived_complement`,
@@ -1268,13 +1314,7 @@ function deriveComplementCandidate(
           evidenceBasis: 'parcel_geometry',
           instrumentTraceability: 'pending',
           normalizationStatus: 'unmapped',
-          parcelCoverage: {
-            parcelAreaSquareMetres: parcelArea,
-            intersectionAreaSquareMetres: roundedArea,
-            parcelPercentage: parcelArea > 0 ? round((roundedArea / parcelArea) * 100, 2) : 0,
-            method: 'polygon_intersection',
-            intersectionGeometry: complementGeometry,
-          },
+          parcelCoverage: coverage,
         },
       };
     } else if (roundedArea > 0) {

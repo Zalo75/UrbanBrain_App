@@ -34,6 +34,11 @@ export interface SiotugaClassificationLayerRegistration {
     categoryCodes?: readonly string[]
     explanation: string
   }[]
+  implicitBackgroundClassification?: {
+    classificationCode: string
+    evidenceBasis: 'implicit_planning_background'
+    legalBasis?: string
+  }
   note?: string
 }
 
@@ -55,6 +60,7 @@ const P1_CLASSIFICATION_LAYERS: readonly SiotugaClassificationLayerRegistration[
       wfsCapabilitiesUrl: knowledge.classificationLayer.capabilitiesUrl,
       verifiedAt: knowledge.activation.verifiedAt,
     },
+    implicitBackgroundClassification: knowledge.implicitBackgroundClassification,
   }))
 
 // Fuentes ya auditadas fuera de P1. Se mantienen sin alterar su comportamiento.

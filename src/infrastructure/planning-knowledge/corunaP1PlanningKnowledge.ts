@@ -81,6 +81,11 @@ export interface ActiveP1MunicipalityPlanning {
     attributes: readonly string[]
     capabilitiesUrl: string
   }
+  implicitBackgroundClassification?: {
+    classificationCode: string
+    evidenceBasis: 'implicit_planning_background'
+    legalBasis?: string
+  }
   documents: readonly PlanningDocumentReference[]
   documentCatalog: {
     generatedAt: string
@@ -119,6 +124,14 @@ export const CORUNA_P1_PLANNING_KNOWLEDGE: readonly ActiveP1MunicipalityPlanning
         attributes: CLASSIFICATION_ATTRIBUTES,
         capabilitiesUrl: `https://siotuga.xunta.gal/siotuga/ws?codine=${code}&SERVICE=WFS&VERSION=1.1.0&REQUEST=GetCapabilities`,
       },
+      implicitBackgroundClassification:
+        code === '15002' // Ames
+          ? {
+              classificationCode: 'SR',
+              evidenceBasis: 'implicit_planning_background',
+              legalBasis: 'DT 1ª L2/2016 (LSG): Suelo Rústico por defecto ante planeamiento disperso',
+            }
+          : undefined,
       documents,
       documentCatalog: {
         generatedAt: CORUNA_P1_DOCUMENT_CATALOG_GENERATED_AT,

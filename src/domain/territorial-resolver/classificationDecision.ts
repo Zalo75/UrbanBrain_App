@@ -79,6 +79,7 @@ function reliabilityScore(candidate: ClassificationCandidate) {
     parcel_geometry: 300,
     representative_point: 200,
     official_document: 100,
+    implicit_planning_background: 250,
   }[candidate.evidenceBasis]
   const traceability = candidate.kind === 'official_classification' ? {
     verified: 30,
@@ -104,6 +105,7 @@ function proposalFor(
     parcel_geometry: 'intersección con la geometría completa de la parcela',
     representative_point: 'consulta sobre el punto representativo oficial',
     official_document: 'evidencia del documento oficial sin resolución parcelaria completa',
+    implicit_planning_background: 'regla normativa de fondo implícito',
   }[candidate.evidenceBasis]
   const traceability = candidate.kind === 'official_classification' ? {
     verified: 'verificada',
