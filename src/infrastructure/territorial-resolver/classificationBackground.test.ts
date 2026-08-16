@@ -3,6 +3,23 @@ import { SiotugaClassificationAdapter } from './SiotugaClassificationAdapter'
 import type { PlanningApplicability, PlanningPort, TerritorialCoordinates, ParcelGeometry } from '@/domain/territorial-resolver/types'
 import { getSiotugaClassificationLayer } from './SiotugaClassificationRegistry'
 
+function feature(
+  id: string,
+  classification: string,
+  category: string,
+  ring: Array<[number, number]>
+) {
+  const positions = ring.map(([lng, lat]) => `${lat} ${lng}`).join(' ')
+  return `<gml:featureMember><ms:classification gml:id="${id}"><ms:geom><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList>${positions}</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></ms:geom><ms:cla_homo>${classification}</ms:cla_homo><ms:cat_homo>${category}</ms:cat_homo></ms:classification></gml:featureMember>`
+}
+
+function fixtureFetcher(...features: string[]) {
+  return async () => new Response(
+    `<wfs:FeatureCollection xmlns:wfs="http://www.opengis.net/wfs" xmlns:gml="http://www.opengis.net/gml" xmlns:ms="http://mapserver.gis.umn.edu/mapserver">${features.join('')}</wfs:FeatureCollection>`,
+    { status: 200, headers: { 'content-type': 'application/xml' } }
+  )
+}
+
 class MockFallback implements PlanningPort {
   async findApplicablePlanning(location: { municipalityCode?: string }): Promise<PlanningApplicability> {
     const layer = location.municipalityCode ? getSiotugaClassificationLayer(location.municipalityCode) : undefined;
@@ -28,7 +45,7 @@ class MockFallback implements PlanningPort {
 
 describe('Implicit Background Classification (Ames)', () => {
   it('should resolve implicit background correctly for Ames (100% background)', async () => {
-    const adapter = new SiotugaClassificationAdapter(new MockFallback())
+    const adapter = new SiotugaClassificationAdapter(new MockFallback(), fixtureFetcher())
     // 15002A076002700000ZO geometry is in a rural area of Ames (no SNR/SU polygon)
     const location = {
       municipalityCode: '15002',
@@ -73,7 +90,16 @@ describe('Implicit Background Classification (Ames)', () => {
   })
 
   it('should resolve mixed (partial SNR + partial background)', async () => {
-    const adapter = new SiotugaClassificationAdapter(new MockFallback())
+    const adapter = new SiotugaClassificationAdapter(
+      new MockFallback(),
+      fixtureFetcher(feature('ames-snr', 'SNR', 'SNRSC', [
+        [-8.653, 42.937],
+        [-8.6515, 42.937],
+        [-8.6515, 42.94],
+        [-8.653, 42.94],
+        [-8.653, 42.937],
+      ]))
+    )
     // A geometry that overlaps an SNR polygon boundary
     const location = {
       municipalityCode: '15002',
@@ -115,7 +141,16 @@ describe('Implicit Background Classification (Ames)', () => {
     const layer = getSiotugaClassificationLayer('15058')
     expect(layer?.implicitBackgroundClassification).toBeUndefined()
 
-    const adapter = new SiotugaClassificationAdapter(new MockFallback())
+    const adapter = new SiotugaClassificationAdapter(
+      new MockFallback(),
+      fixtureFetcher(feature('oleiros-partial', 'SU', 'SUC', [
+        [-8.318, 43.332],
+        [-8.3175, 43.332],
+        [-8.3175, 43.333],
+        [-8.318, 43.333],
+        [-8.318, 43.332],
+      ]))
+    )
     const location = {
       municipalityCode: '15058',
       coordinates: { lat: 43.332, lng: -8.318 } as TerritorialCoordinates,
@@ -146,7 +181,16 @@ describe('Implicit Background Classification (Ames)', () => {
   })
 
   it('should pass regression for Sada (15075)', async () => {
-    const adapter = new SiotugaClassificationAdapter(new MockFallback())
+    const adapter = new SiotugaClassificationAdapter(
+      new MockFallback(),
+      fixtureFetcher(feature('sada-snrc', 'SNR', 'SNRC', [
+        [-8.2977, 43.37859],
+        [-8.29759, 43.37859],
+        [-8.29759, 43.37869],
+        [-8.2977, 43.37869],
+        [-8.2977, 43.37859],
+      ]))
+    )
     const location = {
       municipalityCode: '15075',
       coordinates: { lat: 43.3786, lng: -8.2976 } as TerritorialCoordinates,
