@@ -615,6 +615,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     );
 
     const supplementaryV1Candidates: ChatNormativeCandidate[] = [];
+    const supplementaryCandidateCountsByLayer: Record<string, number> = {};
     for (const layer of supplementaryScope.layers) {
       if (layer.source !== 'v1_global_catalog' || !layer.documentNames?.length) continue;
       const supplementaryRpcStartedAt = performance.now();
@@ -648,9 +649,9 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         });
         return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
       }
-      supplementaryV1Candidates.push(
-        ...mapV1Candidates((Array.isArray(data) ? data : []) as V1Chunk[], undefined, layer.hierarchy)
-      );
+      const dataCandidates = mapV1Candidates((Array.isArray(data) ? data : []) as V1Chunk[], undefined, layer.hierarchy);
+      supplementaryV1Candidates.push(...dataCandidates);
+      supplementaryCandidateCountsByLayer[layer.hierarchy] = (supplementaryCandidateCountsByLayer[layer.hierarchy] || 0) + dataCandidates.length;
     }
 
     // --- SPRINT 3.12: Laboratorio CTE V2 ---
@@ -853,6 +854,48 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         !hasReviewableRegimeEvidence &&
         !hasConditionalRegimeEvidence);
 
+    function logNormativeAnswerPerf(
+      finalDecision: string,
+      validationValid: boolean | null,
+      validationReasonCodes: string[]
+    ) {
+      const missingDataCodes = applicability.missingData.map((d: string) => {
+        if (d.includes('clasificación')) return 'MISSING_CLASIFICACION';
+        if (d.includes('calificación') || d.includes('ordenanza')) return 'MISSING_CALIFICACION';
+        if (d.includes('ámbito') || d.includes('zona')) return 'MISSING_AMBITO';
+        if (d.includes('categoría')) return 'MISSING_CATEGORIA';
+        if (d.includes('evidencia documental suficiente')) return 'MISSING_DOCUMENTARY_EVIDENCE';
+        return 'MISSING_UNKNOWN';
+      });
+
+      console.info('[NormativeAnswerPerf]', {
+        expedienteId,
+        concreteParameterRequested: questionScope === 'parameters',
+        municipalCandidateCount: v1Candidates.length,
+        municipalDocumentCount: new Set(v1Candidates.map(c => c.documentName).filter(Boolean)).size,
+        supplementaryV1CandidateCount: supplementaryV1Candidates.length,
+        supplementaryCandidateCountsByLayer,
+        v2CandidateCount: v2Candidates.length,
+        answerCandidateCount: answerCandidates.length,
+        applicabilityStatus: applicability.status,
+        retrievalApplicabilityStatus: retrievalApplicability.status,
+        canAnswerConcreteParameters: applicability.canAnswerConcreteParameters,
+        canAnswerConditionalViability: applicability.canAnswerConditionalViability,
+        conditionalViabilityRequested,
+        mustAbstainBeforeLlm: mustAbstain,
+        llmExecuted: !mustAbstain,
+        validationValid,
+        validationReasonCodes,
+        missingDataCodes,
+        finalDecision,
+        applicableCount: applicability.applicable.length,
+        reviewCount: applicability.review.length,
+        rejectedCount: applicability.rejected.length,
+        missingDataCount: applicability.missingData.length,
+        conflictCount: applicability.conflicts.length,
+      });
+    }
+
     if (mustAbstain) {
       const answer = buildSafeAbstention(applicability, parcelContext, message);
       const contract = buildAnswerContract(
@@ -870,6 +913,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         content: answer,
         sources: [],
       });
+      logNormativeAnswerPerf('abstain', null, []);
       return NextResponse.json({ answer, sources: [], safety: contract });
     }
 
@@ -923,15 +967,18 @@ No calcules, afirmes ni enumeres ocupación, edificabilidad, altura, retranqueos
 
     // Logging for CTE V2 Response Mode
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
-      console.log(`\n========== CTE V2 RESPONSE MODE ==========
+      console.log(`\n========== KNOWLEDGE ENGINE RESPONSE MODE ==========
 Pregunta: [omitida por privacidad]
 Feature flag: ${process.env.ENABLE_CTE_V2_RESPONSES || 'false'}
 DocumentCodes: ${plan?.documentCodes?.join(', ') || 'Ninguno'}
-Chunks recuperados: ${v2Results?.length || 0}
-Chunks válidos por umbral: ${usedV2 ? (v2FinalContext.match(/\[Fuente \d+\]/g) || []).length : 0}
-Similitud Top 1: ${v2Results && v2Results.length > 0 ? v2Results[0].similarity.toFixed(4) : 'N/A'}
+Candidatos recuperados:
+- V2: ${v2Results?.length || 0}
+- V1 Municipal: ${v1Candidates.length}
+- V1 Suplementario: ${supplementaryV1Candidates.length}
+Capas suplementarias: ${supplementaryScope.layers.map(l => l.hierarchy).join(', ') || 'Ninguna'}
+Similitud Top 1 (V2): ${v2Results && v2Results.length > 0 ? v2Results[0].similarity.toFixed(4) : 'N/A'}
 Fuente de respuesta visible:
-- ${usedV2 ? 'V2_CTE' : 'V1_FALLBACK'}
+- ${usedV2 ? 'V2_CTE' : (supplementaryV1Candidates.length > 0 ? 'V1_SUPLEMENTARIO_Y_MUNICIPAL' : 'V1_MUNICIPAL')}
 
 Motivo: ${usedV2 ? 'Condiciones V2 superadas' : fallbackReason}
 Tiempo búsqueda: ${usedV2 ? v2_time_ms : v1_time_ms}ms
@@ -1013,6 +1060,20 @@ ${usedV2 ? v2Citas : 'N/A'}
       sources,
     });
 
+    const reasonCodes = validation.reasons.map((r: string) => {
+      if (r.includes('vacía')) return 'EMPTY_RESPONSE';
+      if (r.includes('terminología interna')) return 'INTERNAL_TERMINOLOGY';
+      if (r.includes('concluye edificabilidad sin evidencia')) return 'UNVERIFIED_VIABILITY';
+      if (r.includes('confirma categóricamente un régimen territorial no verificado')) return 'UNVERIFIED_REGIME';
+      if (r.includes('cita una fuente inexistente')) return 'INVALID_CITATION';
+      if (r.includes('atribuye un parámetro de parcela sin régimen determinado')) return 'ATTRIBUTED_PARAMETER_WITHOUT_REGIME';
+      if (r.includes('afirmación normativa prescriptiva sin citar')) return 'UNVERIFIED_NORMATIVE_CLAIM';
+      if (r.includes('número o plazo')) return 'UNSUPPORTED_NUMBER';
+      return 'UNKNOWN_REASON';
+    });
+
+    logNormativeAnswerPerf(decision, validation.valid, reasonCodes);
+
     return NextResponse.json({
       answer,
       sources,
@@ -1022,6 +1083,7 @@ ${usedV2 ? v2Citas : 'N/A'}
     if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       return NextResponse.json({ error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' }, { status: 504 });
     }
+    console.error('ROUTE_TS_ERROR', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   } finally {
     releaseChatSlot?.();
