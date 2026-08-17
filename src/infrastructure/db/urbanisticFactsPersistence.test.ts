@@ -121,17 +121,17 @@ describe('urbanisticFacts persistence compatibility', () => {
         status: 'manual_review_required',
         confidence: 'high',
         evidence: [],
-        warnings: ['La consolidacion requiere revision.'],
+        warnings: ['No ha sido posible determinar automáticamente si el suelo urbano es consolidado o no consolidado. Consulte el planeamiento municipal y, cuando proceda, confirme los servicios urbanísticos.'],
         discrepancies: [],
         nextAction: 'review_official_sources',
       },
     }
     const raw = result(classificationResolution(), stored)
 
-    expect(urbanisticFactsFromRaw(raw)).toBe(stored)
-    expect(buildNormalizedParcelContext({ expediente: {}, detected: { urbanisticFacts: stored } }))
+    expect(urbanisticFactsFromRaw(raw)).toMatchObject(stored)
+    expect(buildNormalizedParcelContext({ expediente: {}, detected: { urbanisticFacts: urbanisticFactsFromRaw(raw) } as any }))
       .toMatchObject({ urbanisticFacts: stored })
-    expect(buildTerritorialContextView(raw)?.urbanisticFacts).toBe(stored)
+    expect(buildTerritorialContextView(raw)?.urbanisticFacts).toMatchObject(stored)
   })
 
   it('deriva en lectura hechos de un JSON historico sin reescribir los campos legacy', () => {

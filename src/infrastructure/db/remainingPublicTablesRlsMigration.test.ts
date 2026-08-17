@@ -50,6 +50,7 @@ const tablesProtectedByEarlierMigrations = [
   'context_detections',
   'normative_documents_v2',
   'normative_chunks_v2',
+  'factual_shadow_evaluations',
 ];
 
 describe('remaining public-table RLS hardening migration', () => {
@@ -62,7 +63,7 @@ describe('remaining public-table RLS hardening migration', () => {
       ...newlyProtectedTables,
     ]);
 
-    expect(schemaTables).toHaveLength(24);
+    expect(schemaTables).toHaveLength(25);
     expect(schemaTables.filter((table) => !coveredTables.has(table))).toEqual([]);
   });
 

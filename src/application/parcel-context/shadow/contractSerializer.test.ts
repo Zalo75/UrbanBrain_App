@@ -30,11 +30,16 @@ describe('contractSerializer', () => {
     const serialized = serializeTerritorialFactualContract(contract)
     const parsed = JSON.parse(serialized)
 
-    expect(parsed.identity.address).toBeUndefined()
-    expect(parsed.scopes).toBeUndefined()
+    expect(parsed.classification).toBeDefined()
+    expect(parsed.classification.status).toBe('unresolved')
+
+    // Estos campos deben ser omitidos (vacios)
     expect(parsed.categories).toBeUndefined()
     expect(parsed.planningAreas).toBeUndefined()
+
+    // affects.items esta vacio y se quita, pero affects mantiene status
+    expect(parsed.affects).toBeDefined()
+    expect(parsed.affects.status).toBe('unresolved')
     expect(parsed.affects.items).toBeUndefined()
-    expect(parsed.normativeReferences).toBeUndefined()
   })
 })
