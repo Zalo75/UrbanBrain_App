@@ -186,8 +186,8 @@ describe('urbanisticFacts persistence compatibility', () => {
     })
 
     expect(urbanisticFactsFromRaw(result(multiple))).toMatchObject({
-      classification: { status: 'conflict', value: undefined },
-      category: { status: 'conflict', value: undefined },
+      classification: { status: 'conflict', value: { code: 'SU', label: 'Suelo urbano' } },
+      category: { status: 'conflict', value: { code: 'SUC', label: 'Suelo urbano consolidado' } },
       consolidation: { status: 'conflict', value: undefined },
     })
     expect(urbanisticFactsFromRaw(result(unavailable))).toMatchObject({

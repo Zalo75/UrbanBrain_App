@@ -234,6 +234,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const factualTotalStartedAt = performance.now();
     const contextLoadStartedAt = performance.now();
     const parcelInputs = await loadAuthorizedParcelInputs(expedienteId, userId);
+    
     const contextLoadMs = performance.now() - contextLoadStartedAt;
     if (!parcelInputs) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -1046,7 +1047,6 @@ MODO DOCUMENTAL ESTRICTO
 La pregunta solicita únicamente la documentación o normativa localizada. Enumera exclusivamente las fuentes recuperadas y, solo cuando el fragmento lo permita, describe prudentemente su contenido. Distingue entre documentación localizada y aplicabilidad concreta a la parcela.
 No calcules, afirmes ni enumeres ocupación, edificabilidad, altura, retranqueos, parcela mínima, frente mínimo, número de plantas, usos ni ningún otro parámetro urbanístico no solicitado. Cita con [Fuente N] toda afirmación normativa o documental.`;
     }
-
 
     systemPrompt += `
 

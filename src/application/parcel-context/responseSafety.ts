@@ -48,7 +48,7 @@ function confidenceLabel(confidence: number) {
 }
 
 function isUsableUrbanisticFactStatus(status?: string) {
-  return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated' || status === 'conflict'
+  return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated' || status === 'conflict' || status === 'manual_review_required'
 }
 
 function isConfirmedUrbanisticFactStatus(status?: string) {
@@ -543,6 +543,7 @@ function structuredFactLines(context: NormalizedParcelContext): string[] {
   ].filter((line): line is string => Boolean(line))
 
   return lines.length > 1 ? lines : []
+
 }
 
 function isAffectQuestion(question?: string) {

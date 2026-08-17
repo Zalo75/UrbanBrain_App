@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildMunicipalSafetyPrompt } from './responseSafety'
+import { buildNormalizedParcelContext } from './normalizeParcelContext'
 import type { NormalizedParcelContext } from '../../domain/parcel-context/types'
 
 const baseContext: NormalizedParcelContext = {
@@ -247,5 +248,61 @@ describe('structuredFactLines / describeContext (multizone)', () => {
     // No debe fallar y debe mostrar el valor
     expect(text).toContain('Categoría: Comun (SNRC)')
     expect(text).toContain('Estado espacial: HOMOGÉNEO')
+  })
+
+  it('11. Sada Multizona Runtime Equivalent - manual_review_required', () => {
+    // Se recrea el contexto exactamente como llega desde la BD,
+    // donde detected contiene los hechos con conflict y el expediente tiene un area de actuacion sin validar.
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        contextoValidadoPorTecnico: false
+      },
+      detected: {
+        actionAreaSelection: {
+          current: {
+            selectionType: 'detected_zone',
+            classification: 'SNR',
+            category: 'SNRC',
+            verification: 'unverified',
+            surfaceSquareMetres: 1000
+          }
+        },
+        urbanisticFacts: {
+          classification: {
+            value: { code: 'SNR', label: 'Suelo de Núcleo Rural' },
+            status: 'conflict',
+            confidence: 'high',
+            origin: 'spatial_intersection',
+            evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+          },
+          category: {
+            value: { code: 'SNRC', label: 'Núcleo rural común' },
+            status: 'conflict',
+            confidence: 'high',
+            origin: 'spatial_intersection',
+            candidates: [
+              { value: { code: 'SNRC', label: 'Núcleo rural común' }, parcelPercentage: 98.53 },
+              { value: { code: 'SNRT', label: 'Núcleo rural tradicional' }, parcelPercentage: 1.47 }
+            ],
+            evidence: [], warnings: [], discrepancies: [], nextAction: 'none'
+          },
+          consolidation: { status: 'not_applicable', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' }
+        }
+      }
+    })
+
+    // Asegurarse de que el status efectivamente pasó a manual_review_required
+    expect(context.urbanisticFacts?.classification.status).toBe('manual_review_required')
+    expect(context.urbanisticFacts?.category.status).toBe('manual_review_required')
+
+    const text = getPromptLines(context).join('\n')
+    
+    // Y ahora comprobamos que llega al prompt
+    expect(text).toContain('SNRC')
+    expect(text).toContain('98,53')
+    expect(text).toContain('SNRT')
+    expect(text).toContain('1,47')
+    expect(text).toContain('HETEROGÉNEO')
+    expect(text).toContain('revisión manual') // pendiente de revisión manual
   })
 })
