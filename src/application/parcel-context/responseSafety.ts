@@ -50,6 +50,37 @@ function isConfirmedUrbanisticFactStatus(status?: string) {
   return status === 'automatic_confirmed' || status === 'technician_validated'
 }
 
+function pendingFactIsAlreadyConfirmed(item: string, context: NormalizedParcelContext) {
+  const normalized = item.toLocaleLowerCase('es')
+  const facts = context.urbanisticFacts
+  if (/(clasificaci[oó]n|clase\s+de\s+suelo)/i.test(normalized)) {
+    return isConfirmedUrbanisticFactStatus(facts?.classification.status) ||
+      context.landClass?.verification === 'confirmed'
+  }
+  if (/(categor[ií]a|calificaci[oó]n|ordenanza|[aá]mbito|zona|ficha)/i.test(normalized)) {
+    const categoryConfirmed = isConfirmedUrbanisticFactStatus(facts?.category.status)
+    const zoneConfirmed = context.qualification?.verification === 'confirmed' ||
+      context.planningArea?.verification === 'confirmed'
+    const hasCategoryAndZoneAlternatives = /categor[ií]a/.test(normalized) &&
+      /(?:calificaci[oó]n|ordenanza|[aá]mbito|zona|ficha)/.test(normalized)
+    return hasCategoryAndZoneAlternatives ? categoryConfirmed && zoneConfirmed : categoryConfirmed || zoneConfirmed
+  }
+  if (/municipio|c[oó]digo\s+ine/i.test(normalized)) return context.municipality?.verification === 'confirmed'
+  if (/instrumento|planeamiento/i.test(normalized)) return context.planningInstrument?.verification === 'confirmed'
+  if (/vigencia|vigente/i.test(normalized)) return context.validity?.verification === 'confirmed'
+  return false
+}
+
+/** Returns only backend-backed pending facts; model-proposed text is never authoritative. */
+export function buildDeterministicMissingFacts(
+  applicability: ApplicabilityResult,
+  context: NormalizedParcelContext
+) {
+  return unique(
+    applicability.missingData.filter((item) => !pendingFactIsAlreadyConfirmed(item, context))
+  )
+}
+
 type StructuredParcelFactTopic =
   | 'classification'
   | 'category'
@@ -634,11 +665,13 @@ export function buildMunicipalSafetyPrompt(
   sources: NormativeCandidate[],
   questionScope: ParcelQuestionScope = 'independent'
 ) {
+  const deterministicMissingFacts = buildDeterministicMissingFacts(applicability, context)
   const sourceText = sources
     .map((source, index) => {
       const hierarchy = source.hierarchy ?? 'municipal'
       return [
         `[Fuente ${index + 1}]`,
+        `Aplicabilidad: ${(applicability.review ?? []).some((review) => review.id === source.id) ? 'REVISIÓN (no acreditada como aplicable a la parcela)' : 'APLICABLE'}`,
         `Nivel normativo: ${hierarchy}`,
         `Municipio: ${source.municipalityName ?? 'no identificado'}`,
         `Documento: ${source.documentName ?? 'no identificado'}`,
@@ -679,8 +712,8 @@ ESTADO DE APLICABILIDAD: ${applicability.status}
 CONTEXTO DE PARCELA
 ${describeContext(context)}
 ${
-  applicability.missingData.length > 0
-    ? `\nLIMITACIONES DEL CONTEXTO\n${applicability.missingData
+  deterministicMissingFacts.length > 0
+    ? `\nLIMITACIONES DEL CONTEXTO\n${deterministicMissingFacts
         .map((d) => `- dato pendiente: ${d}`)
         .join('\n')}
 
@@ -710,6 +743,7 @@ export function buildReviewSafetyPrompt(
       const hierarchy = source.hierarchy ?? 'municipal'
       return [
         `[Fuente ${index + 1}]`,
+        'Aplicabilidad: REVISIÓN (evidencia recuperada para contexto; no acreditada como aplicable a la parcela)',
         `Nivel normativo: ${hierarchy}`,
         `Municipio: ${source.municipalityName ?? 'no identificado'}`,
         `Documento: ${source.documentName ?? 'no identificado'}`,
@@ -962,6 +996,7 @@ export function validateReasonerOutput(
     invalidClaimCount++
     invalidClaimReasonCounts[reason] = (invalidClaimReasonCounts[reason] || 0) + 1
   }
+  const reviewSourceIds = new Set((applicability.review ?? []).map((candidate) => candidate.id))
 
   for (const claim of output.claims) {
     // 1. sourceRefs deben existir
@@ -1004,6 +1039,19 @@ export function validateReasonerOutput(
       }
     }
 
+    const parcelSpecificClaim =
+      claim.type === 'parcel_conclusion' ||
+      claim.appliesToParcel === true ||
+      attributesConcreteParameterToParcel(claim.text)
+    const claimSourcesAreReviewOnly =
+      claim.sourceRefs.length > 0 &&
+      claim.sourceRefs.every((ref) => reviewSourceIds.has(sources[ref - 1]?.id ?? ''))
+
+    if (parcelSpecificClaim && claimSourcesAreReviewOnly) {
+      addInvalid('REVIEW_ONLY_PARCEL_CLAIM')
+      continue
+    }
+
     // 3, 4. AppliesToParcel / Parcel conclusion check
     if (claim.type === 'parcel_conclusion' || claim.appliesToParcel === true) {
       if (!applicability.canAnswerConcreteParameters) {
@@ -1029,7 +1077,11 @@ export function validateReasonerOutput(
   return { validClaims, invalidClaimCount, invalidClaimReasonCounts, citations }
 }
 
-export function renderFinalAnswer(output: ReasonerOutput, validClaims: ReasonerClaim[]): string {
+export function renderFinalAnswer(
+  output: ReasonerOutput,
+  validClaims: ReasonerClaim[],
+  deterministicMissingFacts: string[] = []
+): string {
   if (validClaims.length === 0) return ''
 
   const limitations = validClaims.filter(c => c.type === 'limitation')
@@ -1043,16 +1095,18 @@ export function renderFinalAnswer(output: ReasonerOutput, validClaims: ReasonerC
     material.forEach(c => {
       const text = c.text.trim();
       const needsDot = !/[.!?]$/.test(text);
-      const refs = c.sourceRefs.length > 0 ? ` ${c.sourceRefs.map(ref => `[Fuente ${ref}]`).join(' ')}` : '';
+      const refs = c.sourceRefs.length > 0
+        ? ` ${Array.from(new Set(c.sourceRefs)).map(ref => `[Fuente ${ref}]`).join(' ')}`
+        : '';
       lines.push(`- ${text}${needsDot ? '.' : ''}${refs}`)
     })
     lines.push('')
   }
 
-  if (limitations.length > 0 || output.missingFacts.length > 0) {
+  if (limitations.length > 0 || deterministicMissingFacts.length > 0) {
     lines.push('ADVERTENCIAS Y DATOS PENDIENTES')
     limitations.forEach(c => lines.push(`- ${c.text}`))
-    output.missingFacts.forEach(f => lines.push(`- Dato pendiente: ${f}`))
+    deterministicMissingFacts.forEach(f => lines.push(`- Dato pendiente: ${f}`))
     lines.push('')
   }
 

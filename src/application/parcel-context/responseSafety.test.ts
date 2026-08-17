@@ -4,8 +4,11 @@ import {
   renderFinalAnswer,
   buildSafeAbstention,
   parseReasonerOutput,
+  buildDeterministicMissingFacts,
+  buildMunicipalSafetyPrompt,
+  buildReviewSafetyPrompt,
 } from './responseSafety'
-import type { ReasonerOutput, NormativeCandidate, ApplicabilityResult } from '@/domain/parcel-context/types'
+import type { ReasonerOutput, NormativeCandidate, ApplicabilityResult, NormalizedParcelContext } from '@/domain/parcel-context/types'
 
 describe('V3-B Claim-level validation & rendering', () => {
   const sources: NormativeCandidate[] = [
@@ -195,6 +198,17 @@ describe('V3-B Claim-level validation & rendering', () => {
       expect(renderFinalAnswer(output, result.validClaims)).toContain('[Fuente 1] [Fuente 2]')
     })
 
+    it('deduplicates repeated source references in the visible answer', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La regla está documentada', sourceRefs: [1, 1], appliesToParcel: 'unknown', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, sources, app)
+      const answer = renderFinalAnswer(output, result.validClaims)
+      expect(answer.match(/\[Fuente 1\]/g)).toHaveLength(1)
+    })
+
     it('does not let a territorial claim resolve an applicability conflict', () => {
       const output: ReasonerOutput = {
         answerMode: 'definitive',
@@ -219,7 +233,7 @@ describe('V3-B Claim-level validation & rendering', () => {
         ]
       }
       const res = validateReasonerOutput(output, sources, app)
-      const text = renderFinalAnswer(output, res.validClaims)
+      const text = renderFinalAnswer(output, res.validClaims, ['Fact X'])
 
       expect(text).toContain('Claim Seguro')
       expect(text).toContain('Fact X')
@@ -239,6 +253,113 @@ describe('V3-B Claim-level validation & rendering', () => {
     it('rejects sourceRef no enteros', () => {
       const out: unknown = { answerMode: 'definitive', missingFacts: [], claims: [{ id: '1', type: 'normative_fact', text: 'x', sourceRefs: [1.5], appliesToParcel: 'unknown', numericTokens: [] }] }
       expect(validateReasonerOutput(out, sources, app).invalidClaimCount).toBe(1)
+    })
+  })
+
+  describe('V3-D review evidence and deterministic missing facts', () => {
+    const reviewSource: NormativeCandidate = {
+      id: 'review-1',
+      content: 'La separación será de 3 m para zona residencial aislada.',
+      hierarchy: 'municipal',
+    }
+    const applicableSource: NormativeCandidate = {
+      id: 'applicable-1',
+      content: 'El retranqueo aplicable es de 5 m.',
+      hierarchy: 'municipal',
+    }
+
+    it('rejects a parcel parameter supported only by review evidence but keeps a safe limitation', () => {
+      const reviewApplicability: ApplicabilityResult = {
+        ...app,
+        status: 'PARCIAL',
+        applicable: [],
+        review: [reviewSource],
+        canAnswerConcreteParameters: false,
+      }
+      const output: ReasonerOutput = {
+        answerMode: 'partial',
+        missingFacts: [],
+        claims: [
+          { id: 'bad', type: 'parcel_conclusion', text: 'El retranqueo aplicable a esta parcela es 3 m', sourceRefs: [1], appliesToParcel: true, numericTokens: [] },
+          { id: 'safe', type: 'limitation', text: 'La normativa recuperada contiene alternativas, pero no permite vincular una cifra única a la parcela', sourceRefs: [], appliesToParcel: 'conditional', numericTokens: [] },
+        ],
+      }
+      const result = validateReasonerOutput(output, [reviewSource], reviewApplicability)
+      expect(result.invalidClaimReasonCounts.REVIEW_ONLY_PARCEL_CLAIM).toBe(1)
+      expect(result.validClaims.map((claim) => claim.id)).toEqual(['safe'])
+      expect(renderFinalAnswer(output, result.validClaims)).toContain('no permite vincular')
+    })
+
+    it('allows a descriptive review claim that does not attribute the rule to the parcel', () => {
+      const reviewApplicability = { ...app, status: 'PARCIAL' as const, applicable: [], review: [reviewSource], canAnswerConcreteParameters: false }
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: 'descriptive', type: 'normative_fact', text: 'El artículo establece 3 m para la zona residencial aislada', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, [reviewSource], reviewApplicability)
+      expect(result.validClaims).toHaveLength(1)
+    })
+
+    it('allows an applicable parcel parameter and mixed applicable plus review evidence', () => {
+      const mixedApplicability: ApplicabilityResult = {
+        ...app,
+        applicable: [applicableSource],
+        review: [reviewSource],
+        canAnswerConcreteParameters: true,
+      }
+      const applicableOutput: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: 'applicable', type: 'parcel_conclusion', text: 'El retranqueo aplicable a esta parcela es 5 m', sourceRefs: [1], appliesToParcel: true, numericTokens: [] }],
+      }
+      expect(validateReasonerOutput(applicableOutput, [applicableSource], { ...mixedApplicability, review: [] }).validClaims).toHaveLength(1)
+
+      const mixedOutput = { ...applicableOutput, claims: [{ ...applicableOutput.claims[0], sourceRefs: [1, 2] }] }
+      expect(validateReasonerOutput(mixedOutput, [applicableSource, reviewSource], mixedApplicability).validClaims).toHaveLength(1)
+    })
+
+    it('suppresses model-proposed classification/category gaps when structured facts confirm them', () => {
+      const confirmedContext = {
+        qualification: { value: 'SNRSC', source: 'siotuga', confidence: 1, verification: 'confirmed' },
+        urbanisticFacts: {
+          classification: { status: 'automatic_confirmed', value: { code: 'SNR', label: 'SNR' }, origin: 'siotuga', evidence: [], confidence: 'high', discrepancies: [] },
+          category: { status: 'automatic_confirmed', value: { code: 'SNRSC', label: 'SNRSC' }, origin: 'siotuga', evidence: [], confidence: 'high', discrepancies: [] },
+        },
+        knownConstraints: [],
+        conflicts: [],
+        pendingValidation: [],
+      } as NormalizedParcelContext
+      const missing = buildDeterministicMissingFacts(
+        { ...app, missingData: ['clasificación del suelo', 'categoría, ordenanza, ámbito o ficha aplicable'] },
+        confirmedContext
+      )
+      expect(missing).toEqual([])
+    })
+
+    it('keeps the genuinely missing Ames category while suppressing confirmed classification', () => {
+      const amesContext = {
+        landClass: { value: 'rustico', source: 'expediente', confidence: 1, verification: 'confirmed' },
+        urbanisticFacts: {
+          classification: { status: 'technician_validated', value: { code: 'SR', label: 'Suelo rústico' }, origin: 'technician_selection', evidence: [], confidence: 'high', discrepancies: [] },
+          category: { status: 'not_available', value: undefined, origin: 'technician_selection', evidence: [], confidence: 'unknown', discrepancies: [] },
+        },
+        knownConstraints: [],
+        conflicts: [],
+        pendingValidation: [],
+      } as NormalizedParcelContext
+      const missing = buildDeterministicMissingFacts(
+        { ...app, missingData: ['clasificación del suelo', 'categoría, ordenanza, ámbito o ficha aplicable'] },
+        amesContext
+      )
+      expect(missing).toEqual(['categoría, ordenanza, ámbito o ficha aplicable'])
+    })
+
+    it('labels review evidence explicitly in both safety prompts', () => {
+      const context = { knownConstraints: [], conflicts: [], pendingValidation: [] } as NormalizedParcelContext
+      const reviewApplicability = { ...app, status: 'PARCIAL' as const, applicable: [], review: [reviewSource], canAnswerConcreteParameters: false }
+      expect(buildMunicipalSafetyPrompt(context, reviewApplicability, [reviewSource], 'regime')).toContain('Aplicabilidad: REVISIÓN')
+      expect(buildReviewSafetyPrompt(context, [reviewSource], 'regime')).toContain('Aplicabilidad: REVISIÓN')
     })
   })
 })

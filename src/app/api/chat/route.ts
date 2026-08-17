@@ -28,6 +28,7 @@ import {
   buildReviewSafetyPrompt,
   buildSafeAbstention,
   buildStructuredParcelFactAnswer,
+  buildDeterministicMissingFacts,
   sanitizeTechnicalPlaceholders,
   parseReasonerOutput,
   validateReasonerOutput,
@@ -909,7 +910,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     if (hardStopNoViabilityEvidence) hardStopReasonCodes.push('NO_VIABILITY_EVIDENCE');
 
     function logNormativeAnswerPerf(finalDecision: string, validationValid: boolean | null, validationReasonCodes: string[], extraParams: Record<string, unknown> = {}) {
-      const missingDataCodes = applicability.missingData.map((d: string) => {
+      const deterministicMissingFacts = buildDeterministicMissingFacts(applicability, parcelContext);
+      const missingDataCodes = deterministicMissingFacts.map((d: string) => {
         if (d.includes('clasificación')) return 'MISSING_CLASIFICACION';
         if (d.includes('calificación') || d.includes('ordenanza')) return 'MISSING_CALIFICACION';
         if (d.includes('ámbito') || d.includes('zona')) return 'MISSING_AMBITO';
@@ -955,7 +957,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         applicableCount: applicability.applicable.length,
         reviewCount: applicability.review.length,
         rejectedCount: applicability.rejected.length,
-        missingDataCount: applicability.missingData.length,
+        missingDataCount: deterministicMissingFacts.length,
+        reviewOnlyClaimRejectedCount: Number(extraParams.reviewOnlyClaimRejectedCount ?? 0),
         conflictCount: applicability.conflicts.length, ...extraParams, });
     }
 
@@ -1147,7 +1150,11 @@ ${usedV2 ? v2Citas : 'N/A'}
         applicability = failedApplicability;
         sources = [];
       } else {
-        answer = renderFinalAnswer(parsed, validation.validClaims);
+        answer = renderFinalAnswer(
+          parsed,
+          validation.validClaims,
+          buildDeterministicMissingFacts(applicability, parcelContext)
+        );
       }
 
       break;
@@ -1204,6 +1211,7 @@ ${usedV2 ? v2Citas : 'N/A'}
         validClaimCount: validation ? validation.validClaims.length : 0,
         invalidClaimCount: validation ? validation.invalidClaimCount : 0,
         invalidClaimReasonCounts: validation ? validation.invalidClaimReasonCounts : {},
+        reviewOnlyClaimRejectedCount: validation?.invalidClaimReasonCounts.REVIEW_ONLY_PARCEL_CLAIM ?? 0,
         renderedFromClaims: outputParsed && validation && validation.validClaims.length > 0,
         reasonerRetryUsed,
         reasonerParseFailureCode
