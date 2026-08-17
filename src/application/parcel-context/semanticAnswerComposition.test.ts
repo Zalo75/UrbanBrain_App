@@ -4,6 +4,7 @@ import {
   classifyQuestionIntent,
   composeSemanticAnswer,
   evaluateClaimRelevance,
+  humanizeMissingFacts,
 } from './semanticAnswerComposition'
 
 const baseApplicability: ApplicabilityResult = {
@@ -55,10 +56,10 @@ describe('V3-E relevance and semantic composition', () => {
     const result = composeSemanticAnswer(output, claims, '¿Cuánto retranqueo hay que dejar en esta parcela?', 'parcel_parameter', reviewSources, applicability, [])
     expect(result.semanticFallbackReason).toBe('NO_APPLICABLE_PARAMETER_EVIDENCE')
     expect(result.answer).toContain('CONCLUSIÓN')
-    expect(result.answer).toContain('valor único de retranqueo')
-    expect(result.answer).toContain('FUNDAMENTO / NORMATIVA LOCALIZADA')
-    expect(result.answer.split('FUNDAMENTO / NORMATIVA LOCALIZADA')[0]).not.toContain('3 m')
-    expect(result.answer).toContain('Contexto no acreditado como aplicable')
+    expect(result.answer).toContain('No puede fijarse todavía el retranqueo aplicable a esta parcela con seguridad')
+    expect(result.answer).toContain('FUNDAMENTO')
+    expect(result.answer.split('FUNDAMENTO')[0]).not.toContain('3 m')
+    expect(result.answer).toContain('Normativa localizada cuya aplicación concreta')
   })
 
   it('makes an applicable parameter claim primary and unrelated parameters irrelevant', () => {
@@ -70,6 +71,9 @@ describe('V3-E relevance and semantic composition', () => {
     expect(answer.primaryClaimCount).toBe(1)
     expect(answer.answer).toContain('5 m')
     expect(answer.answer).not.toContain('20 %')
+    expect(answer.answer).not.toContain('FUNDAMENTO')
+    expect(answer.answer).not.toContain('PENDIENTE DE COMPROBAR')
+    expect(answer.answer.indexOf('5 m')).toBeGreaterThan(answer.answer.indexOf('CONCLUSIÓN'))
     expect(evaluateClaimRelevance(occupationClaim, 'parcel_parameter', '¿Cuánto retranqueo hay que dejar?', [source], applicability).code).toBe('IRRELEVANT')
   })
 
@@ -79,7 +83,7 @@ describe('V3-E relevance and semantic composition', () => {
     const sanction = claim({ id: 'sanction', text: 'La normativa sanciona la edificación con multa del 15 % al 30 % del valor de la obra.' })
     const result = composeSemanticAnswer(output, [sanction], '¿Se puede construir en esta parcela?', 'parcel_viability', [source], applicability, ['categoría o calificación aplicable'])
     expect(result.semanticFallbackReason).toBe('CONDITIONAL_VIABILITY_ONLY')
-    expect(result.answer).toContain('viabilidad no puede confirmarse')
+    expect(result.answer).toContain('viabilidad urbanística de esta parcela no puede confirmarse')
     expect(result.answer).not.toContain('multa')
     expect(result.irrelevantClaimCount).toBe(1)
   })
@@ -89,8 +93,26 @@ describe('V3-E relevance and semantic composition', () => {
     const applicability = { ...baseApplicability, applicable: [source], canAnswerConditionalViability: true }
     const result = composeSemanticAnswer(output, [], '¿Se puede construir en esta parcela?', 'parcel_viability', [source], applicability, ['categoría o calificación aplicable'])
     expect(result.semanticFallbackReason).toBe('CONDITIONAL_VIABILITY_ONLY')
-    expect(result.answer).toContain('viabilidad no puede confirmarse')
-    expect(result.answer).toContain('categoría o calificación aplicable')
+    expect(result.answer).toContain('viabilidad urbanística de esta parcela no puede confirmarse')
+    expect(result.answer).toContain('La categoría de suelo aplicable.')
+    expect(result.answer).toContain('La calificación urbanística concreta de la parcela.')
+    expect(result.answer.split('PENDIENTE DE COMPROBAR')[0]).not.toContain('categoría')
+  })
+
+  it('humanizes every deterministic missing-fact family without changing the input facts', () => {
+    expect(humanizeMissingFacts([
+      'clasificación del suelo',
+      'categoría, calificación, ordenanza, ámbito o ficha aplicable',
+      'evidencia documental suficiente para respaldar la respuesta',
+    ])).toEqual([
+      'La clasificación urbanística de la parcela.',
+      'La categoría de suelo aplicable.',
+      'La calificación urbanística concreta de la parcela.',
+      'La ordenanza urbanística aplicable.',
+      'El ámbito o zona de ordenación correspondiente.',
+      'La ficha urbanística correspondiente, si existe.',
+      'Evidencia documental suficiente para confirmar la regla aplicable.',
+    ])
   })
 
   it('keeps conditional viability safe and uses only deterministic missing facts', () => {

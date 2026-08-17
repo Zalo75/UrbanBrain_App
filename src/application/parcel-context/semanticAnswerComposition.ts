@@ -221,14 +221,67 @@ function renderClaim(claim: ReasonerClaim, prefix = '') {
 }
 
 function parameterFallback(question: string) {
-  const parameter = requestedParameter(question) ?? 'parámetro urbanístico'
-  return `No puede determinarse todavía un valor único de ${parameter} aplicable a la parcela con la evidencia actualmente acreditada.`
+  const parameter = requestedParameter(question)
+  const readableParameter: Record<string, string> = {
+    retranqueo: 'el retranqueo',
+    ocupación: 'la ocupación',
+    altura: 'la altura',
+    edificabilidad: 'la edificabilidad',
+    'parcela mínima': 'la parcela mínima',
+    'frente mínimo': 'el frente mínimo',
+    alineación: 'la alineación',
+    usos: 'los usos urbanísticos',
+    plantas: 'el número de plantas',
+    categoría: 'la categoría urbanística',
+  }
+  const label = parameter ? readableParameter[parameter] ?? `el parámetro ${parameter}` : 'el parámetro urbanístico'
+  return `No puede fijarse todavía ${label} aplicable a esta parcela con seguridad.`
 }
 
 function viabilityFallback(missingFacts: string[]) {
-  return missingFacts.length > 0
-    ? `La viabilidad no puede confirmarse todavía de forma categórica; depende de los datos determinantes pendientes: ${missingFacts.join(', ')}.`
-    : 'La viabilidad no puede confirmarse todavía de forma categórica con la evidencia aplicable disponible.'
+  void missingFacts
+  return 'La viabilidad urbanística de esta parcela no puede confirmarse todavía de forma categórica porque falta concretar el régimen urbanístico aplicable.'
+}
+
+export function humanizeMissingFacts(facts: string[]) {
+  const labels: string[] = []
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label)
+  }
+
+  for (const fact of facts) {
+    const normalizedFact = normalize(fact)
+    if (/clasificaci[oó]n|clase\s+de\s+suelo/.test(normalizedFact)) {
+      add('La clasificación urbanística de la parcela.')
+    }
+    if (/categor[ií]a/.test(normalizedFact)) {
+      add('La categoría de suelo aplicable.')
+    }
+    if (/calificaci[oó]n/.test(normalizedFact)) {
+      add('La calificación urbanística concreta de la parcela.')
+    }
+    if (/ordenanza/.test(normalizedFact)) {
+      add('La ordenanza urbanística aplicable.')
+    }
+    if (/[aá]mbito|\bzona\b/.test(normalizedFact)) {
+      add('El ámbito o zona de ordenación correspondiente.')
+    }
+    if (/ficha/.test(normalizedFact)) {
+      add('La ficha urbanística correspondiente, si existe.')
+    }
+    if (/evidencia\s+documental/.test(normalizedFact)) {
+      add('Evidencia documental suficiente para confirmar la regla aplicable.')
+    }
+    if (
+      !/clasificaci[oó]n|clase\s+de\s+suelo|categor[ií]a|calificaci[oó]n|ordenanza|[aá]mbito|\bzona\b|ficha|evidencia\s+documental/.test(
+        normalizedFact
+      )
+    ) {
+      add(fact.trim().replace(/[.;:]+$/, '') + '.')
+    }
+  }
+
+  return labels
 }
 
 export function composeSemanticAnswer(
@@ -281,19 +334,22 @@ export function composeSemanticAnswer(
 
   const contextClaims = primaryClaims.length === 0 ? [...supportClaims, ...limitationClaims] : supportClaims
   if (contextClaims.length > 0) {
-    lines.push('', 'FUNDAMENTO / NORMATIVA LOCALIZADA')
+    lines.push('', 'FUNDAMENTO')
     contextClaims.forEach((claim) => {
       const evaluation = evaluationById.get(claim.id)
-      const prefix = evaluation?.role === 'CONTEXT' || evaluation?.role === 'LIMITATION'
-        ? 'Contexto no acreditado como aplicable a la parcela: '
-        : ''
+      const prefix = evaluation?.role === 'CONTEXT'
+        ? 'Normativa localizada cuya aplicación concreta a esta parcela no ha podido confirmarse: '
+        : evaluation?.role === 'LIMITATION'
+          ? 'Información cuya vinculación concreta con esta parcela sigue pendiente: '
+          : ''
       lines.push(renderClaim(claim, prefix))
     })
   }
 
-  if (deterministicMissingFacts.length > 0) {
-    lines.push('', 'ADVERTENCIAS Y DATOS PENDIENTES')
-    deterministicMissingFacts.forEach((fact) => lines.push(`- Dato pendiente: ${fact}`))
+  const visibleMissingFacts = humanizeMissingFacts(deterministicMissingFacts)
+  if (visibleMissingFacts.length > 0) {
+    lines.push('', 'PENDIENTE DE COMPROBAR')
+    visibleMissingFacts.forEach((fact) => lines.push(`- ${fact}`))
   }
 
   return {
