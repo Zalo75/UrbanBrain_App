@@ -521,7 +521,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
 
   it('6. Valdoviño: parámetro concreto (retranqueo) con SNR/SNRSC y normativa municipal', async () => {
     vi.mocked(classifyParcelQuestionScope).mockReturnValueOnce('parameters')
-    vi.mocked(requiresDeterminedParcelRegime).mockReturnValueOnce(true)
+    vi.mocked(requiresDeterminedParcelRegime).mockReturnValue(true)
 
     mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
       expedienteId: 'exp-telemetry',
@@ -555,6 +555,12 @@ describe('NormativeAnswerPerf Telemetry', () => {
       conflicts: []
     })
 
+    mocks.abortSignal.mockReset()
+    mocks.abortSignal.mockResolvedValue({
+      data: [{ chunk_id: 'broad', texto: 'Retranqueo municipal', nombre_pdf: 'NNSS.pdf' }],
+      error: null,
+    })
+
     const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -571,6 +577,12 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(typeof telemetryObj.municipalCandidateCount).toBe('number')
     expect(typeof telemetryObj.municipalDocumentCount).toBe('number')
     expect(Array.isArray(telemetryObj.missingDataCodes)).toBe(true)
+    expect(telemetryObj.municipalRetrievalStrategy).toBe('municipal_scope')
+    expect(telemetryObj.municipalRetrievalAttemptCount).toBe(1)
+    expect(telemetryObj.municipalStrictCandidateCount).toBe(0)
+    expect(telemetryObj.municipalDocumentScopeCandidateCount).toBe(0)
+    expect(telemetryObj.municipalBroadCandidateCount).toBe(1)
+    expect(telemetryObj.municipalFallbackUsed).toBe(false)
   })
 
   it('V3-B: usa JSON mode, reintenta exactamente una vez y no repite retrieval/RPC', async () => {

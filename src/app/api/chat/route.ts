@@ -21,6 +21,7 @@ import {
   type NormativeSearchScope,
 } from '@/application/parcel-context/normativeSearchScope';
 import { resolveSupplementaryNormativeScope } from '@/application/parcel-context/supplementaryNormativeScope';
+import { retrieveMunicipalProgressively } from '@/application/chat/municipalProgressiveRetrieval';
 import {
   buildAnswerContract,
   buildMunicipalSafetyPrompt,
@@ -572,22 +573,57 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const rpcName = scopedRetrieval
       ? 'match_normativa_chunks_scoped'
       : 'match_normativa_chunks';
-    const rpcArguments = scopedRetrieval
-      ? {
+    let municipalRetrievalData: V1Chunk[] = [];
+    let municipalRetrievalError: unknown = null;
+    let municipalRetrievalStrategy: 'strict' | 'document_scope' | 'municipal_scope' | 'none' = 'none';
+    let municipalRetrievalAttemptCount = 0;
+    let municipalStrictCandidateCount = 0;
+    let municipalDocumentScopeCandidateCount = 0;
+    let municipalBroadCandidateCount = 0;
+    let municipalFallbackUsed = false;
+
+    if (scopedRetrieval) {
+      const progressiveRetrieval = await retrieveMunicipalProgressively(
+        {
           query_embedding,
           match_count: 8,
           filter_municipio_codigo: municipioCodigo,
           filter_document_names: normativeScope.documentNames ?? null,
           filter_ordinance: normativeScope.ordinance ?? null,
+          retrieveMunicipal: supplementaryScope.retrieveMunicipal,
+        },
+        async (rpcArguments) => {
+          const result = await supabase
+            .rpc('match_normativa_chunks_scoped', rpcArguments)
+            .abortSignal(signal);
+          return {
+            data: (Array.isArray(result.data) ? result.data : []) as V1Chunk[],
+            error: result.error,
+          };
         }
-      : {
+      );
+      municipalRetrievalData = progressiveRetrieval.data;
+      municipalRetrievalError = progressiveRetrieval.error;
+      municipalRetrievalStrategy = progressiveRetrieval.strategy;
+      municipalRetrievalAttemptCount = progressiveRetrieval.attemptCount;
+      municipalStrictCandidateCount = progressiveRetrieval.strictCandidateCount;
+      municipalDocumentScopeCandidateCount = progressiveRetrieval.documentScopeCandidateCount;
+      municipalBroadCandidateCount = progressiveRetrieval.broadCandidateCount;
+      municipalFallbackUsed = progressiveRetrieval.fallbackUsed;
+    } else if (supplementaryScope.retrieveMunicipal) {
+      const result = await supabase
+        .rpc(rpcName, {
           query_embedding,
           match_count: 8,
           filter_municipio_codigo: municipioCodigo,
-        };
-    const municipalRetrieval = supplementaryScope.retrieveMunicipal
-      ? await supabase.rpc(rpcName, rpcArguments).abortSignal(signal)
-      : { data: [], error: null };
+        })
+        .abortSignal(signal);
+      municipalRetrievalData = (Array.isArray(result.data) ? result.data : []) as V1Chunk[];
+      municipalRetrievalError = result.error;
+      municipalRetrievalStrategy = 'municipal_scope';
+      municipalRetrievalAttemptCount = 1;
+      municipalBroadCandidateCount = municipalRetrievalData.length;
+    }
     const t1_v1 = performance.now();
     const v1_time_ms = Math.round(t1_v1 - t0_v1);
     console.info('[ChatRpcPerf]', {
@@ -595,25 +631,27 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       rpcName: supplementaryScope.retrieveMunicipal ? rpcName : 'not_executed',
       rpcMs: v1_time_ms,
       requestAborted: signal.aborted,
-      status: municipalRetrieval.error ? 'error' : 'completed',
+      status: municipalRetrievalError ? 'error' : 'completed',
+      municipalRetrievalStrategy,
+      municipalRetrievalAttemptCount,
+      municipalFallbackUsed,
     });
 
-    if (municipalRetrieval.error) {
+    if (municipalRetrievalError) {
       console.error('Supabase RPC error:', {
         expedienteId,
         rpcName,
         requestAborted: signal.aborted,
         errorName:
-          typeof municipalRetrieval.error === 'object' && municipalRetrieval.error && 'name' in municipalRetrieval.error
-            ? String(municipalRetrieval.error.name)
+          typeof municipalRetrievalError === 'object' && municipalRetrievalError && 'name' in municipalRetrievalError
+            ? String(municipalRetrievalError.name)
             : 'SupabaseRpcError',
       });
       return NextResponse.json({ error: 'Error querying database' }, { status: 500 });
     }
 
-    const safeChunks = (Array.isArray(municipalRetrieval.data) ? municipalRetrieval.data : []) as V1Chunk[];
     const v1Candidates = mapV1Candidates(
-      safeChunks,
+      municipalRetrievalData,
       scopedRetrieval ? normativeScope : undefined
     );
 
@@ -888,6 +926,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         municipalScopedRetrieval: !!scopedRetrieval,
         municipalScopeDocumentNameCount: normativeScope?.documentNames?.length ?? 0,
         municipalScopeHasOrdinance: !!normativeScope?.ordinance,
+        municipalRetrievalStrategy,
+        municipalRetrievalAttemptCount,
+        municipalStrictCandidateCount,
+        municipalDocumentScopeCandidateCount,
+        municipalBroadCandidateCount,
+        municipalFallbackUsed,
         municipalScopeDiagnosticCode: (!normativeScope?.documentNames?.length && !normativeScope?.ordinance) ? 'NO_DOCUMENT_FILTER' :
           (normativeScope?.documentNames?.length && !normativeScope?.ordinance) ? 'DOCUMENT_FILTER_PRESENT' :
           (!normativeScope?.documentNames?.length && normativeScope?.ordinance) ? 'ORDINANCE_FILTER_PRESENT' : 'DOCUMENT_AND_ORDINANCE_FILTER_PRESENT',
