@@ -1,4 +1,6 @@
 import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
 
 export interface ReasonerRequest {
   systemPrompt: string
@@ -161,8 +163,34 @@ export class OpenAIReasonerProvider implements ReasonerProvider {
 }
 
 export function getReasonerProvider(): ReasonerProvider {
+  let provider: ReasonerProvider;
   if (process.env.URBANBRAIN_REASONER_PROVIDER === 'openai') {
-    return new OpenAIReasonerProvider();
+    provider = new OpenAIReasonerProvider();
+  } else {
+    provider = new DeepSeekReasonerProvider();
   }
-  return new DeepSeekReasonerProvider();
+
+  // Wrap the provider to capture the request if configured
+  if (process.env.NODE_ENV === 'development' && process.env.URBANBRAIN_CAPTURE_REASONER_REQUEST === '1') {
+    return {
+      generate: async (request: ReasonerRequest) => {
+        try {
+          const capturePath = path.join(process.cwd(), '.reasoner_request_capture.json');
+          // Only save safe fields, avoid including any tokens/keys that might somehow end up here
+          const safeRequest = {
+            systemPrompt: request.systemPrompt,
+            userPrompt: request.userPrompt,
+            timeoutMs: request.timeoutMs
+          };
+          fs.writeFileSync(capturePath, JSON.stringify(safeRequest, null, 2));
+          console.log(`[DEV] ReasonerRequest capturado en ${capturePath}`);
+        } catch (e) {
+          console.error(`[DEV] Error capturando ReasonerRequest:`, e);
+        }
+        return provider.generate(request);
+      }
+    };
+  }
+
+  return provider;
 }
