@@ -141,7 +141,7 @@ describe('structuredFactLines / describeContext (multizone)', () => {
     }
     const text = getPromptLines(context).join('\n')
     expect(text).toContain('Estado: validado por técnico')
-    expect(text).toContain('Procedencia: technician_confirmation')
+    expect(text).toContain('Procedencia: confirmación técnica')
     expect(text).toContain('Estado espacial: HOMOGÉNEO')
   })
 
