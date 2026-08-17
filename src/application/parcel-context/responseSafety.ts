@@ -488,6 +488,28 @@ function structuredFactLines(context: NormalizedParcelContext): string[] {
 
   const classification = facts.classification
   const category = facts.category
+
+  const formatCandidate = (cand: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = cand as any;
+    let str = `${c.label ?? c.value?.label ?? c.value?.code ?? 'Sin nombre'} (${c.value?.code ?? 'N/A'})`
+    if (c.parcelPercentage !== undefined) {
+      str += ` - ${c.parcelPercentage.toLocaleString('es-ES', { maximumFractionDigits: 2 })} % del área analizada`
+    }
+    return str
+  }
+
+  const classificationCandidates = classification.candidates && classification.candidates.length > 0
+    ? classification.candidates
+    : []
+
+  const categoryCandidates = category.candidates && category.candidates.length > 0
+    ? category.candidates
+    : []
+
+  const isPlural = categoryCandidates.length > 1 || classificationCandidates.length > 1
+  const isHomogeneous = !isPlural && (category.value || classification.value)
+
   const lines = [
     'HECHOS ESTRUCTURADOS DEL EXPEDIENTE',
     context.actionArea
@@ -501,11 +523,22 @@ function structuredFactLines(context: NormalizedParcelContext): string[] {
       : null,
     context.planningInstrument ? `- Instrumento: ${context.planningInstrument.value}.` : null,
     classification.value
-      ? `- Clasificacion general: ${classification.value.label} (${classification.value.code}). Estado: ${readableFactStatus(classification.status)}. Confianza: ${readableConfidence(classification.confidence)}. Procedencia: ${readableSource(classification.origin)}.`
+      ? `- Clasificación general${classificationCandidates.length > 1 ? ' predominante/efectiva' : ''}: ${classification.value.label} (${classification.value.code}). Estado: ${readableFactStatus(classification.status)}. Confianza: ${readableConfidence(classification.confidence)}. Procedencia: ${readableSource(classification.origin)}.`
+      : null,
+    classificationCandidates.length > 1
+      ? `  - Candidatos de clasificación detectados:\n${classificationCandidates.map(c => `    * ${formatCandidate(c)}`).join('\n')}`
       : null,
     isUsableUrbanisticFactStatus(category.status) && category.value
-      ? `- Categoria: ${category.value.label ?? category.value.code} (${category.value.code}). Estado: ${readableFactStatus(category.status)}. Confianza: ${readableConfidence(category.confidence)}. Procedencia: ${readableSource(category.origin)}.`
+      ? `- Categoría${categoryCandidates.length > 1 ? ' predominante/efectiva' : ''}: ${category.value.label ?? category.value.code} (${category.value.code}). Estado: ${readableFactStatus(category.status)}. Confianza: ${readableConfidence(category.confidence)}. Procedencia: ${readableSource(category.origin)}.`
       : null,
+    isUsableUrbanisticFactStatus(category.status) && categoryCandidates.length > 1
+      ? `  - Candidatos de categoría detectados (pluralidad territorial):\n${categoryCandidates.map(c => `    * ${formatCandidate(c)}`).join('\n')}`
+      : null,
+    isPlural
+      ? `- Estado espacial: HETEROGÉNEO (Pluralidad territorial detectada. La parcela/área contiene múltiples zonas. No aplicar los parámetros del candidato predominante a la totalidad sin soporte normativo explícito).`
+      : isHomogeneous
+        ? `- Estado espacial: HOMOGÉNEO (Zona única detectada).`
+        : null,
     context.planningArea ? `- Ambito/zona: ${context.planningArea.value}.` : null,
   ].filter((line): line is string => Boolean(line))
 
