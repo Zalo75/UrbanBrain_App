@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { validateGeneratedAnswer } from '@/application/parcel-context/responseSafety'
-import { classifyParcelQuestionScope, requiresDeterminedParcelRegime } from '@/application/parcel-context/applicabilityEngine'
+import { classifyParcelQuestionScope, requiresDeterminedParcelRegime, isConditionalViabilityQuestion } from '@/application/parcel-context/applicabilityEngine'
 
 const mocks = vi.hoisted(() => ({
   getExpedienteAccess: vi.fn(),
@@ -155,7 +155,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     mocks.getExpedienteAccess.mockResolvedValue({ ok: true, userId: 'user-telemetry', role: 'admin' })
     mocks.loadAuthorizedParcelInputs.mockResolvedValue({
       expedienteId: 'exp-telemetry',
-      expediente: { landClass: null, urbanPlanningZone: null },
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15002' },
       detected: {
         landClass: null,
         urbanisticFacts: {
@@ -216,9 +216,9 @@ describe('NormativeAnswerPerf Telemetry', () => {
     // Verify RPC calls
     const rpcCalls = mocks.rpc.mock.calls;
     // console.log("RPC CALLS: ", JSON.stringify(rpcCalls, null, 2))
-    
+
     // municipal is retrieved first. If retrieveMunicipal is false, it's not called.
-    // wait, in the test, does it call municipal? 
+    // wait, in the test, does it call municipal?
     // let's just assert the autonómico one for now
     const autonmicoRpcCall = rpcCalls.find(call => call[1]?.filter_municipio_codigo === '');
     expect(autonmicoRpcCall).toBeDefined();
@@ -227,7 +227,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
   it('2. V2=0 no implica loguear que no existen candidatos V1 suplementarios', async () => {
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     process.env.KNOWLEDGE_ENGINE = 'v2'
-    
+
     await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -237,7 +237,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     const v2LogCall = consoleLogSpy.mock.calls.find(call => String(call[0]).includes('KNOWLEDGE ENGINE RESPONSE MODE'))
     expect(v2LogCall).toBeDefined()
     const logOutput = String(v2LogCall![0])
-    
+
     expect(logOutput).toContain('- V1 Suplementario: 1') // We mocked 1 chunk from abortSignal
     expect(logOutput).toContain('V1_SUPLEMENTARIO_Y_MUNICIPAL')
     expect(logOutput).not.toContain('V1_FALLBACK')
@@ -252,7 +252,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
       reasons: ['La respuesta atribuye un parámetro de parcela sin régimen determinado.'],
       citations: []
     })
-    
+
     mocks.completionCreate.mockResolvedValueOnce({
       choices: [{ message: { content: 'CONCLUSIÓN\nEl régimen se aplica, la edificabilidad es 5.0.' } }], // Invalid, attributes without regime
     })
@@ -287,13 +287,264 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(allInfoLogs).not.toContain('CONCLUSIÓN') // LLM Response text
   })
 
+  it('5. V3-A: Ames SR + category pendiente + 16 candidates: LLM SE EJECUTA para parámetro concreto', async () => {
+    vi.mocked(classifyParcelQuestionScope).mockReturnValueOnce('parameters')
+    vi.mocked(requiresDeterminedParcelRegime).mockReturnValueOnce(true)
+    vi.mocked(isConditionalViabilityQuestion).mockReturnValueOnce(false)
+    const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
+    vi.mocked(evaluateApplicability).mockReturnValue({
+      status: 'PARCIAL',
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      rejected: [],
+      review: [],
+      missingData: ['categoría'],
+      conflicts: [],
+      warnings: [],
+      canAnswerConcreteParameters: false,
+      canAnswerConditionalViability: true
+    })
+    mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
+      expedienteId: 'exp-telemetry',
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15002' },
+      detected: {
+        landClass: null,
+        urbanisticFacts: {
+          classification: {
+            status: 'automatic_confirmed',
+            value: { code: 'SR', label: 'Suelo rústico' },
+            origin: 'implicit_planning_background',
+            evidence: [],
+            confidence: 'high',
+            discrepancies: []
+          }
+        },
+        actionAreaSelection: null,
+        municipalityCode: '15002',
+        municipalityName: 'Ames',
+        planningInstrument: 'PGOM'
+      },
+      constraints: [],
+      userMessages: [],
+      conflicts: []
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Cuánto retranqueo hay que dejar en esta parcela?' }),
+    }))
+    expect(response.status).toBe(200)
+
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: any) => call[0] === '[NormativeAnswerPerf]')
+    expect(telemetryCall).toBeDefined()
+    const telemetryObj = telemetryCall![1]
+
+    expect(telemetryObj.concreteParameterRequested).toBe(true)
+    expect(telemetryObj.canAnswerConcreteParameters).toBe(false)
+    expect(telemetryObj.missingDataCodes.length).toBeGreaterThan(0)
+
+    // V3-A expectations:
+    expect(telemetryObj.reasonerAllowedWithMissingFacts).toBe(true)
+    expect(telemetryObj.mustAbstainBeforeLlm).toBe(false)
+    expect(telemetryObj.llmExecuted).toBe(true)
+  })
+
+  it('5B. V3-A: Ames retranqueo + categoría pendiente + LLM afirma parámetro -> Safety rechaza', async () => {
+    vi.mocked(classifyParcelQuestionScope).mockReturnValue('parameters')
+    vi.mocked(requiresDeterminedParcelRegime).mockReturnValue(true)
+    vi.mocked(isConditionalViabilityQuestion).mockReturnValue(false)
+    const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
+    vi.mocked(evaluateApplicability).mockReturnValue({
+      status: 'PARCIAL',
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      rejected: [],
+      review: [],
+      missingData: ['categoría'],
+      conflicts: [],
+      warnings: [],
+      canAnswerConcreteParameters: false,
+      canAnswerConditionalViability: true
+    })
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expedienteId: 'exp-telemetry',
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15002' },
+      detected: {
+        landClass: null,
+        urbanisticFacts: {
+          classification: {
+            status: 'automatic_confirmed',
+            value: { code: 'SR', label: 'Suelo rústico' },
+            origin: 'implicit_planning_background',
+            evidence: [],
+            confidence: 'high',
+            discrepancies: []
+          }
+        },
+        actionAreaSelection: null,
+        municipalityCode: '15002',
+        municipalityName: 'Ames',
+        planningInstrument: 'PGOM'
+      },
+      constraints: [],
+      userMessages: [],
+      conflicts: []
+    })
+    // Mock de validación: Safety rechaza la afirmación de parámetro porque falta categoría
+    const { validateGeneratedAnswer } = await import('@/application/parcel-context/responseSafety');
+    vi.mocked(validateGeneratedAnswer).mockReturnValueOnce({
+      valid: false,
+      reasons: ['La respuesta atribuye un parámetro de parcela sin régimen determinado.'],
+      citations: [1]
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Cuánto retranqueo hay que dejar en esta parcela?' }),
+    }))
+    expect(response.status).toBe(200)
+
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: any) => call[0] === '[NormativeAnswerPerf]')
+    expect(telemetryCall).toBeDefined()
+    const telemetryObj = telemetryCall![1]
+
+    expect(telemetryObj.llmExecuted).toBe(true)
+    expect(telemetryObj.validationValid).toBe(false)
+    expect(telemetryObj.finalDecision).toBe('abstain')
+  })
+
+  it('5C. V3-A: Ames retranqueo + categoría pendiente + LLM responde condicionado sin atribuir -> Safety acepta', async () => {
+    vi.mocked(classifyParcelQuestionScope).mockReturnValue('parameters')
+    vi.mocked(requiresDeterminedParcelRegime).mockReturnValue(true)
+    vi.mocked(isConditionalViabilityQuestion).mockReturnValue(false)
+    const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
+    vi.mocked(evaluateApplicability).mockReturnValue({
+      status: 'PARCIAL',
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      rejected: [],
+      review: [],
+      missingData: ['categoría'],
+      conflicts: [],
+      warnings: [],
+      canAnswerConcreteParameters: false,
+      canAnswerConditionalViability: true
+    })
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expedienteId: 'exp-telemetry',
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15002' },
+      detected: {
+        landClass: null,
+        urbanisticFacts: {
+          classification: {
+            status: 'automatic_confirmed',
+            value: { code: 'SR', label: 'Suelo rústico' },
+            origin: 'implicit_planning_background',
+            evidence: [],
+            confidence: 'high',
+            discrepancies: []
+          }
+        },
+        actionAreaSelection: null,
+        municipalityCode: '15002',
+        municipalityName: 'Ames',
+        planningInstrument: 'PGOM'
+      },
+      constraints: [],
+      userMessages: [],
+      conflicts: []
+    })
+    // Mock de validación: Safety acepta la respuesta condicionada sin atribución definitiva
+    const { validateGeneratedAnswer } = await import('@/application/parcel-context/responseSafety');
+    vi.mocked(validateGeneratedAnswer).mockReturnValueOnce({
+      valid: true,
+      reasons: [],
+      citations: [1]
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Cuánto retranqueo hay que dejar en esta parcela?' }),
+    }))
+    expect(response.status).toBe(200)
+
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: any) => call[0] === '[NormativeAnswerPerf]')
+    expect(telemetryCall).toBeDefined()
+    const telemetryObj = telemetryCall![1]
+
+    expect(telemetryObj.llmExecuted).toBe(true)
+    expect(telemetryObj.validationValid).toBe(true)
+    expect(telemetryObj.finalDecision).toBe('answer')
+  })
+
+  it('5D. V3-A: Ames SR + category pendiente + 16 candidates: LLM SE EJECUTA para viabilidad condicionada', async () => {
+    vi.mocked(classifyParcelQuestionScope).mockReturnValueOnce('viability')
+    vi.mocked(requiresDeterminedParcelRegime).mockReturnValueOnce(false)
+    vi.mocked(isConditionalViabilityQuestion).mockReturnValueOnce(true)
+    const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
+    vi.mocked(evaluateApplicability).mockReturnValue({
+      status: 'PARCIAL',
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      rejected: [],
+      review: [],
+      missingData: ['categoría'],
+      conflicts: [],
+      warnings: [],
+      canAnswerConcreteParameters: false,
+      canAnswerConditionalViability: true
+    })
+    mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
+      expedienteId: 'exp-telemetry',
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15002' },
+      detected: {
+        landClass: null,
+        urbanisticFacts: {
+          classification: {
+            status: 'automatic_confirmed',
+            value: { code: 'SR', label: 'Suelo rústico' },
+            origin: 'implicit_planning_background',
+            evidence: [],
+            confidence: 'high',
+            discrepancies: []
+          }
+        },
+        actionAreaSelection: null,
+        municipalityCode: '15002',
+        municipalityName: 'Ames',
+        planningInstrument: 'PGOM'
+      },
+      constraints: [],
+      userMessages: [],
+      conflicts: []
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Se puede construir en esta parcela?' }),
+    }))
+    expect(response.status).toBe(200)
+
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: any) => call[0] === '[NormativeAnswerPerf]')
+    expect(telemetryCall).toBeDefined()
+    const telemetryObj = telemetryCall![1]
+
+    expect(telemetryObj.concreteParameterRequested).toBe(false)
+    expect(telemetryObj.canAnswerConcreteParameters).toBe(false)
+    expect(telemetryObj.missingDataCodes.length).toBeGreaterThan(0)
+
+    expect(telemetryObj.reasonerAllowedWithMissingFacts).toBe(true)
+    expect(telemetryObj.mustAbstainBeforeLlm).toBe(false)
+    expect(telemetryObj.llmExecuted).toBe(true)
+  })
+
   it('6. Valdoviño: parámetro concreto (retranqueo) con SNR/SNRSC y normativa municipal', async () => {
     vi.mocked(classifyParcelQuestionScope).mockReturnValueOnce('parameters')
     vi.mocked(requiresDeterminedParcelRegime).mockReturnValueOnce(true)
 
     mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
       expedienteId: 'exp-telemetry',
-      expediente: { landClass: null, urbanPlanningZone: null },
+      expediente: { landClass: null, urbanPlanningZone: null, municipio: '15087' },
       detected: {
         landClass: null,
         urbanisticFacts: {
@@ -305,7 +556,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
             confidence: 'high',
             discrepancies: []
           },
-          category: { 
+          category: {
             status: 'automatic_confirmed',
             value: { code: 'SNRSC', label: 'SNR de protección de costas' },
             origin: 'implicit_planning_background',
@@ -328,7 +579,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Cuánto retranqueo hay que dejar en esta parcela?' }),
     }))
-    
+
     expect(response.status).toBe(200)
 
     const telemetryCall = consoleInfoSpy.mock.calls.find((call: any) => call[0] === '[NormativeAnswerPerf]')

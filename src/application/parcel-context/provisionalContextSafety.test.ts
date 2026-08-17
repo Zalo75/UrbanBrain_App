@@ -114,7 +114,7 @@ describe('provisional parcel context safety', () => {
       'abstain'
     )
 
-    expect(prompt).toContain('previous_official')
+    expect(prompt).toContain('último contexto oficial válido')
     expect(prompt).toContain('Catastro esta tardando mas de lo esperado.')
     expect(context.pendingValidation.join(' ')).toContain('2026-07-13T10:00:00.000Z')
     expect(contract.confidence).toBeLessThanOrEqual(0.4)

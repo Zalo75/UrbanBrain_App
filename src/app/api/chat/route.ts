@@ -833,26 +833,39 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     }
     retrievalApplicability = layeredRetrievalApplicability;
 
-    const regimeUnavailable =
-      applicability.status === 'CONFLICTIVO' ||
-      applicability.status === 'NO_DETERMINADO' ||
-      !applicability.canAnswerConcreteParameters;
-    const hasReviewableRegimeEvidence =
-      questionScope === 'regime' &&
-      applicability.status === 'PARCIAL' &&
-      applicability.review.length > 0;
     const hasConditionalRegimeEvidence =
       conditionalViabilityRequested &&
       applicability.canAnswerConditionalViability === true &&
       answerCandidates.length > 0;
+
+    const hasReviewableRegimeEvidence =
+      questionScope === 'regime' &&
+      applicability.status === 'PARCIAL' &&
+      applicability.review.length > 0;
+
+    const hardStopNoCandidates = answerCandidates.length === 0;
+    const hardStopRetrievalConflict = retrievalApplicability.status === 'CONFLICTIVO';
+    const hardStopTerritorialConflict = applicability.status === 'CONFLICTIVO';
+
+    // Condicional viabilidad es un caso especial: si se pregunta si se puede construir,
+    // y no hay *ninguna* evidencia que hable de viabilidad general (ej. 0 chunks aplicables
+    // o aplicabilidad totalmente indeterminada para viabilidad), entonces es un hard-stop.
+    const hardStopNoViabilityEvidence = conditionalViabilityRequested && !hasConditionalRegimeEvidence;
+
     const mustAbstain =
-      answerCandidates.length === 0 ||
-      retrievalApplicability.status === 'CONFLICTIVO' ||
-      (conditionalViabilityRequested && !hasConditionalRegimeEvidence) ||
-      (questionScope === 'regime' &&
-        regimeUnavailable &&
-        !hasReviewableRegimeEvidence &&
-        !hasConditionalRegimeEvidence);
+      hardStopNoCandidates ||
+      hardStopRetrievalConflict ||
+      hardStopTerritorialConflict ||
+      hardStopNoViabilityEvidence;
+
+    const missingDeterminingFacts = applicability.missingData.length > 0;
+    const reasonerAllowedWithMissingFacts = !mustAbstain && missingDeterminingFacts;
+
+    const hardStopReasonCodes: string[] = [];
+    if (hardStopNoCandidates) hardStopReasonCodes.push('NO_CANDIDATES');
+    if (hardStopRetrievalConflict) hardStopReasonCodes.push('RETRIEVAL_CONFLICT');
+    if (hardStopTerritorialConflict && !hardStopRetrievalConflict) hardStopReasonCodes.push('TERRITORIAL_CONFLICT');
+    if (hardStopNoViabilityEvidence) hardStopReasonCodes.push('NO_VIABILITY_EVIDENCE');
 
     function logNormativeAnswerPerf(
       finalDecision: string,
@@ -894,6 +907,8 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         validationReasonCodes,
         missingDataCodes,
         finalDecision,
+        reasonerAllowedWithMissingFacts,
+        hardStopReasonCodes,
         applicableCount: applicability.applicable.length,
         reviewCount: applicability.review.length,
         rejectedCount: applicability.rejected.length,
@@ -1016,10 +1031,6 @@ ${usedV2 ? v2Citas : 'N/A'}
     const completion = await openai.chat.completions.create(completionRequest, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
     const t1_llm = performance.now();
     v2LLMTime = Math.round(t1_llm - t0_llm);
-
-    if (usedV2 && process.env.KNOWLEDGE_ENGINE === 'v2') {
-       console.log(`Tiempo LLM (V2): ${v2LLMTime}ms\n`);
-    }
 
     let answer = sanitizeTechnicalPlaceholders(completion.choices[0].message.content || '');
     const validation = validateGeneratedAnswer(

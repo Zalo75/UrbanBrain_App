@@ -675,6 +675,23 @@ ESTADO DE APLICABILIDAD: ${applicability.status}
 
 CONTEXTO DE PARCELA
 ${describeContext(context)}
+${
+  applicability.missingData.length > 0
+    ? `\nLIMITACIONES DEL CONTEXTO\n${applicability.missingData
+        .map((d) => `- dato pendiente: ${d}`)
+        .join('\n')}
+
+REGLA:
+Estos datos pendientes impiden atribuir a la parcela parámetros o conclusiones definitivas que dependan de ellos.
+Sin embargo:
+- explica lo que las fuentes recuperadas sí permiten afirmar;
+- formula como condicional cualquier determinación cuya aplicabilidad dependa del dato pendiente;
+- indica qué dato falta para cerrar la conclusión;
+- no inventes alternativas que no aparezcan en las fuentes;
+- no inventes cifras;
+- no concluyas que un parámetro es aplicable a la parcela si el contexto no permite acreditarlo.`
+    : ''
+}
 
 FORMATO
 CONCLUSIÓN
@@ -828,7 +845,7 @@ function isStructuredFactClaim(claim: string, context?: NormalizedParcelContext)
 }
 
 function isNormativeClaim(claim: string) {
-  return /\b(?:debe|deber[aá]|exige|permite|proh[ií]be|m[aá]xim[oa]|m[ií]nim[oa]|obligatori[oa]|edificabilidad|ocupaci[oó]n|altura|retranque)\b/i.test(
+  return /\b(?:debe|deber[aá]|exige|permite|proh[ií]be|m[aá]xim[oa]|m[ií]nim[oa]|obligatori[oa]|edificabilidad|ocupaci[oó]n|altura|retranqueos?)\b/i.test(
     claim
   )
 }
