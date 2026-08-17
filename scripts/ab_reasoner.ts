@@ -2,7 +2,7 @@ import * as dotenv from 'dotenv';
 import path from 'path';
 
 // Load environment variables for local testing
-dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import { DeepSeekReasonerProvider, OpenAIReasonerProvider, type ReasonerRequest } from '../src/application/chat/reasonerProvider';
 import { parseReasonerOutput, validateReasonerOutput } from '../src/application/parcel-context/responseSafety';
@@ -21,7 +21,7 @@ async function runHarness() {
     requestPath = args[requestArgIndex + 1];
   }
 
-  let loadedRequest: ReasonerRequest;
+  let loadedRequest: ReasonerRequest | undefined;
 
   if (requestPath) {
     try {
@@ -51,11 +51,7 @@ async function runHarness() {
     }
 
     // Stop here to avoid external API calls in this phase
-    console.log('\n▶ JSON cargado exitosamente. API calls omitidas para este test.');
-    console.log('\n==================================================');
-    console.log('HARNESS COMPLETADO (DRY RUN)');
-    console.log('==================================================\n');
-    return;
+    console.log('\n▶ JSON cargado exitosamente. Ejecutando harness...');
   }
 
   if (!process.env.DEEPSEEK_API_KEY) {
@@ -100,22 +96,29 @@ Pregunta: ¿Cuánto retranqueo debo dejar?
   };
 
   const providerConstructors = [
-    DeepSeekReasonerProvider,
-    OpenAIReasonerProvider // Relies on URBANBRAIN_OPENAI_REASONER_MODEL or defaults to gpt-4o
+    OpenAIReasonerProvider
   ];
 
   for (const ProviderClass of providerConstructors) {
     console.log(`\n▶ Evaluando Provider: ${ProviderClass.name}`);
     try {
       const provider = new ProviderClass();
-      const result = await provider.generate(request);
+      const result = await provider.generate(loadedRequest || request);
 
       console.log('  Métricas de ejecución:');
       console.log(`  - Modelo: ${result.model}`);
       console.log(`  - Latencia: ${result.latencyMs}ms`);
-      console.log(`  - Input Tokens: ${result.inputTokens ?? 'N/A'} (Cached: ${result.cachedInputTokens ?? 'N/A'})`);
-      console.log(`  - Output Tokens: ${result.outputTokens ?? 'N/A'} (Reasoning: ${result.reasoningTokens ?? 'N/A'})`);
+      console.log(`  - Input Tokens: ${result.inputTokens ?? 'N/A'}`);
+      console.log(`  - Cached Input Tokens: ${result.cachedInputTokens ?? 'N/A'}`);
+      console.log(`  - Output Tokens: ${result.outputTokens ?? 'N/A'}`);
+      console.log(`  - Reasoning Tokens: ${result.reasoningTokens ?? 'N/A'}`);
       console.log(`  - Total Tokens: ${result.totalTokens ?? 'N/A'}`);
+
+      console.log('\n==================================================');
+      console.log('1. ReasonerOutput RAW');
+      console.log('==================================================');
+      console.log(result.rawContent);
+      console.log('==================================================\n');
 
       // Validar salida
       const parsed = parseReasonerOutput(result.rawContent);
@@ -127,9 +130,9 @@ Pregunta: ¿Cuánto retranqueo debo dejar?
 
       // Mock minimal required objects for validation
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockSources = [{ id: '1', docId: '1', sourceId: '1', layer: 'municipal', content: 'mock' } as any];
+      const mockSources = Array.from({length: 20}, (_, i) => ({ id: `${i+1}`, docId: '1', sourceId: '1', layer: 'municipal', content: 'mock' } as any));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mockApplicability = { status: 'DETERMINADO', scope: 'municipal' } as any;
+      const mockApplicability = { status: 'PARCIAL', scope: 'municipal' } as any;
 
       const validation = validateReasonerOutput(parsed, mockSources, mockApplicability);
 
@@ -141,7 +144,7 @@ Pregunta: ¿Cuánto retranqueo debo dejar?
       console.log('\n  Claims Válidos:');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       validation.validClaims.forEach((c: any) => {
-        console.log(`  * [${c.type}] ${c.text} (Aplica: ${c.appliesToParcel})`);
+        console.log(`  * [${c.type}] ${c.text} (Refs: ${c.sourceRefs.join(', ')}) (Aplica: ${c.appliesToParcel})`);
       });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
