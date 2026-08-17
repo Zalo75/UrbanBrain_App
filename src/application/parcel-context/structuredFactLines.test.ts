@@ -25,7 +25,7 @@ describe('structuredFactLines / describeContext (multizone)', () => {
       urbanisticFacts: {
         classification: {
           value: { code: 'SNR', label: 'Suelo de Núcleo Rural' },
-          status: 'automatic_confirmed',
+          status: 'conflict',
           confidence: 'high',
           origin: 'spatial_intersection',
           evidence: [],
@@ -35,7 +35,7 @@ describe('structuredFactLines / describeContext (multizone)', () => {
         },
         category: {
           value: { code: 'SNRC', label: 'Núcleo rural común' },
-          status: 'automatic_confirmed',
+          status: 'conflict',
           confidence: 'high',
           origin: 'spatial_intersection',
           candidates: [
@@ -165,7 +165,7 @@ describe('structuredFactLines / describeContext (multizone)', () => {
       }
     }
     const text = getPromptLines(context).join('\n')
-    expect(text).not.toContain('Categoría')
+    expect(text).toContain('Estado: con información contradictoria')
   })
 
   it('6 & 7. Area Selection vs Whole Parcel', () => {

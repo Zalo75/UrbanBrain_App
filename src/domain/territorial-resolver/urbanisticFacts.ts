@@ -133,7 +133,8 @@ export function urbanisticFactsFromClassificationResolution(
   const classificationStatus = factStatus(resolution, Boolean(isOfficial && candidate?.classification.code))
   const classificationAvailable =
     classificationStatus === 'automatic_confirmed' ||
-    classificationStatus === 'automatic_probable'
+    classificationStatus === 'automatic_probable' ||
+    classificationStatus === 'conflict'
   const classificationCandidates = resolution?.candidates
     ?.filter((c) => c.kind === 'official_classification' && c.classification?.code)
     .map((c) => ({
@@ -160,7 +161,8 @@ export function urbanisticFactsFromClassificationResolution(
     isOfficial &&
     candidate?.classification.categoryCode &&
       (classificationStatus === 'automatic_confirmed' ||
-        classificationStatus === 'automatic_probable')
+        classificationStatus === 'automatic_probable' ||
+        classificationStatus === 'conflict')
   )
   const categoryStatus: UrbanisticFactStatus = categoryAvailable
     ? classificationStatus

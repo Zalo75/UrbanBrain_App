@@ -48,7 +48,7 @@ function confidenceLabel(confidence: number) {
 }
 
 function isUsableUrbanisticFactStatus(status?: string) {
-  return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated'
+  return status === 'automatic_confirmed' || status === 'automatic_probable' || status === 'technician_validated' || status === 'conflict'
 }
 
 function isConfirmedUrbanisticFactStatus(status?: string) {
