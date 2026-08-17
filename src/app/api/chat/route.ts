@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI, TaskType } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import { getReasonerProvider, type ReasonerRequest } from '@/application/chat/reasonerProvider';
 import { db } from '@/infrastructure/db/client';
 import { chatMessages } from '@/infrastructure/db/schema';
 import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository';
@@ -29,7 +30,6 @@ import {
   buildSafeAbstention,
   buildStructuredParcelFactAnswer,
   buildDeterministicMissingFacts,
-  sanitizeTechnicalPlaceholders,
   parseReasonerOutput,
   validateReasonerOutput,
   type ClaimValidationResult,
@@ -1103,31 +1103,22 @@ ${usedV2 ? v2Citas : 'N/A'}
 
     const maxRetries = 1;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const t0_llm = performance.now();
-      const completionRequest = {
-        model: 'deepseek-v4-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content:
-              usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
-                ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
-                : attempt > 0 ? `Tu respuesta anterior fue vacía o un JSON inválido. Por favor, corrige el formato y responde OBLIGATORIAMENTE con el schema JSON provisto.\n\nPregunta: ${message}` : message,
-          },
-        ],
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' as const },
-      } satisfies Parameters<typeof openai.chat.completions.create>[0] & {
-        thinking: { type: 'disabled' };
+      const reasonerRequest: ReasonerRequest = {
+        systemPrompt,
+        userPrompt: usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
+          ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
+          : attempt > 0 ? `Tu respuesta anterior fue vacía o un JSON inválido. Por favor, corrige el formato y responde OBLIGATORIAMENTE con el schema JSON provisto.\n\nPregunta: ${message}` : message,
+        signal,
+        timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
       };
 
-      const completion = await openai.chat.completions.create(completionRequest, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
-      const t1_llm = performance.now();
-      v2LLMTime = Math.round(t1_llm - t0_llm);
+      const provider = getReasonerProvider();
+      const result = await provider.generate(reasonerRequest);
 
-      const rawContent = completion.choices[0].message.content || '';
+      v2LLMTime = result.latencyMs;
+
+      // Note: Here we could add telemetry for result.inputTokens, result.outputTokens, etc.
+      const rawContent = result.rawContent;
 
       if (!rawContent.trim()) {
         reasonerParseFailureCode = 'EMPTY_CONTENT';
