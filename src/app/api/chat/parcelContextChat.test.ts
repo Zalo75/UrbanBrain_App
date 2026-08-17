@@ -691,7 +691,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks_scoped',
       expect.objectContaining({
-        filter_municipio_codigo: null,
+        filter_municipio_codigo: '',
         filter_document_names: expect.arrayContaining(['LSG CONSOLIDADA ENERO 2026- V2.pdf']),
       })
     )
@@ -751,7 +751,7 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(mocks.rpc).toHaveBeenCalledWith(
       'match_normativa_chunks_scoped',
       expect.objectContaining({
-        filter_municipio_codigo: null,
+        filter_municipio_codigo: '',
         filter_document_names: expect.arrayContaining(['Lei_8_2013_Estradas_Galicia.pdf']),
       })
     )

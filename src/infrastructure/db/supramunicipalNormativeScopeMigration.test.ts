@@ -69,7 +69,8 @@ describe('supramunicipal normativa retrieval migration', () => {
   it('documenta null como ausencia de filtro y no convierte el string vacío en sentinel', () => {
     expect(migration).toContain('null disables municipal filtering for supramunicipal retrieval')
     expect(migration).not.toMatch(/btrim\(filter_municipio_codigo\)\s*=\s*''/)
-    expect(chatRoute).not.toMatch(/filter_municipio_codigo\s*:\s*''/)
+    // Por el hotfix de producción de 8K-D, route.ts envía '' en lugar de null
+    expect(chatRoute).toMatch(/filter_municipio_codigo\s*:\s*''/)
   })
 
   it('conserva la RPC server-only y sin cambios de firma', () => {
