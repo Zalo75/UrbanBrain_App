@@ -90,6 +90,11 @@ function claimIsMateriallyViable(claim: ReasonerClaim) {
   return VIABILITY_PATTERN.test(claim.text) && !SANCTION_PATTERN.test(claim.text)
 }
 
+function isSpeculativeHypothesis(claim: ReasonerClaim) {
+  const text = normalize(claim.text)
+  return /\b(?:si\s+(?:se\s+trata|existe|es|la\s+parcela|el\s+ambito|suelo)|en\s+(?:el\s+)?supuesto|en\s+(?:el\s+)?caso\s+de\s+(?:que|tratarse)|dependera\s+de|podria|salvo\s+que)\b/.test(text)
+}
+
 export function classifyQuestionIntent(
   question: string,
   questionScope: ParcelQuestionScope,
@@ -140,6 +145,9 @@ export function evaluateClaimRelevance(
       claim.type === 'normative_conditional' ||
       claim.type === 'normative_fact'
     ) {
+      if ((claim.type === 'normative_conditional' || claim.appliesToParcel === 'conditional') && isSpeculativeHypothesis(claim)) {
+        return { code: 'SUPPORTING', role: 'SUPPORTING', reason: 'speculative-conditional' }
+      }
       return { code: 'DIRECT', role: 'PRIMARY', reason: 'requested-parameter-applicable' }
     }
     return { code: 'SUPPORTING', role: 'SUPPORTING', reason: 'requested-parameter-support' }
@@ -156,6 +164,9 @@ export function evaluateClaimRelevance(
       return { code: 'DIRECT', role: 'PRIMARY', reason: 'authorized-viability-conclusion' }
     }
     if (claim.type === 'normative_conditional' && applicable && claimIsMateriallyViable(claim)) {
+      if (isSpeculativeHypothesis(claim)) {
+        return { code: 'SUPPORTING', role: 'SUPPORTING', reason: 'speculative-viability' }
+      }
       return { code: 'DIRECT', role: 'PRIMARY', reason: 'conditional-viability-evidence' }
     }
     if ((claim.type === 'normative_fact' || claim.type === 'territorial_fact') && applicable && claimIsMateriallyViable(claim)) {
@@ -238,8 +249,13 @@ function parameterFallback(question: string) {
   return `No puede fijarse todavía ${label} aplicable a esta parcela con seguridad.`
 }
 
-function viabilityFallback(missingFacts: string[]) {
+function viabilityFallback(missingFacts: string[], context?: NormalizedParcelContext) {
   void missingFacts
+  const classification = context?.urbanisticFacts?.classification
+
+  if (classification?.status === 'automatic_confirmed' || classification?.status === 'technician_validated') {
+    return `No puede confirmarse todavía la edificabilidad de la parcela de forma categórica. Su clasificación como ${classification.value?.label?.toLowerCase() ?? 'suelo'} está determinada, pero falta concretar la categoría o regulación específica necesaria para determinar los usos y condiciones aplicables.`
+  }
   return 'La viabilidad urbanística de esta parcela no puede confirmarse todavía de forma categórica porque falta concretar el régimen urbanístico aplicable.'
 }
 
@@ -317,7 +333,7 @@ export function composeSemanticAnswer(
       fallbackText = parameterFallback(question)
     } else if (questionIntent === 'parcel_viability' && applicability.canAnswerConditionalViability) {
       semanticFallbackReason = 'CONDITIONAL_VIABILITY_ONLY'
-      fallbackText = viabilityFallback(deterministicMissingFacts)
+      fallbackText = viabilityFallback(deterministicMissingFacts, context)
     } else {
       semanticFallbackReason = 'NO_RELEVANT_PRIMARY_CLAIM'
       fallbackText = limitationClaims[0] ? stripInlineCitations(limitationClaims[0].text) : 'La evidencia recuperada no permite cerrar una respuesta material a la pregunta.'
@@ -325,14 +341,20 @@ export function composeSemanticAnswer(
   }
 
   const lines: string[] = ['CONCLUSIÓN']
-  if (primaryClaims.length > 0) primaryClaims.forEach((claim) => lines.push(renderClaim(claim)))
-  else if (fallbackText) lines.push(`- ${fallbackText}`)
+  if (primaryClaims.length > 0) {
+    primaryClaims.forEach((claim) => lines.push(renderClaim(claim)))
+    if (deterministicMissingFacts.length > 0 && limitationClaims.length > 0) {
+      lines.push(renderClaim(limitationClaims[0]))
+    }
+  } else if (fallbackText) lines.push(`- ${fallbackText}`)
 
   if (primaryClaims.length === 0 && limitationClaims.length > 0 && semanticFallbackReason === 'NO_RELEVANT_PRIMARY_CLAIM') {
     limitationClaims.slice(1).forEach((claim) => lines.push(renderClaim(claim)))
   }
 
-  const contextClaims = primaryClaims.length === 0 ? [...supportClaims, ...limitationClaims] : supportClaims
+  const contextClaims = primaryClaims.length === 0
+    ? [...supportClaims, ...limitationClaims]
+    : [...supportClaims, ...limitationClaims.slice(deterministicMissingFacts.length > 0 ? 1 : 0)]
   if (contextClaims.length > 0) {
     lines.push('', 'FUNDAMENTO')
     contextClaims.forEach((claim) => {
