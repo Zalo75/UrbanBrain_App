@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { validateGeneratedAnswer } from '@/application/parcel-context/responseSafety'
 import { classifyParcelQuestionScope, requiresDeterminedParcelRegime, isConditionalViabilityQuestion } from '@/application/parcel-context/applicabilityEngine'
 
 const mocks = vi.hoisted(() => ({
@@ -60,7 +59,7 @@ vi.mock('@/application/parcel-context/applicabilityEngine', async (importOrigina
     ...actual,
     evaluateApplicability: vi.fn(() => ({
       status: 'PARCIAL',
-      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' }],
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "texto", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }), title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' }],
       rejected: [],
       review: [],
       missingData: [],
@@ -185,7 +184,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
       error: null,
     })
     mocks.completionCreate.mockResolvedValue({
-      choices: [{ message: { content: 'CONCLUSIÓN\nEl régimen se aplica. [Fuente 1]' } }],
+      choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] }).mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: '1', type: 'normative_conditional', text: 'El régimen se aplica', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }) } }],
     })
   })
 
@@ -247,14 +246,9 @@ describe('NormativeAnswerPerf Telemetry', () => {
   })
 
   it('3. validation failure produce: validationValid=false, validationReasonCodes sanitizados, finalDecision=abstain', async () => {
-    vi.mocked(validateGeneratedAnswer).mockReturnValueOnce({
-      valid: false,
-      reasons: ['La respuesta atribuye un parámetro de parcela sin régimen determinado.'],
-      citations: []
-    })
 
     mocks.completionCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'CONCLUSIÓN\nEl régimen se aplica, la edificabilidad es 5.0.' } }], // Invalid, attributes without regime
+      choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] }).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: '1', type: 'parcel_conclusion', text: 'El régimen se aplica', sourceRefs: [999], appliesToParcel: true, numericTokens: [] }], missingFacts: [] }) } }],
     })
 
     await POST(new NextRequest('http://localhost/api/chat', {
@@ -271,7 +265,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(telemetryObj.finalDecision).toBe('abstain')
     expect(Array.isArray(telemetryObj.validationReasonCodes)).toBe(true)
     expect(telemetryObj.validationReasonCodes.length).toBeGreaterThan(0)
-    expect(telemetryObj.validationReasonCodes).toContain('ATTRIBUTED_PARAMETER_WITHOUT_REGIME')
+    expect(telemetryObj.validationReasonCodes).toContain('NON_EXISTENT_SOURCE')
   })
 
   it('5. ningún log contiene pregunta, respuesta o chunks', async () => {
@@ -294,7 +288,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
     vi.mocked(evaluateApplicability).mockReturnValue({
       status: 'PARCIAL',
-      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "texto", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }), title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
       rejected: [],
       review: [],
       missingData: ['categoría'],
@@ -350,13 +344,14 @@ describe('NormativeAnswerPerf Telemetry', () => {
   })
 
   it('5B. V3-A: Ames retranqueo + categoría pendiente + LLM afirma parámetro -> Safety rechaza', async () => {
+    mocks.completionCreate.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] }).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: '1', type: 'parcel_conclusion', text: 'El retranqueo es 5m', sourceRefs: [1], appliesToParcel: true, numericTokens: ['5'] }], missingFacts: [] }) } }] });
     vi.mocked(classifyParcelQuestionScope).mockReturnValue('parameters')
     vi.mocked(requiresDeterminedParcelRegime).mockReturnValue(true)
     vi.mocked(isConditionalViabilityQuestion).mockReturnValue(false)
     const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
     vi.mocked(evaluateApplicability).mockReturnValue({
       status: 'PARCIAL',
-      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "texto", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }), title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
       rejected: [],
       review: [],
       missingData: ['categoría'],
@@ -390,13 +385,6 @@ describe('NormativeAnswerPerf Telemetry', () => {
       conflicts: []
     })
     // Mock de validación: Safety rechaza la afirmación de parámetro porque falta categoría
-    const { validateGeneratedAnswer } = await import('@/application/parcel-context/responseSafety');
-    vi.mocked(validateGeneratedAnswer).mockReturnValueOnce({
-      valid: false,
-      reasons: ['La respuesta atribuye un parámetro de parcela sin régimen determinado.'],
-      citations: [1]
-    })
-
     const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -420,7 +408,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
     vi.mocked(evaluateApplicability).mockReturnValue({
       status: 'PARCIAL',
-      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "texto", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }), title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
       rejected: [],
       review: [],
       missingData: ['categoría'],
@@ -454,13 +442,6 @@ describe('NormativeAnswerPerf Telemetry', () => {
       conflicts: []
     })
     // Mock de validación: Safety acepta la respuesta condicionada sin atribución definitiva
-    const { validateGeneratedAnswer } = await import('@/application/parcel-context/responseSafety');
-    vi.mocked(validateGeneratedAnswer).mockReturnValueOnce({
-      valid: true,
-      reasons: [],
-      citations: [1]
-    })
-
     const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -484,7 +465,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     const { evaluateApplicability } = await import('@/application/parcel-context/applicabilityEngine');
     vi.mocked(evaluateApplicability).mockReturnValue({
       status: 'PARCIAL',
-      applicable: [{ id: 'c1', chunk_id: 'c1', content: 'texto', title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
+      applicable: [{ id: 'c1', chunk_id: 'c1', content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "texto", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }), title: 'titulo', hierarchy: 'estatal', visibleSourceKind: 'normative_v1' } as any],
       rejected: [],
       review: [],
       missingData: ['categoría'],
@@ -590,12 +571,63 @@ describe('NormativeAnswerPerf Telemetry', () => {
     expect(typeof telemetryObj.municipalCandidateCount).toBe('number')
     expect(typeof telemetryObj.municipalDocumentCount).toBe('number')
     expect(Array.isArray(telemetryObj.missingDataCodes)).toBe(true)
+  })
 
-    console.log('Valdoviño Scope Diagnostic:', {
-      municipalScopedRetrieval: telemetryObj.municipalScopedRetrieval,
-      municipalScopeDocumentNameCount: telemetryObj.municipalScopeDocumentNameCount,
-      municipalScopeHasOrdinance: telemetryObj.municipalScopeHasOrdinance,
-      municipalScopeDiagnosticCode: telemetryObj.municipalScopeDiagnosticCode,
+  it('V3-B: usa JSON mode, reintenta exactamente una vez y no repite retrieval/RPC', async () => {
+    let completionCalls = 0
+    let reasonerStarted = false
+    mocks.rpc.mockImplementation(() => {
+      if (reasonerStarted) throw new Error('retrieval repeated during reasoner retry')
+      return { abortSignal: mocks.abortSignal }
     })
+    mocks.completionCreate.mockReset()
+    mocks.completionCreate.mockImplementation(async () => {
+      completionCalls += 1
+      if (completionCalls === 1) {
+        return { choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] }
+      }
+      reasonerStarted = true
+      return completionCalls === 2
+        ? { choices: [{ message: { content: '{invalid-json' } }] }
+        : { choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim-1', type: 'normative_fact', text: 'El rÃ©gimen se aplica', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }) } }] }
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: 'Â¿Se puede construir?' }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.completionCreate).toHaveBeenCalledTimes(3)
+    expect(mocks.completionCreate.mock.calls.every((call: unknown[]) => {
+      const request = call[0] as { response_format?: { type?: string } } | undefined
+      return request?.response_format?.type === 'json_object'
+    })).toBe(true)
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: unknown[]) => call[0] === '[NormativeAnswerPerf]')
+    const telemetry = telemetryCall?.[1] as Record<string, unknown> | undefined
+    expect(telemetry?.reasonerRetryUsed).toBe(true)
+    expect(telemetry?.reasonerParseFailureCode).toBe('INVALID_JSON_SCHEMA')
+  })
+
+  it('V3-B: segundo fallo de parsing termina en abstention', async () => {
+    mocks.completionCreate.mockReset()
+    mocks.completionCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: '' } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: '{still-invalid' } }] })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expedienteId: 'exp-telemetry', message: 'Â¿Se puede construir?' }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.completionCreate).toHaveBeenCalledTimes(3)
+    const telemetryCall = consoleInfoSpy.mock.calls.find((call: unknown[]) => call[0] === '[NormativeAnswerPerf]')
+    const telemetry = telemetryCall?.[1] as Record<string, unknown> | undefined
+    expect(telemetry?.finalDecision).toBe('abstain')
+    expect(telemetry?.reasonerParseFailureCode).toBe('INVALID_JSON_SCHEMA')
   })
 })

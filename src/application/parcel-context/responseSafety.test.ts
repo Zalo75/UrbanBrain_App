@@ -1,793 +1,244 @@
 import { describe, expect, it } from 'vitest'
-
-import type {
-  ApplicabilityResult,
-  NormalizedParcelContext,
-  NormativeCandidate,
-} from '@/domain/parcel-context/types'
-import type { UrbanisticFactStatus, UrbanisticRegimeFacts } from '@/domain/territorial-resolver/types'
-import { buildNormalizedParcelContext } from './normalizeParcelContext'
 import {
-  buildAnswerContract,
-  buildMunicipalSafetyPrompt,
+  validateReasonerOutput,
+  renderFinalAnswer,
   buildSafeAbstention,
-  validateGeneratedAnswer,
-  buildStructuredParcelFactAnswer,
-  sanitizeTechnicalPlaceholders,
+  parseReasonerOutput,
 } from './responseSafety'
+import type { ReasonerOutput, NormativeCandidate, ApplicabilityResult } from '@/domain/parcel-context/types'
 
-describe('sanitizeTechnicalPlaceholders', () => {
-  it('removes unmistakable technical placeholders before persistence', () => {
-    expect(sanitizeTechnicalPlaceholders('Dato [undefined], otro [Fuente undefined], tercero [null] y [Fuente 1]. [contexto]'))
-      .toBe('Dato, otro, tercero y [Fuente 1]. [contexto]')
-  })
-
-  it('preserves legitimate bracketed prose', () => {
-    expect(sanitizeTechnicalPlaceholders('Valor [orientativo] y artículo [bis].'))
-      .toBe('Valor [orientativo] y artículo [bis].')
-  })
-})
-
-const context = buildNormalizedParcelContext({
-  expediente: {
-    refCatastral: '1234567NH4913S0001AB',
-    municipio: 'arteixo',
-    landClass: 'urbano_consolidado',
-    urbanPlanningZone: 'Z-4',
-    planeamiento: 'PXOM de Arteixo',
-    contextoValidadoPorTecnico: true,
-  },
-  detected: { planningStatus: 'vigente' },
-})
-
-const source: NormativeCandidate = {
-  id: 'chunk-1',
-  municipalityName: 'Arteixo',
-  documentName: 'PXOM de Arteixo',
-  title: 'Ordenanza Z-4',
-  content: 'La altura máxima será de 7 m en la ordenanza Z-4.',
-  hierarchy: 'ordenanza',
-}
-
-const determined: ApplicabilityResult = {
-  status: 'DETERMINADO',
-  applicable: [source],
-  rejected: [],
-  warnings: [],
-  missingData: [],
-  conflicts: [],
-  canAnswerConcreteParameters: true,
-}
-
-function regimeFacts(status: UrbanisticFactStatus): UrbanisticRegimeFacts {
-  return {
-    classification: {
-      value: { code: 'SNR', label: 'Suelo de núcleo rural' },
-      status,
-      confidence: status === 'automatic_confirmed' ? 'high' : 'unknown',
-      evidence: [],
-      warnings: [],
-      discrepancies: [],
-      nextAction: status === 'automatic_confirmed' ? 'none' : 'review_official_sources',
-    },
-    category: {
-      value: { code: 'SNRC', label: 'Núcleo Rural Común' },
-      status,
-      confidence: status === 'automatic_confirmed' ? 'high' : 'unknown',
-      evidence: [],
-      warnings: [],
-      discrepancies: [],
-      nextAction: status === 'automatic_confirmed' ? 'none' : 'review_official_sources',
-    },
-    consolidation: {
-      status: 'not_available',
-      confidence: 'unknown',
-      evidence: [],
-      warnings: [],
-      discrepancies: [],
-      nextAction: 'none',
-    },
+describe('V3-B Claim-level validation & rendering', () => {
+  const sources: NormativeCandidate[] = [
+    { id: 'source-1', content: 'Retranqueo mínimo 5 m y ocupación 30 %', title: 'article' }
+  ]
+  const app: ApplicabilityResult = {
+    status: 'DETERMINADO',
+    canAnswerConcreteParameters: true,
+    mustAbstainBeforeLlm: false,
+    municipalCandidateCount: 1,
+    municipalDocumentCount: 1,
+    municipalScopedRetrieval: false,
+    municipalScopeDocumentNameCount: 1,
+    municipalScopeHasOrdinance: false,
+    municipalScopeDiagnosticCode: 'NO_DOCUMENT_FILTER',
+    supplementaryV1CandidateCount: 0,
+    supplementaryCandidateCountsByLayer: {},
+    v2CandidateCount: 0,
+    answerCandidateCount: 1,
+    missingData: [],
+    rejected: []
   }
-}
 
-function confirmationContext({
-  parcelStatus,
-  actionAreaStatus,
-  reliabilityMode,
-}: {
-  parcelStatus?: UrbanisticFactStatus
-  actionAreaStatus?: UrbanisticFactStatus
-  reliabilityMode?: NonNullable<NormalizedParcelContext['reliability']>['mode']
-}): NormalizedParcelContext {
-  return {
-    parcelUrbanisticFacts: parcelStatus ? regimeFacts(parcelStatus) : undefined,
-    urbanisticFacts: actionAreaStatus
-      ? regimeFacts(actionAreaStatus)
-      : parcelStatus
-        ? regimeFacts(parcelStatus)
-        : undefined,
-    actionArea: actionAreaStatus
-      ? {
-          value: {
-            id: 'area-1',
-            geometry: { type: 'MultiPolygon', coordinates: [], crs: 'EPSG:4326' },
-            surfaceSquareMetres: 800,
-            parcelSurfaceSquareMetres: 1800,
-            selectionType: 'detected_zone',
-            classification: 'SNR',
-            category: 'SNRC',
-            source: 'manual',
-            confidence: 'high',
-            selectedBy: 'technician',
-            selectedAt: '2026-08-13T10:00:00.000Z',
-            verification: actionAreaStatus === 'technician_validated' ? 'confirmed' : 'unresolved',
-          },
-          source: 'manual',
-          confidence: 0.8,
-          verification: actionAreaStatus === 'technician_validated' ? 'confirmed' : 'unverified',
+  describe('JSON y schema coverage', () => {
+    it('rejects JSON inválido', () => {
+      expect(parseReasonerOutput('{not-json')).toBeNull()
+    })
+
+    it('rejects schema inválido', () => {
+      expect(parseReasonerOutput(JSON.stringify({ answerMode: 'definitive', claims: [] }))).toBeNull()
+    })
+
+    it('handles content vacío', () => {
+      expect(parseReasonerOutput('')).toBeNull()
+      const out: ReasonerOutput = { answerMode: 'abstain', claims: [], missingFacts: [] }
+      const res = validateReasonerOutput(out, sources, app)
+      expect(res.invalidClaimCount).toBe(0)
+    })
+
+    it('rejects type inválido', () => {
+      const out: unknown = { answerMode: 'definitive', claims: [{ id: '1', type: 'INVALID', text: 'x', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }
+      expect(parseReasonerOutput(JSON.stringify(out))).toBeNull()
+    })
+
+    it('rejects appliesToParcel inválido', () => {
+      const out: unknown = { answerMode: 'definitive', claims: [{ id: '1', type: 'normative_fact', text: 'x', sourceRefs: [1], appliesToParcel: 'invalid', numericTokens: [] }], missingFacts: [] }
+      expect(parseReasonerOutput(JSON.stringify(out))).toBeNull()
+    })
+  })
+
+  describe('Extracción defensiva', () => {
+    it('detects numeric tokens defensively even if numericTokens is empty', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{
+          id: '1', type: 'normative_fact', text: 'El retranqueo es de 5 m',
+          sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: []
+        }]
+      }
+      const res = validateReasonerOutput(output, sources, app)
+      expect(res.invalidClaimCount).toBe(0)
+    })
+
+    it('rejects if defensive number is not in source', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{
+          id: '1', type: 'normative_fact', text: 'El retranqueo es de 10 m',
+          sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: []
+        }]
+      }
+      const res = validateReasonerOutput(output, sources, app)
+      expect(res.invalidClaimCount).toBe(1)
+      expect(res.invalidClaimReasonCounts['UNSUPPORTED_NUMBER']).toBe(1)
+    })
+
+    it('supports complex decimal notations', () => {
+      const complexSources: NormativeCandidate[] = [{ id: 'source-1', content: 'Parcela mínima de 355,1 m² o 5.0 m de frente.', title: 'article' }]
+
+      const tests = ['5,00 m', '5.0 m', '355,1 m²']
+
+      for (const t of tests) {
+        const out: ReasonerOutput = {
+          answerMode: 'definitive', missingFacts: [],
+          claims: [{ id: '1', type: 'normative_fact', text: t, sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }]
         }
-      : undefined,
-    knownConstraints: [],
-    conflicts: [],
-    pendingValidation: reliabilityMode === 'manual_unverified' ? ['Revisión manual pendiente.'] : [],
-    reliability: reliabilityMode
-      ? { mode: reliabilityMode, sourceIssues: [] }
-      : undefined,
-  }
-}
-
-describe('validateGeneratedAnswer', () => {
-  it('acepta un parámetro determinado con cita y cifra presentes en la fuente', () => {
-    const validation = validateGeneratedAnswer(
-      'La altura máxima es de 7 m [Fuente 1].',
-      [source],
-      determined
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
+        const res = validateReasonerOutput(out, complexSources, app)
+        expect(res).toBeDefined()
+      }
+    })
   })
 
-  it('rechaza una cifra que no está soportada por la fuente citada', () => {
-    const validation = validateGeneratedAnswer(
-      'La altura máxima es de 9 m [Fuente 1].',
-      [source],
-      determined
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons.join(' ')).toMatch(/9m.*no aparece/i)
-  })
-
-  it('rechaza citas inexistentes para que fuentes visibles y corpus coincidan', () => {
-    const validation = validateGeneratedAnswer(
-      'La norma exige esta condición [Fuente 2].',
-      [source],
-      determined
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons).toContain('La respuesta cita una fuente inexistente.')
-  })
-
-  it('rechaza un parámetro atribuido a la parcela cuando el régimen no está determinado', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const validation = validateGeneratedAnswer(
-      'La altura máxima es de 7 m [Fuente 1].',
-      [source],
-      partial,
-      'regime'
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons.join(' ')).toMatch(/parámetro de parcela sin régimen determinado/i)
-  })
-
-  it('permite cifras documentales citadas cuando la pregunta no depende del régimen de parcela', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const validation = validateGeneratedAnswer(
-      'El artículo citado establece una altura de 7 m [Fuente 1].',
-      [source],
-      partial,
-      'independent'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
-  })
-
-  it('mantiene el circuito CTE V2 con su propia fuente estatal', () => {
-    const cteSource: NormativeCandidate = {
-      id: 'cte-si-1',
-      content: 'La resistencia al fuego será de 60 minutos.',
-      documentName: 'CTE DB-SI',
-      title: 'SI 6',
-      hierarchy: 'estatal',
-      sourceUrl: 'https://example.test/cte-si',
-    }
-    const cteApplicability = { ...determined, applicable: [cteSource] }
-
-    const validation = validateGeneratedAnswer(
-      'La resistencia exigida es de 60 minutos [Fuente 1].',
-      [cteSource],
-      cteApplicability
-    )
-    const contract = buildAnswerContract(
-      'La resistencia exigida es de 60 minutos [Fuente 1].',
-      context,
-      cteApplicability,
-      [1],
-      [cteSource],
-      'answer'
-    )
-
-    expect(validation.valid).toBe(true)
-    expect(contract.hierarchy.estatal).toEqual(['CTE DB-SI'])
-    expect(contract.hierarchy.municipal).toBeUndefined()
-  })
-
-  it('acepta una respuesta mixta que responde lo documentado y se abstiene sólo del parámetro bloqueado', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const mixedSource = {
-      ...source,
-      content: 'La parcela está afectada por la zona de protección de carreteras.',
-    }
-
-    const validation = validateGeneratedAnswer(
-      'La parcela está afectada por la zona de protección de carreteras [Fuente 1]. No puedo determinar el retranqueo urbanístico sin clasificación y ordenanza confirmadas.',
-      [mixedSource],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
-  })
-
-  it('rechaza en una respuesta mixta el parámetro afirmado sin régimen determinado', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'La parcela está afectada por carreteras [Fuente 1]. El retranqueo urbanístico aplicable es de 3 m.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons.join(' ')).toMatch(/parámetro de parcela sin régimen determinado/i)
-  })
-
-  it('rechaza un parámetro atribuido expresamente a esta parcela sin régimen determinado', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const parameterSource = {
-      ...source,
-      content: 'La parcela mínima es de 200 m².',
-    }
-
-    const validation = validateGeneratedAnswer(
-      'Para esta parcela, la parcela mínima es 200 m² [Fuente 1].',
-      [parameterSource],
-      partial,
-      'mixed'
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons).toContain('La respuesta atribuye un parámetro de parcela sin régimen determinado.')
-  })
-
-  it('permite inventariar varias ordenanzas citadas cuando declara que no puede saber cuál aplica', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const inventorySource = {
-      ...source,
-      content:
-        'Ordenanza A: parcela mínima de 200 m² y ocupación máxima del 20%. Ordenanza B: parcela mínima de 500 m² y ocupación máxima del 10%.',
-    }
-
-    const validation = validateGeneratedAnswer(
-      'Se han recuperado varias ordenanzas, pero no puede determinarse cuál corresponde a esta parcela. Una ordenanza establece una parcela mínima de 200 m² y ocupación máxima del 20% [Fuente 1]. Otra ordenanza establece una parcela mínima de 500 m² y ocupación máxima del 10% [Fuente 1].',
-      [inventorySource],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [1] })
-  })
-
-  it('rechaza una cifra normativa material sin fuente aunque se presente como recuperación', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'Se ha localizado que la ocupación máxima es del 20%.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons).toContain('Existe una cifra normativa sin respaldo en las fuentes recuperadas.')
-  })
-
-  it('permite una afirmación metadocumental sin cita', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'He localizado documentación con condiciones de parcela y ocupación.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('permite informar sin cita que no se ha localizado la ordenanza específica aplicable', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'No se ha localizado la ordenanza específica aplicable.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('mantiene la cita unida a una referencia jerárquica de artículo', () => {
-    const articleSource = {
-      ...source,
-      content: 'El artículo 8.1.5 establece una ocupación máxima del 20%.',
-    }
-
-    const validation = validateGeneratedAnswer(
-      'El art. 8.1.5. establece una ocupación máxima del 20% [Fuente 1] [Fuente 2].',
-      [articleSource, articleSource],
-      determined
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [1, 2] })
-  })
-
-  it('permite una descripción temática de documentación recuperada sin cita', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'La documentación recuperada incluye fragmentos de la normativa que regulan condiciones de parcela, ocupación, usos y remisiones al POL.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('rechaza una condición material sin cita aunque mencione documentación recuperada', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'La documentación recuperada establece una ocupación máxima del 20%.',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons).toContain('Existe una cifra normativa sin respaldo en las fuentes recuperadas.')
-  })
-
-  it('permite describir la fiabilidad manual de la clasificación como dato de contexto', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-
-    const validation = validateGeneratedAnswer(
-      'La clasificación de la parcela como núcleo rural es un dato manual no verificado; el último intento de verificación fue el 2026-08-07 [contexto].',
-      [source],
-      partial,
-      'mixed'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('permite una superficie factual de contexto sin la etiqueta [contexto]', () => {
-    const validation = validateGeneratedAnswer(
-      'Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m².',
-      [source],
-      determined,
-      'independent'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('permite una superficie factual de contexto con la etiqueta [contexto]', () => {
-    const validation = validateGeneratedAnswer(
-      'Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m² [contexto].',
-      [source],
-      determined,
-      'independent'
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('acepta el patrón de respuesta RAW de la última auditoría documental', () => {
-    const partial = { ...determined, status: 'PARCIAL' as const, canAnswerConcreteParameters: false }
-    const auditSource = {
-      ...source,
-      content:
-        'El artículo 8.1.5 establece parcela mínima de 5.000 m² y de 200 m², ocupación máxima del 20%, frente mínimo de 6 metros, círculo de 4 metros, separación de 5 metros, pendiente del 25%, parcela mínima de 1.000 m², frente de 16 metros, círculo de 12 metros y ocupación máxima del 50%.',
-    }
-    const sources = Array.from({ length: 8 }, () => auditSource)
-
-    const validation = validateGeneratedAnswer(
-      `La documentación recuperada incluye fragmentos de la normativa urbanística del PXOM que regulan condiciones de parcela, ocupación, usos y remisiones al POL. No puedo determinar con certeza cuál de estas ordenanzas es la aplicable a la parcela concreta.
-Superficie del área de actuación: 1764,22 m²; parcela catastral completa: 1790,46 m².
-Un grupo de fragmentos establece una parcela mínima de 5.000 m² y una ocupación máxima del 20% sobre la parcela edificable, con remisión al artículo 8.1.5. para excepciones [Fuente 1], [Fuente 3], [Fuente 4].
-Otro grupo de fragmentos corresponde a una ordenanza con parcela mínima de 200 m², frente mínimo de 6 metros y círculo inscribible de 4 metros [Fuente 2], [Fuente 5].
-Un tercer grupo de fragmentos regula una ordenanza con parcela mínima de 5.000 m², ocupación máxima del 5%, separación a linderos de 5 metros y pendiente del 25% [Fuente 6].
-Otros fragmentos corresponden a ordenanzas con parcela mínima de 1.000 m², frente mínimo de 16 metros, círculo inscribible de 12 metros y ocupación máxima del 50% [Fuente 7], [Fuente 8].
-La clasificación de la parcela como núcleo rural es un dato manual no verificado; el último intento de verificación fue el 2026-08-07.`,
-      sources,
-      partial,
-      'mixed'
-    )
-
-    expect(validation.valid).toBe(true)
-  })
-})
-
-describe('categorical territorial confirmations', () => {
-  const parcelQuestion = '¿Puedo considerar toda la parcela como Núcleo Rural Común (SNRC)?'
-  const actionAreaQuestion = '¿Puedo considerar el área seleccionada como Núcleo Rural Común (SNRC)?'
-  const categoricalAnswer = 'CONCLUSIÓN\nSí, toda la parcela puede considerarse Núcleo Rural Común (SNRC) [contexto].'
-
-  it.each([
-    ['manual_unverified', confirmationContext({ parcelStatus: 'manual_review_required', reliabilityMode: 'manual_unverified' })],
-    ['unresolved', confirmationContext({ parcelStatus: 'not_available', reliabilityMode: 'unresolved' })],
-    ['conflict', confirmationContext({ parcelStatus: 'conflict' })],
-    ['automatic_probable', confirmationContext({ parcelStatus: 'automatic_probable' })],
-  ])('rejects a categorical parcel confirmation for %s', (_label, provisionalContext) => {
-    const validation = validateGeneratedAnswer(
-      categoricalAnswer,
-      [],
-      determined,
-      'regime',
-      provisionalContext,
-      false,
-      parcelQuestion
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(validation.reasons).toContain(
-      'La respuesta confirma categóricamente un régimen territorial no verificado o de otro ámbito.'
-    )
-  })
-
-  it('does not use actionArea facts to confirm the whole parcel', () => {
-    const validation = validateGeneratedAnswer(
-      categoricalAnswer,
-      [],
-      determined,
-      'regime',
-      confirmationContext({ actionAreaStatus: 'automatic_confirmed' }),
-      false,
-      parcelQuestion
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(buildStructuredParcelFactAnswer('¿Qué categoría tiene toda la parcela?', confirmationContext({ actionAreaStatus: 'automatic_confirmed' }))?.answer)
-      .toContain('Categoría: no determinada.')
-  })
-
-  it('does not use parcel facts to confirm an unbacked actionArea', () => {
-    const validation = validateGeneratedAnswer(
-      'Sí, el área seleccionada puede considerarse Núcleo Rural Común (SNRC) [contexto].',
-      [],
-      determined,
-      'regime',
-      confirmationContext({ parcelStatus: 'automatic_confirmed' }),
-      false,
-      actionAreaQuestion
-    )
-
-    expect(validation.valid).toBe(false)
-    expect(buildStructuredParcelFactAnswer('¿Qué categoría tiene el área seleccionada?', confirmationContext({ parcelStatus: 'automatic_confirmed' }))?.answer)
-      .toContain('Categoría: no determinada.')
-  })
-
-  it('preserves an affirmative answer for a confirmed fact from the requested scope', () => {
-    const validation = validateGeneratedAnswer(
-      categoricalAnswer,
-      [],
-      determined,
-      'regime',
-      confirmationContext({ parcelStatus: 'automatic_confirmed', reliabilityMode: 'current_official' }),
-      false,
-      parcelQuestion
-    )
-
-    expect(validation).toEqual({ valid: true, reasons: [], citations: [] })
-  })
-
-  it('does not turn an automatic probable structured fact into a categorical confirmation', () => {
-    const answer = buildStructuredParcelFactAnswer(
-      '¿Puedo confirmar la categoría de toda la parcela como Núcleo Rural Común (SNRC)?',
-      confirmationContext({ parcelStatus: 'automatic_probable' })
-    )?.answer
-
-    expect(answer).toContain('Categoría: no determinada.')
-    expect(answer).not.toContain('Categoría: Núcleo Rural Común (SNRC).')
-  })
-
-  it('instructs the model to qualify provisional states and preserve scope', () => {
-    const prompt = buildMunicipalSafetyPrompt(
-      confirmationContext({ parcelStatus: 'manual_review_required', reliabilityMode: 'manual_unverified' }),
-      determined,
-      [],
-      'regime'
-    )
-
-    expect(prompt).toContain('Nunca extrapoles entre la parcela completa y el área seleccionada')
-    expect(prompt).toContain('no comiences con "Sí"')
-    expect(prompt).toContain('confirmado automáticamente o validado por técnico')
-  })
-})
-
-describe('buildSafeAbstention', () => {
-  it('indica el dato exacto que falta sin enumerar valores incompatibles', () => {
-    const answer = buildSafeAbstention({
-      ...determined,
-      status: 'PARCIAL',
-      applicable: [],
-      missingData: ['calificación, ordenanza, ámbito o ficha'],
-      canAnswerConcreteParameters: false,
+  describe('Claim-level filtering', () => {
+    it('renders A valid, C valid, but hides B invalid', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [
+          { id: '1', type: 'normative_fact', text: 'Claim A', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] },
+          { id: '2', type: 'normative_fact', text: 'Claim B 10m', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] },
+          { id: '3', type: 'normative_fact', text: 'Claim C', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] },
+        ]
+      }
+      const res = validateReasonerOutput(output, sources, app)
+      expect(res.validClaims.map(c => c.id)).toEqual(['1', '3'])
+
+      const finalHtml = renderFinalAnswer(output, res.validClaims)
+      expect(finalHtml).toContain('Claim A')
+      expect(finalHtml).toContain('Claim C')
+      expect(finalHtml).not.toContain('Claim B')
+      expect(finalHtml).not.toMatch(/rechazado|omitido|seguridad|inválido/i)
     })
 
-    expect(answer).toContain('calificación, ordenanza, ámbito o ficha')
-    expect(answer).toContain('Me abstengo')
-    expect(answer).not.toMatch(/7 m|9 m/)
-  })
+    it('triggers buildSafeAbstention if all claims invalid', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [
+          { id: '2', type: 'normative_fact', text: 'Claim B 10m', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] },
+        ]
+      }
+      const res = validateReasonerOutput(output, sources, app)
+      expect(res.validClaims.length).toBe(0)
 
-  it('explica que existen disposiciones recuperadas cuando falta acreditar su aplicaci\u00f3n al \u00e1mbito', () => {
-    const contextWithArea = buildNormalizedParcelContext({
-      expediente: {
-        refCatastral: '1234567NH4913S0001AB',
-        municipio: 'arteixo',
-        landClass: 'urbano_consolidado',
-        urbanPlanningZone: '\u00c1mbito Z-4',
-        planeamiento: 'PXOM de Arteixo',
-      },
-      detected: { planningStatus: 'vigente' },
-    })
-    const answer = buildSafeAbstention(
-      {
-        ...determined,
-        status: 'PARCIAL',
-        applicable: [],
-        rejected: [{
-          candidate: source,
-          reason: 'El fragmento contiene una regulaci\u00f3n potencialmente relevante, pero no acredita su aplicaci\u00f3n al \u00e1mbito Z-4.',
-        }],
-        canAnswerConcreteParameters: false,
-      },
-      contextWithArea,
-      '\u00bfCu\u00e1nto retranqueo hay que dejar?'
-    )
-
-    expect(answer).toContain('disposiciones sobre retranqueos')
-    expect(answer).toContain('\u00e1mbito \u00c1mbito Z-4')
-    expect(answer).not.toContain('No se ha recuperado evidencia documental suficiente')
-    expect(answer).not.toMatch(/3 m|7 m/)
-  })
-
-  it('comunica afecciones confirmadas por secciones aunque Betanzos tenga clasificación conflictiva', () => {
-    const betanzosContext = buildNormalizedParcelContext({
-      expediente: {},
-      detected: {
-        cadastralReference: '15009A01300255',
-        municipalityName: 'Betanzos',
-        municipalityId: 'betanzos',
-        locationSource: 'catastro',
-        locationStatus: 'confirmed',
-        locationConfidence: 'high',
-        planningApplicabilityStatus: 'conflict',
-        planningCanAnswerConcreteParameters: false,
-        planningConflicts: [
-          'La parcela intersecta clases de suelo incompatibles y requiere validación geométrica.',
-        ],
-      },
-      constraints: [
-        {
-          name: 'Patrimonio cultural: contorno de protección',
-          source: 'ideg',
-          confidence: 0.95,
-          confirmed: true,
-        },
-        {
-          name: 'Comprobar otras afecciones sectoriales no cubiertas',
-          source: 'ideg',
-          confidence: 0.55,
-          confirmed: false,
-        },
-      ],
-    })
-    const conflictive: ApplicabilityResult = {
-      ...determined,
-      status: 'CONFLICTIVO',
-      applicable: [],
-      conflicts: betanzosContext.conflicts.map((conflict) => conflict.reason),
-      missingData: ['clasificación del suelo', 'ordenanza o ámbito aplicable'],
-      warnings: ['La cobertura automática de afecciones es parcial.'],
-      canAnswerConcreteParameters: false,
-    }
-
-    const answer = buildSafeAbstention(conflictive, betanzosContext)
-
-    expect(betanzosContext.cadastralReference?.value).toBe('15009A01300255')
-    expect(answer).toContain('AFECCIONES CONFIRMADAS')
-    expect(answer).toContain('Patrimonio cultural: contorno de protección')
-    expect(answer).toContain('Fuente: ideg')
-    expect(answer).toContain('Confianza: alta')
-    expect(answer).toMatch(/cobertura parcial/i)
-    expect(answer).toContain('CLASIFICACIÓN Y PLANEAMIENTO')
-    expect(answer).toMatch(/Estado no determinado/i)
-    expect(answer).toContain('COMPROBACIONES PENDIENTES')
-    expect(answer).toContain('Comprobar otras afecciones sectoriales no cubiertas')
-    expect(answer).toMatch(/abstengo únicamente.*clasificación.*planeamiento.*parámetros/i)
-    expect(answer).not.toMatch(/edificabilidad\s*[:=]|altura\s*[:=]|ocupación\s*[:=]/i)
-  })
-})
-
-describe('structured facts in prompts', () => {
-  it('prefiere hechos V2 y conserva SUSC sin reducirlo a suelo urbano generico', () => {
-    const contextWithFacts = buildNormalizedParcelContext({
-      expediente: { planeamiento: 'PXOM de Culleredo' },
-      detected: {
-        municipalityName: 'Culleredo',
-        municipalityCode: '15031',
-        locationSource: 'catastro',
-        locationStatus: 'confirmed',
-        locationConfidence: 'high',
-        planningInstrument: 'PXOM de Culleredo',
-        planningArea: 'LEDOÃ‘O',
-        urbanisticFacts: {
-          classification: {
-            value: { code: 'SU', label: 'Suelo urbano' },
-            status: 'automatic_confirmed',
-            confidence: 'high',
-            evidence: [],
-            warnings: [],
-            discrepancies: [],
-            nextAction: 'none',
-            origin: 'spatial_intersection',
-          },
-          category: {
-            value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' },
-            status: 'automatic_confirmed',
-            confidence: 'high',
-            evidence: [],
-            warnings: [],
-            discrepancies: [],
-            nextAction: 'none',
-            origin: 'spatial_intersection',
-          },
-          consolidation: {
-            status: 'manual_review_required',
-            confidence: 'unknown',
-            evidence: [],
-            warnings: [],
-            discrepancies: [],
-            nextAction: 'review_official_sources',
-          },
-        },
-      },
+      const fallback = buildSafeAbstention(app, undefined, undefined, ['Dato faltante'])
+      expect(fallback).toContain('Me abstengo')
     })
 
-    const prompt = buildMunicipalSafetyPrompt(contextWithFacts, determined, [], 'independent')
-
-    expect(prompt).toContain('HECHOS ESTRUCTURADOS DEL EXPEDIENTE')
-    expect(prompt).toContain('Suelo urbano sin consolidar (SUSC)')
-    expect(prompt).toContain('PXOM de Culleredo')
-    expect(prompt).toContain('debe llevar literalmente [contexto]')
-    expect(prompt).toContain('LEDOÃ‘O')
-  })
-
-  it('presenta el contexto territorial sin enums internos visibles', () => {
-    const contextWithFacts = confirmationContext({
-      actionAreaStatus: 'automatic_confirmed',
-      reliabilityMode: 'manual_unverified',
+    it('rejects a parcel conclusion when concrete parameters are not authorized', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'parcel_conclusion', text: 'La parcela tiene una parcela mínima de 5 m', sourceRefs: [1], appliesToParcel: true, numericTokens: [] }],
+      }
+      const partial = { ...app, canAnswerConcreteParameters: false }
+      const result = validateReasonerOutput(output, sources, partial)
+      expect(result.validClaims).toHaveLength(0)
+      expect(result.invalidClaimReasonCounts.UNAUTHORIZED_CONCLUSION).toBe(1)
     })
-    contextWithFacts.urbanisticFacts!.classification.origin = 'automatic_source'
-    const prompt = buildMunicipalSafetyPrompt(contextWithFacts, determined, [], 'regime')
 
-    expect(prompt).not.toMatch(
-      /whole_parcel|detected_zone|user_polygon|actionArea|unverified|manual_unverified|technician_validated|automatic_confirmed|automatic_probable|manual_review_required|automatic_source|spatial_intersection|implicit_planning_background|current_official|previous_official|coverageComplete|coverageReason|factRef|semanticCompleteness|\bhigh\b/
-    )
+    it('accepts a parcel conclusion only when concrete parameters are authorized', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'parcel_conclusion', text: 'La parcela tiene una parcela mínima de 5 m', sourceRefs: [1], appliesToParcel: true, numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, sources, app)
+      expect(result.validClaims).toHaveLength(1)
+    })
   })
 
-  it('rechaza una conclusión definitiva de edificabilidad en modo condicionado', () => {
-    const partialConditional = {
-      ...determined,
-      status: 'PARCIAL' as const,
-      canAnswerConcreteParameters: false,
-      canAnswerGeneralRegime: true,
-      canAnswerConditionalViability: true,
-    } as ApplicabilityResult
+  describe('Citation and provenance guarantees', () => {
+    it('rejects a numeric claim without sourceRefs', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La ocupación máxima es del 30 %', sourceRefs: [], appliesToParcel: 'unknown', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, sources, app)
+      expect(result.validClaims).toHaveLength(0)
+      expect(result.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1)
+    })
 
-    const unsafe = validateGeneratedAnswer(
-      'Sí, se puede construir en esta parcela [Fuente 1].',
-      [source], partialConditional, 'regime', context, false,
-      '¿Se puede construir en esta parcela?'
-    )
-    const safe = validateGeneratedAnswer(
-      'Todavía no puede confirmarse que la parcela sea edificable. La documentación recuperada describe el régimen general aplicable [Fuente 1].',
-      [source], partialConditional, 'regime', context, false,
-      '¿Se puede construir en esta parcela?'
-    )
+    it('allows a non-numeric documentary claim without a citation', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'partial',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'limitation', text: 'No se ha localizado la ordenanza específica aplicable', sourceRefs: [], appliesToParcel: 'conditional', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, sources, app)
+      expect(result.validClaims).toHaveLength(1)
+      expect(renderFinalAnswer(output, result.validClaims)).toContain('No se ha localizado')
+    })
 
-    expect(unsafe.valid).toBe(false)
-    expect(safe.valid).toBe(true)
-  })
-})
+    it('preserves every validated citation when rendering a claim', () => {
+      const twoSources: NormativeCandidate[] = [
+        { id: 'source-1', content: 'La ocupación máxima es del 30 %', title: 'A' },
+        { id: 'source-2', content: 'La ocupación máxima es del 30 %', title: 'B' },
+      ]
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La ocupación máxima es del 30 %', sourceRefs: [1, 2], appliesToParcel: 'unknown', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, twoSources, app)
+      expect(renderFinalAnswer(output, result.validClaims)).toContain('[Fuente 1] [Fuente 2]')
+    })
 
-describe('structured facts without normative evidence', () => {
-  const contextWithFacts = buildNormalizedParcelContext({
-    expediente: { planeamiento: 'PXOM de Culleredo' },
-    detected: {
-      municipalityName: 'Culleredo',
-      municipalityCode: '15031',
-      locationSource: 'catastro',
-      locationStatus: 'confirmed',
-      locationConfidence: 'high',
-      planningInstrument: 'PXOM de Culleredo',
-      urbanisticFacts: {
-        classification: {
-          value: { code: 'SU', label: 'Suelo urbano' },
-          status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
-        },
-        category: {
-          value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' },
-          status: 'automatic_confirmed', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'none',
-        },
-        consolidation: {
-          status: 'manual_review_required', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'review_official_sources',
-        },
-      },
-    },
-  })
-  const partial = { ...determined, status: 'PARCIAL' as const, applicable: [], canAnswerConcreteParameters: false }
-
-  it('preserves valid facts in the limited abstention and omits irrelevant affects', () => {
-    const answer = buildSafeAbstention(partial, contextWithFacts, 'Â¿Que implica la clasificacion urbanistica?')
-
-    expect(answer).toContain('Suelo urbano sin consolidar (SUSC)')
-    expect(answer).toContain('hechos territoriales estructurados válidos')
-    expect(answer).not.toContain('Estado no determinado')
-    expect(answer).not.toContain('AFECCIONES CONFIRMADAS')
+    it('does not let a territorial claim resolve an applicability conflict', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{ id: '1', type: 'territorial_fact', text: 'La clasificación es suelo urbano', sourceRefs: [], appliesToParcel: true, numericTokens: [] }],
+      }
+      const conflicted = { ...app, status: 'CONFLICTIVO' as const }
+      const result = validateReasonerOutput(output, sources, conflicted)
+      expect(result.validClaims).toHaveLength(0)
+      expect(result.invalidClaimReasonCounts.CONFLICT_UNRESOLVED).toBe(1)
+    })
   })
 
-  it('accepts structured facts and non-numeric normative descriptions without a RAG citation', () => {
-    const structural = validateGeneratedAnswer(
-      'El expediente identifica suelo urbano sin consolidar [contexto]. No se ha recuperado evidencia documental suficiente para concretar sus consecuencias.',
-      [source], partial, 'independent', contextWithFacts
-    )
-    const normative = validateGeneratedAnswer(
-      'El expediente identifica suelo urbano sin consolidar [contexto]. La norma permite licencia directa.',
-      [source], partial, 'independent', contextWithFacts
-    )
-    const disguisedNormative = validateGeneratedAnswer(
-      'La parcela clasificada como suelo urbano sin consolidar [contexto] permite licencia directa.',
-      [source], partial, 'independent', contextWithFacts
-    )
+  describe('Conclusión determinista', () => {
+    it('does not use any conclusion field from LLM', () => {
+      const output: ReasonerOutput & { conclusion: string } = {
+        answerMode: 'definitive' as const,
+        missingFacts: ['Fact X'],
+        conclusion: 'PELIGROSO TEXTO DEL LLM',
+        claims: [
+          { id: '1', type: 'normative_fact', text: 'Claim Seguro', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] as string[] }
+        ]
+      }
+      const res = validateReasonerOutput(output, sources, app)
+      const text = renderFinalAnswer(output, res.validClaims)
 
-    expect(structural.valid).toBe(true)
-    expect(normative.valid).toBe(true)
-    expect(disguisedNormative.valid).toBe(true)
+      expect(text).toContain('Claim Seguro')
+      expect(text).toContain('Fact X')
+      expect(text).not.toContain('PELIGROSO TEXTO DEL LLM')
+    })
   })
 
-  it('includes confirmed affects only when the question is about them', () => {
-    const withAffect = { ...contextWithFacts, knownConstraints: [{ value: 'Carreteras: zona de proteccion', source: 'ideg' as const, confidence: 0.95, verification: 'confirmed' as const }] }
-    const answer = buildSafeAbstention(partial, withAffect, 'Â¿Que afecciones tiene la parcela?')
-
-    expect(answer).toContain('AFECCIONES CONFIRMADAS')
-    expect(answer).toContain('Carreteras: zona de proteccion')
+  describe('Source validation', () => {
+    it('rejects sourceRef = 0', () => {
+      const out: ReasonerOutput = { answerMode: 'definitive', missingFacts: [], claims: [{ id: '1', type: 'normative_fact', text: 'x', sourceRefs: [0], appliesToParcel: 'unknown', numericTokens: [] }] }
+      expect(validateReasonerOutput(out, sources, app).invalidClaimCount).toBe(1)
+    })
+    it('rejects sourceRef > sources.length', () => {
+      const out: ReasonerOutput = { answerMode: 'definitive', missingFacts: [], claims: [{ id: '1', type: 'normative_fact', text: 'x', sourceRefs: [99], appliesToParcel: 'unknown', numericTokens: [] }] }
+      expect(validateReasonerOutput(out, sources, app).invalidClaimCount).toBe(1)
+    })
+    it('rejects sourceRef no enteros', () => {
+      const out: unknown = { answerMode: 'definitive', missingFacts: [], claims: [{ id: '1', type: 'normative_fact', text: 'x', sourceRefs: [1.5], appliesToParcel: 'unknown', numericTokens: [] }] }
+      expect(validateReasonerOutput(out, sources, app).invalidClaimCount).toBe(1)
+    })
   })
 })

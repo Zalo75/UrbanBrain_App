@@ -28,10 +28,13 @@ import {
   buildSafeAbstention,
   buildStructuredParcelFactAnswer,
   sanitizeTechnicalPlaceholders,
-  validateGeneratedAnswer,
+  parseReasonerOutput,
+  validateReasonerOutput,
+  renderFinalAnswer,
+  type ClaimValidationResult,
 } from '@/application/parcel-context/responseSafety';
 import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
-import type { ApplicabilityResult, NormativeCandidate } from '@/domain/parcel-context/types';
+import type { ApplicabilityResult, NormativeCandidate, ReasonerOutput } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
 import type { KnowledgePlan } from '@/application/knowledge-orchestrator/KnowledgeOrchestrator';
@@ -867,11 +870,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     if (hardStopTerritorialConflict && !hardStopRetrievalConflict) hardStopReasonCodes.push('TERRITORIAL_CONFLICT');
     if (hardStopNoViabilityEvidence) hardStopReasonCodes.push('NO_VIABILITY_EVIDENCE');
 
-    function logNormativeAnswerPerf(
-      finalDecision: string,
-      validationValid: boolean | null,
-      validationReasonCodes: string[]
-    ) {
+    function logNormativeAnswerPerf(finalDecision: string, validationValid: boolean | null, validationReasonCodes: string[], extraParams: Record<string, unknown> = {}) {
       const missingDataCodes = applicability.missingData.map((d: string) => {
         if (d.includes('clasificación')) return 'MISSING_CLASIFICACION';
         if (d.includes('calificación') || d.includes('ordenanza')) return 'MISSING_CALIFICACION';
@@ -913,8 +912,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         reviewCount: applicability.review.length,
         rejectedCount: applicability.rejected.length,
         missingDataCount: applicability.missingData.length,
-        conflictCount: applicability.conflicts.length,
-      });
+        conflictCount: applicability.conflicts.length, ...extraParams, });
     }
 
     if (mustAbstain) {
@@ -934,7 +932,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         content: answer,
         sources: [],
       });
-      logNormativeAnswerPerf('abstain', null, []);
+      logNormativeAnswerPerf('abstain', null, [], {});
       return NextResponse.json({ answer, sources: [], safety: contract });
     }
 
@@ -986,6 +984,28 @@ La pregunta solicita únicamente la documentación o normativa localizada. Enume
 No calcules, afirmes ni enumeres ocupación, edificabilidad, altura, retranqueos, parcela mínima, frente mínimo, número de plantas, usos ni ningún otro parámetro urbanístico no solicitado. Cita con [Fuente N] toda afirmación normativa o documental.`;
     }
 
+
+    systemPrompt += `
+
+OUTPUT JSON REQUERIDO:
+Debes responder obligatoriamente con un único objeto JSON que cumpla el siguiente schema (ReasonerOutput). No añadas texto fuera del JSON.
+
+{
+  "answerMode": "definitive" | "conditional" | "partial" | "abstain",
+  "claims": [
+    {
+      "id": "string",
+      "type": "territorial_fact" | "normative_fact" | "normative_conditional" | "limitation",
+      "text": "string (la afirmación)",
+      "sourceRefs": [1, 2],
+      "appliesToParcel": true | false | "conditional" | "unknown",
+      "numericTokens": ["5", "10", "300"]
+    }
+  ],
+  "missingFacts": ["string (datos pendientes)"]
+}
+`;
+
     // Logging for CTE V2 Response Mode
     if (process.env.KNOWLEDGE_ENGINE === 'v2') {
       console.log(`\n========== KNOWLEDGE ENGINE RESPONSE MODE ==========
@@ -1008,44 +1028,88 @@ ${usedV2 ? v2Citas : 'N/A'}
 ==========================================\n`);
     }
 
-    const t0_llm = performance.now();
-    const completionRequest = {
-      model: 'deepseek-v4-flash',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content:
-            usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
-              ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
-              : message,
-        },
-      ],
-      temperature: 0.1,
-      thinking: {
-        type: 'disabled' as const,
-      },
-    } satisfies Parameters<typeof openai.chat.completions.create>[0] & {
-      thinking: { type: 'disabled' };
-    };
-    const completion = await openai.chat.completions.create(completionRequest, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
-    const t1_llm = performance.now();
-    v2LLMTime = Math.round(t1_llm - t0_llm);
-
-    let answer = sanitizeTechnicalPlaceholders(completion.choices[0].message.content || '');
-    const validation = validateGeneratedAnswer(
-      answer,
-      answerCandidates,
-      applicability,
-      questionScope,
-      parcelContext,
-      hasReviewableRegimeEvidence,
-      message
-    );
+    let answer = '';
     let sources = mapVisibleSources(answerCandidates);
     let decision: 'answer' | 'abstain' = 'answer';
+    let validation: ClaimValidationResult | null = null;
+    let reasonerRetryUsed = false;
+    let reasonerParseFailureCode: string | null = null;
+    let outputParsed = false;
+    let parsed: ReasonerOutput | null = null;
 
-    if (!validation.valid) {
+    const maxRetries = 1;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const t0_llm = performance.now();
+      const completionRequest = {
+        model: 'deepseek-v4-flash',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content:
+              usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
+                ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
+                : attempt > 0 ? `Tu respuesta anterior fue vacía o un JSON inválido. Por favor, corrige el formato y responde OBLIGATORIAMENTE con el schema JSON provisto.\n\nPregunta: ${message}` : message,
+          },
+        ],
+        temperature: 0.1,
+        response_format: { type: 'json_object' },
+        thinking: { type: 'disabled' as const },
+      } satisfies Parameters<typeof openai.chat.completions.create>[0] & {
+        thinking: { type: 'disabled' };
+      };
+
+      const completion = await openai.chat.completions.create(completionRequest, { signal, timeout: CHAT_REQUEST_TIMEOUT_MS });
+      const t1_llm = performance.now();
+      v2LLMTime = Math.round(t1_llm - t0_llm);
+
+      const rawContent = completion.choices[0].message.content || '';
+
+      if (!rawContent.trim()) {
+        reasonerParseFailureCode = 'EMPTY_CONTENT';
+        if (attempt < maxRetries) {
+          reasonerRetryUsed = true;
+          continue;
+        } else {
+          break;
+        }
+      }
+
+      parsed = parseReasonerOutput(rawContent);
+      if (!parsed) {
+        reasonerParseFailureCode = 'INVALID_JSON_SCHEMA';
+        if (attempt < maxRetries) {
+          reasonerRetryUsed = true;
+          continue;
+        } else {
+          break;
+        }
+      }
+
+      outputParsed = true;
+      validation = validateReasonerOutput(parsed, answerCandidates, applicability, parcelContext);
+
+      if (validation.validClaims.length === 0) {
+        decision = 'abstain';
+        const failedApplicability: ApplicabilityResult = {
+          ...applicability,
+          missingData: [
+            ...applicability.missingData,
+            'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
+          ],
+          canAnswerConcreteParameters: false,
+        };
+        answer = buildSafeAbstention(failedApplicability, parcelContext, message);
+        applicability = failedApplicability;
+        sources = [];
+      } else {
+        answer = renderFinalAnswer(parsed, validation.validClaims);
+      }
+
+      break;
+    }
+
+    if (!outputParsed) {
       decision = 'abstain';
       const failedApplicability: ApplicabilityResult = {
         ...applicability,
@@ -1058,12 +1122,14 @@ ${usedV2 ? v2Citas : 'N/A'}
       answer = buildSafeAbstention(failedApplicability, parcelContext, message);
       applicability = failedApplicability;
       sources = [];
+      validation = { validClaims: [], citations: [], invalidClaimCount: 0, invalidClaimReasonCounts: {} };
     }
+
     const contract = buildAnswerContract(
       answer,
       parcelContext,
       applicability,
-      decision === 'answer' ? validation.citations : [],
+      decision === 'answer' ? (validation?.citations || []) : [],
       decision === 'answer' ? answerCandidates : [],
       decision
     );
@@ -1077,19 +1143,28 @@ ${usedV2 ? v2Citas : 'N/A'}
       sources,
     });
 
-    const reasonCodes = validation.reasons.map((r: string) => {
-      if (r.includes('vacía')) return 'EMPTY_RESPONSE';
-      if (r.includes('terminología interna')) return 'INTERNAL_TERMINOLOGY';
-      if (r.includes('concluye edificabilidad sin evidencia')) return 'UNVERIFIED_VIABILITY';
-      if (r.includes('confirma categóricamente un régimen territorial no verificado')) return 'UNVERIFIED_REGIME';
-      if (r.includes('cita una fuente inexistente')) return 'INVALID_CITATION';
-      if (r.includes('atribuye un parámetro de parcela sin régimen determinado')) return 'ATTRIBUTED_PARAMETER_WITHOUT_REGIME';
-      if (r.includes('afirmación normativa prescriptiva sin citar')) return 'UNVERIFIED_NORMATIVE_CLAIM';
-      if (r.includes('número o plazo')) return 'UNSUPPORTED_NUMBER';
-      return 'UNKNOWN_REASON';
-    });
+    const reasonCodes: string[] = [];
+    if (reasonerParseFailureCode) reasonCodes.push(reasonerParseFailureCode);
+    if (validation && validation.invalidClaimCount > 0) {
+      reasonCodes.push(...Object.keys(validation.invalidClaimReasonCounts));
+    }
+    const isTotallyValid = outputParsed && validation && validation.invalidClaimCount === 0;
 
-    logNormativeAnswerPerf(decision, validation.valid, reasonCodes);
+    logNormativeAnswerPerf(
+      decision,
+      isTotallyValid,
+      reasonCodes,
+      {
+        reasonerOutputParsed: outputParsed,
+        reasonerClaimCount: validation ? validation.validClaims.length + validation.invalidClaimCount : 0,
+        validClaimCount: validation ? validation.validClaims.length : 0,
+        invalidClaimCount: validation ? validation.invalidClaimCount : 0,
+        invalidClaimReasonCounts: validation ? validation.invalidClaimReasonCounts : {},
+        renderedFromClaims: outputParsed && validation && validation.validClaims.length > 0,
+        reasonerRetryUsed,
+        reasonerParseFailureCode
+      }
+    );
 
     return NextResponse.json({
       answer,

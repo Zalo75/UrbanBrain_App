@@ -128,3 +128,18 @@ export interface SafeAnswerContract {
   warnings: string[]
   decision: 'answer' | 'abstain'
 }
+
+export interface ReasonerClaim {
+  id: string
+  type: 'territorial_fact' | 'normative_fact' | 'normative_conditional' | 'parcel_conclusion' | 'limitation'
+  text: string
+  sourceRefs: number[]
+  appliesToParcel: boolean | 'conditional' | 'unknown'
+  numericTokens: string[]
+}
+
+export interface ReasonerOutput {
+  answerMode: 'definitive' | 'conditional' | 'partial' | 'abstain'
+  claims: ReasonerClaim[]
+  missingFacts: string[]
+}

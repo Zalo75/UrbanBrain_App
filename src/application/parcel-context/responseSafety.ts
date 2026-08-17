@@ -1,3 +1,6 @@
+
+import type { ReasonerOutput, ReasonerClaim } from '@/domain/parcel-context/types';
+
 import type {
   ApplicabilityResult,
   NormalizedParcelContext,
@@ -316,13 +319,13 @@ export function buildStructuredParcelFactAnswer(
       usedFacts.push(fact)
     } else if (!requiresConfirmedRegime && fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
       const uniqueCodes = new Set(fact.candidates.map(c => c.value.code))
-      
+
       if (uniqueCodes.size === 1) {
         const representative = fact.candidates[0]
         lines.push(`Clasificación: ${representative.label ?? representative.value.code} (${representative.value.code}).`)
       } else {
         lines.push(`Clasificación: existen múltiples clasificaciones detectadas.`)
-        
+
         // Group by code to sum percentages if multiple candidates have the same classification code
         const grouped = new Map<string, { code: string, label: string, percentage: number }>()
         for (const c of fact.candidates) {
@@ -330,7 +333,7 @@ export function buildStructuredParcelFactAnswer(
           if (c.parcelPercentage) existing.percentage += c.parcelPercentage
           grouped.set(c.value.code, existing)
         }
-        
+
         const sorted = Array.from(grouped.values()).sort((a, b) => b.percentage - a.percentage)
         sorted.forEach(g => {
           lines.push(`  - ${g.label} (${g.code}) — ${g.percentage > 0 ? Number(g.percentage.toFixed(2)) + ' %' : 'sin %'}`)
@@ -353,20 +356,20 @@ export function buildStructuredParcelFactAnswer(
       usedFacts.push(fact)
     } else if (!requiresConfirmedRegime && fact?.status === 'conflict' && fact.candidates && fact.candidates.length > 0) {
       const uniqueCodes = new Set(fact.candidates.map(c => c.value.code))
-      
+
       if (uniqueCodes.size === 1) {
         const representative = fact.candidates[0]
         lines.push(`Categoría: ${representative.label ?? representative.value.code} (${representative.value.code}).`)
       } else {
         lines.push(`Categoría: existen múltiples categorías detectadas.`)
-        
+
         const grouped = new Map<string, { code: string, label: string, percentage: number }>()
         for (const c of fact.candidates) {
           const existing = grouped.get(c.value.code) || { code: c.value.code, label: c.label ?? c.value.code, percentage: 0 }
           if (c.parcelPercentage) existing.percentage += c.parcelPercentage
           grouped.set(c.value.code, existing)
         }
-        
+
         const sorted = Array.from(grouped.values()).sort((a, b) => b.percentage - a.percentage)
         sorted.forEach(g => {
           lines.push(`  - ${g.label} (${g.code}) — ${g.percentage > 0 ? Number(g.percentage.toFixed(2)) + ' %' : 'sin %'}`)
@@ -693,22 +696,6 @@ Sin embargo:
     : ''
 }
 
-FORMATO
-CONCLUSIÓN
-[respuesta directa]
-
-CONTEXTO DE PARCELA UTILIZADO
-[datos relevantes]
-
-FUNDAMENTO POR NIVEL NORMATIVO
-[conclusiones con citas]
-
-ADVERTENCIAS Y DATOS PENDIENTES
-[limitaciones]
-
-DECISIÓN
-[RESPONDER o ABSTENERSE]
-
 FRAGMENTOS AUTORIZADOS Y APLICABLES
 ${sourceText}`
 }
@@ -744,19 +731,7 @@ REGLAS OBLIGATORIAS
 3. Limítate a formular los datos como contenido de la normativa recuperada.
 4. Incluye documento, artículo/apartado y página en cada extracción.
 5. Cita las fuentes usando [Fuente N].
-6. La sección FUENTES debe incluir: "Documento, artículo/página, enlace oficial." o "Documento identificado; enlace oficial no disponible" si no hay URL.
-
-FORMATO DE RESPUESTA REQUERIDO:
-
-INFORMACIÓN LOCALIZADA
-La normativa recuperada contiene las siguientes determinaciones relacionadas con la consulta:
-- [dato o disposición], según [documento, artículo, página] [Fuente 1].
-
-VERIFICACIÓN NECESARIA
-La relación de estas determinaciones con ${expectedZone} o con la ordenanza aplicable todavía no está acreditada.
-
-FUENTES
-- [Fuente 1]: Documento, artículo/página, enlace oficial.
+6. Tu respuesta debe ser exclusivamente un objeto JSON válido. No generes markdown, ni bloques de código, ni texto fuera del JSON. Extrae la información en claims de tipo 'normative_fact'.
 
 FRAGMENTOS PARA REVISIÓN
 ${sourceText}`
@@ -904,92 +879,6 @@ function isParcelContextFactClaim(claim: string, context?: NormalizedParcelConte
   )
 }
 
-export function validateGeneratedAnswer(
-  answer: string,
-  sources: NormativeCandidate[],
-  applicability: ApplicabilityResult,
-  questionScope: ParcelQuestionScope = 'regime',
-  context?: NormalizedParcelContext,
-  isReviewMode = false,
-  question?: string
-): AnswerValidationResult {
-  const reasons: string[] = []
-  const citations = citedNumbers(answer)
-  const claims = splitClaims(answer)
-
-  if (!answer.trim()) reasons.push('La respuesta está vacía.')
-  if (INTERNAL_PRESENTATION_TOKEN_PATTERN.test(answer)) {
-    reasons.push('La respuesta contiene terminología interna no destinada al usuario.')
-  }
-  if (
-    question &&
-    applicability.canAnswerConditionalViability &&
-    assertsDefinitiveViability(answer)
-  ) {
-    reasons.push('La respuesta concluye edificabilidad sin evidencia suficiente.')
-  }
-  if (
-    question &&
-    context &&
-    startsWithCategoricalRegimeConfirmation(answer) &&
-    !canCategoricallyConfirmRequestedRegime(question, context)
-  ) {
-    reasons.push('La respuesta confirma categóricamente un régimen territorial no verificado o de otro ámbito.')
-  }
-  if (citations.some((citation) => citation < 1 || citation > sources.length)) {
-    reasons.push('La respuesta cita una fuente inexistente.')
-  }
-
-  for (const claim of claims) {
-    if (/\b(?:p[aá]gina|fuente\s+oficial|url|identificador)\b/i.test(claim)) continue
-    const normativeClaim = isNormativeClaim(claim)
-    const numbers = numericTokens(claim)
-    const regimeAbstention = /\b(?:no\s+puedo|no\s+es\s+posible|no\s+puede\s+determinarse|no\s+se\s+puede\s+determinar|falta|pendiente|requiere\s+(?:clasificaci[oó]n|revisi[oó]n))\b/i.test(
-      claim
-    )
-    const cautiousDocumentaryInventory =
-      hasExplicitRegimeUncertainty(answer) && isDocumentaryInventoryClaim(claim)
-
-    if (
-      !applicability.canAnswerConcreteParameters &&
-      attributesConcreteParameterToParcel(claim) &&
-      !regimeAbstention &&
-      !cautiousDocumentaryInventory
-    ) {
-      reasons.push('La respuesta atribuye un parámetro de parcela sin régimen determinado.')
-    }
-
-    if (regimeAbstention) continue
-
-    if (isParcelContextFactClaim(claim, context)) {
-      continue
-    }
-
-    if (isRetrievalMetaClaim(claim, normativeClaim, numbers)) {
-      continue
-    }
-    if (!isMaterialNormativeAssertion(claim, normativeClaim, numbers) || numbers.length === 0) continue
-
-    const claimCitations = claimCitationNumbers(claim)
-    if (claimCitations.length === 0) {
-      reasons.push('Existe una cifra normativa sin respaldo en las fuentes recuperadas.')
-      continue
-    }
-
-    for (const token of numbers) {
-      const supported = claimCitations.some((citation) => {
-        const source = sources[citation - 1]
-        if (!source) return false
-        const normalizedContent = source.content.replace(/\s+/g, '').toLowerCase()
-        return normalizedContent.includes(token)
-      })
-      if (!supported) reasons.push(`La cifra ${token} no aparece en la fuente citada.`)
-    }
-  }
-
-  return { valid: reasons.length === 0, reasons: unique(reasons), citations }
-}
-
 export function buildAnswerContract(
   answer: string,
   context: NormalizedParcelContext,
@@ -1023,4 +912,149 @@ export function buildAnswerContract(
     warnings: [...applicability.warnings, ...context.pendingValidation],
     decision,
   }
+}
+
+export function parseReasonerOutput(content: string): ReasonerOutput | null {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    if (!parsed || typeof parsed !== 'object') return null
+    const candidate = parsed as Record<string, unknown>
+    if (!['definitive', 'conditional', 'partial', 'abstain'].includes(String(candidate.answerMode))) return null
+    if (!Array.isArray(candidate.claims)) return null
+
+    for (const rawClaim of candidate.claims) {
+      if (!rawClaim || typeof rawClaim !== 'object') return null
+      const claim = rawClaim as Record<string, unknown>
+      if (typeof claim.id !== 'string') return null
+      if (!['territorial_fact', 'normative_fact', 'normative_conditional', 'parcel_conclusion', 'limitation'].includes(String(claim.type))) return null
+      if (typeof claim.text !== 'string') return null
+      if (!Array.isArray(claim.sourceRefs) || !claim.sourceRefs.every((ref: unknown) => typeof ref === 'number')) return null
+      if (![true, false, 'conditional', 'unknown'].includes(claim.appliesToParcel as boolean | 'conditional' | 'unknown')) return null
+      if (!Array.isArray(claim.numericTokens) || !claim.numericTokens.every((tok: unknown) => typeof tok === 'string')) return null
+    }
+
+    if (!Array.isArray(candidate.missingFacts) || !candidate.missingFacts.every((fact: unknown) => typeof fact === 'string')) return null
+
+    return parsed as ReasonerOutput
+  } catch {
+    return null
+  }
+}
+
+export interface ClaimValidationResult {
+  validClaims: ReasonerClaim[]
+  invalidClaimCount: number
+  invalidClaimReasonCounts: Record<string, number>
+  citations: number[]
+}
+
+export function validateReasonerOutput(
+  output: ReasonerOutput,
+  sources: NormativeCandidate[],
+  applicability: ApplicabilityResult,
+  context?: NormalizedParcelContext
+): ClaimValidationResult {
+  const validClaims: ReasonerClaim[] = []
+  const invalidClaimReasonCounts: Record<string, number> = {}
+  let invalidClaimCount = 0
+
+  const addInvalid = (reason: string) => {
+    invalidClaimCount++
+    invalidClaimReasonCounts[reason] = (invalidClaimReasonCounts[reason] || 0) + 1
+  }
+
+  for (const claim of output.claims) {
+    // 1. sourceRefs deben existir
+    if (claim.sourceRefs.some((ref) => ref < 1 || ref > sources.length)) {
+      addInvalid('NON_EXISTENT_SOURCE')
+      continue
+    }
+
+    // Defensive numeric tokens extraction
+    const defensiveNumericTokens = numericTokens(claim.text)
+    const combinedTokens = Array.from(new Set([...claim.numericTokens, ...defensiveNumericTokens]))
+
+    // 2. Cifras deben existir literalmente en las fuentes citadas
+    if (combinedTokens.length > 0) {
+      let missingNumber = false
+      for (const token of combinedTokens) {
+        let supported = false;
+        // If claim has no sourceRefs but has numbers? Invalid.
+        if (claim.sourceRefs.length === 0) {
+           missingNumber = true;
+           break;
+        }
+        for (const ref of claim.sourceRefs) {
+          const source = sources[ref - 1]
+          if (!source) continue
+          const normalizedContent = source.content.replace(/\s+/g, '').toLowerCase()
+          if (normalizedContent.includes(token)) {
+             supported = true;
+             break;
+          }
+        }
+        if (!supported) {
+          missingNumber = true
+          break
+        }
+      }
+      if (missingNumber) {
+        addInvalid('UNSUPPORTED_NUMBER')
+        continue
+      }
+    }
+
+    // 3, 4. AppliesToParcel / Parcel conclusion check
+    if (claim.type === 'parcel_conclusion' || claim.appliesToParcel === true) {
+      if (!applicability.canAnswerConcreteParameters) {
+        addInvalid('UNAUTHORIZED_CONCLUSION')
+        continue
+      }
+    }
+
+    // 5. La clasificación/categoría territorial del claim debe coincidir con hechos efectivos (handled mostly by fact claims matching Context, we can just enforce conflicts here)
+    // 6. Conflictos territoriales no pueden ser resueltos por el LLM
+    if (claim.type === 'parcel_conclusion' || claim.type === 'territorial_fact') {
+      if (applicability.status === 'CONFLICTIVO' || (context && enumeratedTerritorialConflictLines(context).length > 0)) {
+        addInvalid('CONFLICT_UNRESOLVED')
+        continue
+      }
+    }
+
+    validClaims.push(claim)
+  }
+
+  const citations = Array.from(new Set(validClaims.flatMap((c) => c.sourceRefs)))
+
+  return { validClaims, invalidClaimCount, invalidClaimReasonCounts, citations }
+}
+
+export function renderFinalAnswer(output: ReasonerOutput, validClaims: ReasonerClaim[]): string {
+  if (validClaims.length === 0) return ''
+
+  const limitations = validClaims.filter(c => c.type === 'limitation')
+  const material = validClaims.filter(c => c.type !== 'limitation')
+
+  const lines: string[] = []
+
+  if (material.length > 0) {
+    lines.push('CONCLUSIÓN')
+    // We just render the material claims directly.
+    material.forEach(c => {
+      const text = c.text.trim();
+      const needsDot = !/[.!?]$/.test(text);
+      const refs = c.sourceRefs.length > 0 ? ` ${c.sourceRefs.map(ref => `[Fuente ${ref}]`).join(' ')}` : '';
+      lines.push(`- ${text}${needsDot ? '.' : ''}${refs}`)
+    })
+    lines.push('')
+  }
+
+  if (limitations.length > 0 || output.missingFacts.length > 0) {
+    lines.push('ADVERTENCIAS Y DATOS PENDIENTES')
+    limitations.forEach(c => lines.push(`- ${c.text}`))
+    output.missingFacts.forEach(f => lines.push(`- Dato pendiente: ${f}`))
+    lines.push('')
+  }
+
+  return lines.join('\n').trim()
 }

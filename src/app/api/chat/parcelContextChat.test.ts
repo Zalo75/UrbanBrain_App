@@ -72,7 +72,7 @@ describe('POST /api/chat parcel context boundary', () => {
     mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
     mocks.abortSignal.mockResolvedValue({ data: [], error: null })
     mocks.completionCreate.mockResolvedValue({
-      choices: [{ message: { content: 'El documento vigente se identifica en la fuente [Fuente 1].' } }],
+      choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "El documento vigente se identifica en la fuente [Fuente 1].", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }) } }],
     })
     mocks.getExpedienteAccess.mockResolvedValue({
       ok: true,
@@ -364,7 +364,7 @@ describe('POST /api/chat parcel context boundary', () => {
     mocks.completionCreate.mockResolvedValue({
       choices: [{
         message: {
-          content: 'La parcela está afectada por la zona de protección de carreteras [Fuente 1]. No puedo determinar el retranqueo urbanístico sin clasificación y ordenanza confirmadas.',
+          content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "La parcela está afectada por la zona de protección de carreteras [Fuente 1]. No puedo determinar el retranqueo urbanístico sin clasificación y ordenanza confirmadas.", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }),
         },
       }],
     })
@@ -578,7 +578,7 @@ describe('POST /api/chat parcel context boundary', () => {
       userMessages: [], constraints: [],
     })
     mocks.abortSignal.mockResolvedValue({ data: [{ chunk_id: 'chunk-1', texto: 'Norma municipal vigente.', municipio_nombre: 'Culleredo', nombre_pdf: 'PXOM Culleredo' }], error: null })
-    mocks.completionCreate.mockResolvedValue({ choices: [{ message: { content: 'La norma permite licencia directa.' } }] })
+    mocks.completionCreate.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "La norma permite licencia directa.", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }) } }] })
 
     const response = await POST(new NextRequest('http://localhost/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -651,16 +651,20 @@ describe('POST /api/chat parcel context boundary', () => {
       const system = String(request.messages?.[0]?.content ?? '')
       if (system.includes('FRAGMENTOS AUTORIZADOS')) {
         return {
-          choices: [{ message: { content: [
-            'CONCLUSIÓN',
-            'Con la información disponible todavía no puede confirmarse que la parcela sea edificable.',
-            '',
-            'CONTEXTO DE PARCELA UTILIZADO',
-            'La parcela está clasificada como suelo rústico [contexto].',
-            '',
-            'FUNDAMENTO POR NIVEL NORMATIVO',
-            'La normativa general exige comprobar la categoría y las autorizaciones sectoriales aplicables [Fuente 1].',
-          ].join('\n') } }],
+          choices: [{ message: { content: JSON.stringify({
+            answerMode: 'conditional',
+            claims: [
+              {
+                id: 'claim_1',
+                type: 'normative_conditional',
+                text: 'Con la información disponible todavía no puede confirmarse que la parcela sea edificable sin conocer la categoría de suelo rústico y las autorizaciones sectoriales aplicables.',
+                sourceRefs: [1],
+                appliesToParcel: 'conditional',
+                numericTokens: [],
+              },
+            ],
+            missingFacts: ['categoría de suelo rústico', 'autorizaciones sectoriales'],
+          }) } }],
         }
       }
       return {
@@ -734,7 +738,7 @@ describe('POST /api/chat parcel context boundary', () => {
     })
     mocks.completionCreate.mockResolvedValue({
       choices: [{ message: {
-        content: 'La normativa de carreteras regula las zonas de protección [Fuente 1].',
+        content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: 'claim_1', type: 'normative_fact', text: "La normativa de carreteras regula las zonas de protección [Fuente 1].", sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }], missingFacts: [] }),
       } }],
     })
 
@@ -812,27 +816,42 @@ describe('POST /api/chat parcel context boundary', () => {
       error: null,
     })
 
-    mocks.completionCreate.mockImplementation((req: any) => {
+    mocks.completionCreate.mockImplementation((req: { messages: Array<{ content: string }> }) => {
       const systemPrompt = req.messages[0].content
-      if (systemPrompt.includes('Tu tarea es extraer la información solicitada')) {
+      // buildReviewSafetyPrompt is used when review.length > 0, scope='regime', status='PARCIAL'
+      if (systemPrompt.includes('Tu tarea es extraer la información solicitada') ||
+          systemPrompt.includes('FRAGMENTOS AUTORIZADOS')) {
         return Promise.resolve({
-          choices: [{
-            message: {
-              content: `INFORMACIÓN LOCALIZADA
-La normativa recuperada contiene las siguientes determinaciones relacionadas con la consulta:
-- disposiciones sobre retranqueos, según documento [Fuente 1].
-
-VERIFICACIÓN NECESARIA
-La relación de estas determinaciones con el ámbito CASCAS o con la ordenanza aplicable todavía no está acreditada.
-
-FUENTES
-- [Fuente 1]: 0060no011.pdf, no identificada, enlace oficial no disponible.`
-            }
-          }],
+          choices: [{ message: { content: JSON.stringify({
+            answerMode: 'partial',
+            claims: [
+              {
+                id: 'claim_1',
+                type: 'normative_fact',
+                text: 'La normativa recuperada contiene disposiciones sobre retranqueos según el documento [Fuente 1].',
+                sourceRefs: [1],
+                appliesToParcel: 'conditional',
+                numericTokens: [],
+              },
+              {
+                id: 'claim_2',
+                type: 'limitation',
+                text: 'La relación de estas determinaciones con el ámbito CASCAS o con la ordenanza aplicable todavía no está acreditada.',
+                sourceRefs: [1],
+                appliesToParcel: 'conditional',
+                numericTokens: [],
+              },
+            ],
+            missingFacts: ['ordenanza o ficha de zona CASCAS aplicable'],
+          }) } }],
         })
       }
       return Promise.resolve({
-        choices: [{ message: { content: 'El documento vigente se identifica en la fuente [Fuente 1].' } }],
+        choices: [{ message: { content: JSON.stringify({
+          intent: 'normativa_lookup', required_scopes: [],
+          required_categories: [], needs_context: true,
+          needs_sources: true, extracted_parameters: {},
+        }) } }],
       })
     })
 
