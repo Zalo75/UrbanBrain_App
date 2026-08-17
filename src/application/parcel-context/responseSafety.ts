@@ -36,6 +36,11 @@ function unique<T>(values: T[]) {
   return [...new Set(values)]
 }
 
+function stripInlineSourceReferences(text: string) {
+  // Structured sourceRefs are authoritative; inline model markers are presentation noise.
+  return text.replace(/\s*\[Fuente\s+\d+\]/gi, '').replace(/[ \t]{2,}/g, ' ').trim()
+}
+
 function confidenceLabel(confidence: number) {
   if (confidence >= 0.85) return 'alta'
   if (confidence >= 0.65) return 'media'
@@ -699,7 +704,8 @@ REGLAS OBLIGATORIAS
 12. Todo dato procedente del CONTEXTO DE PARCELA debe llevar literalmente [contexto] en la misma frase, incluidos superficies, referencia catastral, dirección, coordenadas, clasificación, categoría, instrumento, ámbito, afecciones, vigencia y fechas de verificación.
 13. Si la pregunta pide confirmar la clasificación o categoría de toda la parcela o del área seleccionada, usa únicamente los hechos estructurados de ese mismo ámbito. Nunca extrapoles entre la parcela completa y el área seleccionada.
 14. Ante una verificación pendiente, un conflicto o un hecho no resuelto, no comiences con "Sí" ni formules una confirmación categórica: describe el dato como provisional y explica qué falta verificar. Un hecho confirmado automáticamente o validado por técnico del mismo ámbito sí puede confirmarse.
-15. ${applicability.canAnswerConditionalViability
+15. Clasifica cada claim por su función: parcel_conclusion responde directamente a la pregunta y solo con aplicabilidad acreditada; normative_conditional explica una dependencia material; normative_fact describe la evidencia normativa sin convertirla en una conclusión parcelaria; limitation explica por qué no puede cerrarse una respuesta.
+16. ${applicability.canAnswerConditionalViability
     ? 'La pregunta solicita una valoración general condicionada: explica el régimen territorial acreditado y la normativa recuperada, pero no concluyas que la parcela es o no es edificable, ni proporciones parámetros cerrados. Indica qué categoría, afecciones o comprobaciones faltan.'
     : questionScope === 'regime'
     ? 'La pregunta solicita un parámetro dependiente del régimen de la parcela: no lo afirmes si la clasificación, zona o instrumento aplicable no están determinados.'
@@ -766,6 +772,7 @@ REGLAS OBLIGATORIAS
 4. Incluye documento, artículo/apartado y página en cada extracción.
 5. Cita las fuentes usando [Fuente N].
 6. Tu respuesta debe ser exclusivamente un objeto JSON válido. No generes markdown, ni bloques de código, ni texto fuera del JSON. Extrae la información en claims de tipo 'normative_fact'.
+7. Usa normative_fact para describir la normativa localizada, no para afirmar que una regla se aplica a la parcela. Usa parcel_conclusion únicamente cuando la pregunta y la evidencia permitan una conclusión parcelaria.
 
 FRAGMENTOS PARA REVISIÓN
 ${sourceText}`
@@ -1093,7 +1100,7 @@ export function renderFinalAnswer(
     lines.push('CONCLUSIÓN')
     // We just render the material claims directly.
     material.forEach(c => {
-      const text = c.text.trim();
+      const text = stripInlineSourceReferences(c.text);
       const needsDot = !/[.!?]$/.test(text);
       const refs = c.sourceRefs.length > 0
         ? ` ${Array.from(new Set(c.sourceRefs)).map(ref => `[Fuente ${ref}]`).join(' ')}`

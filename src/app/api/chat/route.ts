@@ -32,9 +32,13 @@ import {
   sanitizeTechnicalPlaceholders,
   parseReasonerOutput,
   validateReasonerOutput,
-  renderFinalAnswer,
   type ClaimValidationResult,
 } from '@/application/parcel-context/responseSafety';
+import {
+  classifyQuestionIntent,
+  composeSemanticAnswer,
+  type SemanticCompositionResult,
+} from '@/application/parcel-context/semanticAnswerComposition';
 import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
 import type { ApplicabilityResult, NormativeCandidate, ReasonerOutput } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
@@ -254,6 +258,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const questionScope = classifyParcelQuestionScope(message);
     const concreteParameterRequested = requiresDeterminedParcelRegime(message);
     const conditionalViabilityRequested = isConditionalViabilityQuestion(message);
+    const questionIntent = classifyQuestionIntent(
+      message,
+      questionScope,
+      concreteParameterRequested,
+      conditionalViabilityRequested
+    );
     const normativeScope = buildNormativeSearchScope({
       context: parcelContext,
       municipioCodigo: trustedMunicipioCodigo,
@@ -959,6 +969,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         rejectedCount: applicability.rejected.length,
         missingDataCount: deterministicMissingFacts.length,
         reviewOnlyClaimRejectedCount: Number(extraParams.reviewOnlyClaimRejectedCount ?? 0),
+        questionIntent,
+        primaryClaimCount: Number(extraParams.primaryClaimCount ?? 0),
+        contextClaimCount: Number(extraParams.contextClaimCount ?? 0),
+        irrelevantClaimCount: Number(extraParams.irrelevantClaimCount ?? 0),
+        semanticFallbackUsed: Boolean(extraParams.semanticFallbackUsed ?? false),
+        semanticFallbackReason: extraParams.semanticFallbackReason ?? null,
         conflictCount: applicability.conflicts.length, ...extraParams, });
     }
 
@@ -1083,6 +1099,7 @@ ${usedV2 ? v2Citas : 'N/A'}
     let reasonerParseFailureCode: string | null = null;
     let outputParsed = false;
     let parsed: ReasonerOutput | null = null;
+    let semanticComposition: SemanticCompositionResult | null = null;
 
     const maxRetries = 1;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1137,24 +1154,48 @@ ${usedV2 ? v2Citas : 'N/A'}
       validation = validateReasonerOutput(parsed, answerCandidates, applicability, parcelContext);
 
       if (validation.validClaims.length === 0) {
-        decision = 'abstain';
-        const failedApplicability: ApplicabilityResult = {
-          ...applicability,
-          missingData: [
-            ...applicability.missingData,
-            'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
-          ],
-          canAnswerConcreteParameters: false,
-        };
-        answer = buildSafeAbstention(failedApplicability, parcelContext, message);
-        applicability = failedApplicability;
-        sources = [];
+        const semanticFallbackEligible =
+          (questionIntent === 'parcel_parameter' && applicability.applicable.length === 0 && applicability.review.length > 0) ||
+          (questionIntent === 'parcel_viability' && applicability.canAnswerConditionalViability === true);
+        if (semanticFallbackEligible) {
+          semanticComposition = composeSemanticAnswer(
+            parsed,
+            [],
+            message,
+            questionIntent,
+            answerCandidates,
+            applicability,
+            buildDeterministicMissingFacts(applicability, parcelContext),
+            parcelContext
+          );
+          answer = semanticComposition.answer;
+          sources = mapVisibleSources(answerCandidates);
+        } else {
+          decision = 'abstain';
+          const failedApplicability: ApplicabilityResult = {
+            ...applicability,
+            missingData: [
+              ...applicability.missingData,
+              'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
+            ],
+            canAnswerConcreteParameters: false,
+          };
+          answer = buildSafeAbstention(failedApplicability, parcelContext, message);
+          applicability = failedApplicability;
+          sources = [];
+        }
       } else {
-        answer = renderFinalAnswer(
+        semanticComposition = composeSemanticAnswer(
           parsed,
           validation.validClaims,
-          buildDeterministicMissingFacts(applicability, parcelContext)
+          message,
+          questionIntent,
+          answerCandidates,
+          applicability,
+          buildDeterministicMissingFacts(applicability, parcelContext),
+          parcelContext
         );
+        answer = semanticComposition.answer;
       }
 
       break;
@@ -1214,7 +1255,12 @@ ${usedV2 ? v2Citas : 'N/A'}
         reviewOnlyClaimRejectedCount: validation?.invalidClaimReasonCounts.REVIEW_ONLY_PARCEL_CLAIM ?? 0,
         renderedFromClaims: outputParsed && validation && validation.validClaims.length > 0,
         reasonerRetryUsed,
-        reasonerParseFailureCode
+        reasonerParseFailureCode,
+        primaryClaimCount: semanticComposition?.primaryClaimCount ?? 0,
+        contextClaimCount: semanticComposition?.contextClaimCount ?? 0,
+        irrelevantClaimCount: semanticComposition?.irrelevantClaimCount ?? 0,
+        semanticFallbackUsed: semanticComposition?.semanticFallbackUsed ?? false,
+        semanticFallbackReason: semanticComposition?.semanticFallbackReason ?? null,
       }
     );
 
