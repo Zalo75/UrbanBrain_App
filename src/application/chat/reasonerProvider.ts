@@ -164,7 +164,13 @@ export class OpenAIReasonerProvider implements ReasonerProvider {
 
 export function getReasonerProvider(): ReasonerProvider {
   let provider: ReasonerProvider;
-  if (process.env.URBANBRAIN_REASONER_PROVIDER === 'openai') {
+  let providerType = process.env.URBANBRAIN_REASONER_PROVIDER;
+  
+  if (!providerType && process.env.NODE_ENV === 'development') {
+    providerType = 'openai';
+  }
+
+  if (providerType === 'openai') {
     provider = new OpenAIReasonerProvider();
   } else {
     provider = new DeepSeekReasonerProvider();
