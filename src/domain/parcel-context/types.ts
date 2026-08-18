@@ -88,6 +88,15 @@ export type NormativeHierarchyLevel =
   | 'ficha'
   | 'sectorial'
 
+export interface NormativeRegimeIdentity {
+  kind: 'ordinance' | 'planning_area' | 'land_class' | 'general' | 'equivalent'
+  code?: string
+  label?: string
+  instrumentId?: string
+  provenance: 'explicit_heading' | 'inherited_heading' | 'deterministic_inference' | 'ai_assisted' | 'manual'
+  confidence: 'high' | 'medium' | 'low'
+}
+
 export interface NormativeCandidate {
   id: string
   content: string
@@ -99,6 +108,7 @@ export interface NormativeCandidate {
   similarity?: number | null
   hierarchy?: NormativeHierarchyLevel
   status?: string | null
+  regimeMetadata?: NormativeRegimeIdentity | null
   ordinance?: string | null
   landClass?: string | null
   planningArea?: string | null

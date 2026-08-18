@@ -594,6 +594,7 @@ export const normativeChunksV2 = pgTable(
       .references(() => normativeDocumentsV2.id, { onDelete: 'cascade' })
       .notNull(),
     content: text('content').notNull(),
+    metadata: jsonb('metadata'),
     embedding: vector768('embedding'),
     page: customType<{ data: number; driverData: number }>({
       dataType() {

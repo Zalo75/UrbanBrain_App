@@ -108,7 +108,25 @@ function matchesExpected(candidate: NormativeCandidate, expected: string) {
   return normalizeComparable(candidateText(candidate)).includes(normalizedExpected)
 }
 
+function isStructuredRegimeCompatible(candidate: NormativeCandidate, expected: string, kind: 'ordinance' | 'planning_area'): boolean | null {
+  if (candidate.regimeMetadata) {
+    if (candidate.regimeMetadata.kind === kind || candidate.regimeMetadata.kind === 'equivalent') {
+      const codeMatches = candidate.regimeMetadata.code && normalizeComparable(candidate.regimeMetadata.code) === normalizeComparable(expected);
+      const labelMatches = candidate.regimeMetadata.label && normalizeComparable(candidate.regimeMetadata.label) === normalizeComparable(expected);
+      if (codeMatches || labelMatches) return true;
+      return false; // Structured metadata exists and does not match!
+    } else if (candidate.regimeMetadata.kind === 'general') {
+      return true; // General provisions are compatible with anything
+    }
+    return false;
+  }
+  return null;
+}
+
 function hasCompatiblePlanningArea(candidate: NormativeCandidate, expected: string) {
+  const structuredMatch = isStructuredRegimeCompatible(candidate, expected, 'planning_area');
+  if (structuredMatch !== null) return structuredMatch;
+
   const areas = extractPlanningAreas(candidate)
   return areas.length > 0
     ? areas.some((area) => normalizeComparable(area) === normalizeComparable(expected))
@@ -116,6 +134,9 @@ function hasCompatiblePlanningArea(candidate: NormativeCandidate, expected: stri
 }
 
 function hasCompatibleOrdinance(candidate: NormativeCandidate, expected: string) {
+  const structuredMatch = isStructuredRegimeCompatible(candidate, expected, 'ordinance');
+  if (structuredMatch !== null) return structuredMatch;
+
   const ordinances = extractOrdinances(candidate)
   return ordinances.length > 0
     ? ordinances.some(
@@ -275,7 +296,7 @@ export function evaluateApplicability(
       context.validity?.verification === 'confirmed'
   )
   if (concreteParameterRequested && result.missingData.length === 0 && !requiredFieldsAreConfirmed) {
-    result.missingData.push('confirmación técnica del régimen urbanístico aplicable')
+    result.missingData.push('MISSING_REGIME_VALIDATION')
   }
 
   const hasCompleteParcelRegime = Boolean(
@@ -324,7 +345,7 @@ export function evaluateApplicability(
     if (
       municipalDetailed &&
       expectedArea &&
-      extractPlanningAreas(candidate).length > 0 &&
+      (candidate.regimeMetadata || extractPlanningAreas(candidate).length > 0) &&
       !hasCompatiblePlanningArea(candidate, expectedArea)
     ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otro ámbito, sector o ficha.' })
@@ -334,7 +355,7 @@ export function evaluateApplicability(
     if (
       municipalDetailed &&
       expectedQualification &&
-      extractOrdinances(candidate).length > 0 &&
+      (candidate.regimeMetadata || extractOrdinances(candidate).length > 0) &&
       !hasCompatibleOrdinance(candidate, expectedQualification)
     ) {
       result.rejected.push({ candidate, reason: 'El chunk corresponde a otra ordenanza o calificación.' })
@@ -345,6 +366,7 @@ export function evaluateApplicability(
       municipalDetailed &&
       concreteParameterRequested &&
       (expectedQualification || expectedArea) &&
+      !candidate.regimeMetadata &&
       extractPlanningAreas(candidate).length === 0 &&
       extractOrdinances(candidate).length === 0 &&
       !matchesExpected(candidate, expectedQualification ?? expectedArea!)
@@ -357,6 +379,7 @@ export function evaluateApplicability(
       municipalDetailed &&
       concreteParameterRequested &&
       (expectedQualification || expectedArea) &&
+      !candidate.regimeMetadata &&
       !(
         (expectedQualification && hasCompatibleOrdinance(candidate, expectedQualification)) ||
         (expectedArea && hasCompatiblePlanningArea(candidate, expectedArea))
@@ -372,6 +395,18 @@ export function evaluateApplicability(
     }
 
     result.applicable.push(candidate)
+  }
+
+  const isTechnicianValidated = context.reliability?.mode === 'technician_validated_manual';
+  if (
+    isTechnicianValidated &&
+    result.missingData.includes('MISSING_REGIME_VALIDATION') &&
+    result.applicable.some(c => 
+      (expectedQualification && isStructuredRegimeCompatible(c, expectedQualification, 'ordinance') === true) ||
+      (expectedArea && isStructuredRegimeCompatible(c, expectedArea, 'planning_area') === true)
+    )
+  ) {
+    result.missingData = result.missingData.filter(d => d !== 'MISSING_REGIME_VALIDATION');
   }
 
   if (result.conflicts.length > 0) {
@@ -405,7 +440,16 @@ export function evaluateApplicability(
     return result
   }
 
+  const finalCompleteParcelRegime = Boolean(
+    expectedMunicipality &&
+      (context.cadastralReference || context.address || context.coordinates) &&
+      expectedLandClass &&
+      (expectedQualification || expectedArea) &&
+      context.planningInstrument &&
+      context.validity &&
+      !result.missingData.includes('MISSING_REGIME_VALIDATION')
+  )
   result.status = expectedMunicipality ? 'DETERMINADO' : 'PARCIAL'
-  result.canAnswerConcreteParameters = result.status === 'DETERMINADO' && hasCompleteParcelRegime
+  result.canAnswerConcreteParameters = result.status === 'DETERMINADO' && finalCompleteParcelRegime
   return result
 }

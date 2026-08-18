@@ -1,0 +1,96 @@
+{
+  "operations": [
+    {
+      "factRef": {
+        "type": "classification",
+        "scope": "parcel"
+      },
+      "operation": "state_conflict"
+    },
+    {
+      "factRef": {
+        "type": "classification",
+        "scope": "parcel"
+      },
+      "operation": "state_determination",
+      "determination": "unresolved"
+    },
+    {
+      "factRef": {
+        "code": "SNRT",
+        "type": "category",
+        "scope": "parcel"
+      },
+      "operation": "state_conflict"
+    },
+    {
+      "factRef": {
+        "code": "SNRT",
+        "type": "category",
+        "scope": "parcel"
+      },
+      "operation": "state_determination",
+      "determination": "unresolved"
+    },
+    {
+      "factRef": {
+        "code": "SNRC",
+        "type": "category",
+        "scope": "parcel"
+      },
+      "operation": "state_conflict"
+    },
+    {
+      "factRef": {
+        "code": "SNRC",
+        "type": "category",
+        "scope": "parcel"
+      },
+      "operation": "state_determination",
+      "determination": "unresolved"
+    },
+    {
+      "factRef": {
+        "type": "consolidation",
+        "scope": "parcel"
+      },
+      "operation": "state_conflict"
+    },
+    {
+      "factRef": {
+        "type": "consolidation",
+        "scope": "parcel"
+      },
+      "operation": "state_determination",
+      "determination": "unresolved"
+    },
+    {
+      "label": "transporte: Área de carretera estatal o provincial",
+      "factRef": {
+        "type": "affect",
+        "label": "transporte: Área de carretera estatal o provincial",
+        "scope": "parcel"
+      },
+      "operation": "state_label"
+    },
+    {
+      "status": "automatic_confirmed",
+      "factRef": {
+        "type": "affect",
+        "label": "transporte: Área de carretera estatal o provincial",
+        "scope": "parcel"
+      },
+      "operation": "state_status"
+    },
+    {
+      "factRef": {
+        "type": "affect",
+        "label": "transporte: Área de carretera estatal o provincial",
+        "scope": "parcel"
+      },
+      "operation": "state_determination",
+      "determination": "effective"
+    }
+  ],
+  "abstentions": []
+}

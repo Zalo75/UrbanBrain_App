@@ -165,7 +165,7 @@ describe('evaluateApplicability', () => {
     const result = evaluateApplicability(context, [candidate()], true)
 
     expect(result.status).toBe('PARCIAL')
-    expect(result.missingData).toContain('confirmación técnica del régimen urbanístico aplicable')
+    expect(result.missingData).toContain('MISSING_REGIME_VALIDATION')
     expect(result.canAnswerConcreteParameters).toBe(false)
   })
 

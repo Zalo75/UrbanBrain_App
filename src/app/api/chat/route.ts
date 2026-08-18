@@ -80,6 +80,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+import { NormativeRegimeIdentity } from '@/domain/parcel-context/types'
+
 interface V1Chunk {
   chunk_id: string | number;
   texto?: string | null;
@@ -89,6 +91,7 @@ interface V1Chunk {
   pagina_detectada?: string | number | null;
   original_path?: string | null;
   similarity?: number | null;
+  metadata?: { regime?: NormativeRegimeIdentity } | null;
 }
 
 interface V2SearchResult {
@@ -104,6 +107,7 @@ interface V2SearchResult {
   officialIdentifier?: string | null;
   scope?: string | null;
   category?: string | null;
+  metadata?: { regime?: NormativeRegimeIdentity } | null;
 }
 
 type ChatNormativeCandidate = NormativeCandidate & {
@@ -159,8 +163,8 @@ function mapV1Candidates(
     sourceUrl: chunk.original_path ?? null,
     similarity: chunk.similarity ?? null,
     hierarchy,
-    // The scope limits retrieval; it is not evidence contained in the chunk.
-    // V1 rows do not expose a proven ordinance or planning-area attribute.
+    regimeMetadata: chunk.metadata?.regime ?? null,
+    // Keep legacy attributes as null unless proven elsewhere
     ordinance: null,
     planningArea: null,
     parentInstrument: scope?.instrumentId ?? null,
@@ -777,6 +781,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               similarity: result.similarity,
               hierarchy: hierarchyForSupplementaryCandidate(result),
               status: 'vigente',
+              regimeMetadata: result.metadata?.regime ?? null,
               visibleSourceKind: 'normative_v2',
             }));
 
@@ -930,6 +935,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         if (d.includes('ámbito') || d.includes('zona')) return 'MISSING_AMBITO';
         if (d.includes('categoría')) return 'MISSING_CATEGORIA';
         if (d.includes('evidencia documental suficiente')) return 'MISSING_DOCUMENTARY_EVIDENCE';
+        if (d.includes('MISSING_REGIME_VALIDATION')) return 'MISSING_REGIME_VALIDATION';
         return 'MISSING_UNKNOWN';
       });
 
