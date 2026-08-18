@@ -907,7 +907,7 @@ export function canonicalizeNumericToken(token: string): string {
 
 export function numericTokens(claim: string) {
   const regex = /(?<!\w)\d+(?:[.,]\d+)*\s*(?:%|m²|m2|metros?|m|cent[íi]metros?|cm|plantas?)?(?!\w)/gi;
-  const stripped = claim.replace(/\[Fuente\s+\d+\]/gi, '');
+  const stripped = claim.replace(/\[Fuente\s+\d+\]/gi, '').replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/gi, '');
   const matches = [...stripped.matchAll(regex)].map(m => m[0]);
   return unique(matches.map(canonicalizeNumericToken));
 }
@@ -1126,7 +1126,10 @@ export function validateReasonerOutput(
            break;
         }
         
-        const numPart = (t: string) => t.replace(/[^\d.]/g, '');
+        const numPart = (t: string) => {
+          const match = t.match(/^[+-]?\d+(?:\.\d+)?/);
+          return match ? match[0] : t;
+        };
         for (const ref of claim.sourceRefs) {
           const source = sources[ref - 1]
           if (!source) continue
@@ -1163,8 +1166,12 @@ export function validateReasonerOutput(
     // 3, 4. AppliesToParcel / Parcel conclusion check
     if (claim.type === 'parcel_conclusion' || claim.appliesToParcel === true) {
       if (!applicability.canAnswerConcreteParameters) {
-        addInvalid('UNAUTHORIZED_CONCLUSION')
-        continue
+        if (claim.type === 'limitation' || (claim.type === 'territorial_fact' && !attributesConcreteParameterToParcel(claim.text))) {
+          // ALLOW purely territorial facts and limitations
+        } else {
+          addInvalid('UNAUTHORIZED_CONCLUSION')
+          continue
+        }
       }
     }
 
