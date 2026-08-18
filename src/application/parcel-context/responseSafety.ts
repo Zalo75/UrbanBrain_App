@@ -858,12 +858,58 @@ function claimCitationNumbers(claim: string) {
   return [...claim.matchAll(/\[Fuente\s+(\d+)\]/gi)].map((match) => Number(match[1]))
 }
 
-function numericTokens(claim: string) {
-  return unique(
-    [...claim.replace(/\[Fuente\s+\d+\]/gi, '').matchAll(/\b\d+(?:[.,]\d+)?\s*(?:%|m²|m2|m|cm|plantas?)?\b/gi)].map(
-      (match) => match[0].replace(/\s+/g, '').toLowerCase()
-    )
-  )
+
+export function canonicalizeNumericToken(token: string): string {
+  const canon = token.replace(/\s+/g, '').toLowerCase();
+  
+  const match = canon.match(/^([\d.,]+)(.*)$/);
+  if (!match) return canon;
+
+  const numPart = match[1];
+  let unitPart = match[2];
+
+  const hasComma = numPart.includes(',');
+  const hasDot = numPart.includes('.');
+  
+  let normalizedNum: number;
+  if (hasComma && hasDot) {
+    const raw = numPart.replace(/\./g, '').replace(',', '.');
+    normalizedNum = parseFloat(raw);
+  } else if (hasComma) {
+    const raw = numPart.replace(',', '.');
+    normalizedNum = parseFloat(raw);
+  } else if (hasDot) {
+    const parts = numPart.split('.');
+    if (parts.length > 1 && parts[parts.length - 1].length === 3) {
+      const raw = numPart.replace(/\./g, '');
+      normalizedNum = parseFloat(raw);
+    } else {
+      normalizedNum = parseFloat(numPart);
+    }
+  } else {
+    normalizedNum = parseFloat(numPart);
+  }
+
+  const canonNumStr = Number.isNaN(normalizedNum) ? numPart : normalizedNum.toString();
+
+  if (unitPart === 'm²' || unitPart === 'm2') {
+    unitPart = 'm2';
+  } else if (unitPart === 'metros' || unitPart === 'metro' || unitPart === 'm') {
+    unitPart = 'm';
+  } else if (unitPart === 'centimetros' || unitPart === 'centímetro' || unitPart === 'centímetros' || unitPart === 'cm') {
+    unitPart = 'cm';
+  } else if (unitPart.startsWith('planta')) {
+    unitPart = 'plantas';
+  }
+
+  return canonNumStr + unitPart;
+}
+
+export function numericTokens(claim: string) {
+  const regex = /(?<!\w)\d+(?:[.,]\d+)*\s*(?:%|m²|m2|metros?|m|cent[íi]metros?|cm|plantas?)?(?!\w)/gi;
+  const stripped = claim.replace(/\[Fuente\s+\d+\]/gi, '');
+  const matches = [...stripped.matchAll(regex)].map(m => m[0]);
+  return unique(matches.map(canonicalizeNumericToken));
 }
 
 function isStructuredFactClaim(claim: string, context?: NormalizedParcelContext) {
@@ -1046,25 +1092,46 @@ export function validateReasonerOutput(
       continue
     }
 
-    // Defensive numeric tokens extraction
     const defensiveNumericTokens = numericTokens(claim.text)
-    const combinedTokens = Array.from(new Set([...claim.numericTokens, ...defensiveNumericTokens]))
+    const combinedTokens = Array.from(new Set([...claim.numericTokens.map(canonicalizeNumericToken), ...defensiveNumericTokens]))
 
-    // 2. Cifras deben existir literalmente en las fuentes citadas
+    const contextTokens = new Set<string>();
+    if (context) {
+      const addNum = (num?: number) => {
+        if (num !== undefined && num !== null && !isNaN(num)) {
+          const s = num.toString();
+          contextTokens.add(s);
+          contextTokens.add(s + 'm2');
+          contextTokens.add(s + '%');
+        }
+      }
+      addNum(context.parcelSurfaceSquareMetres);
+      addNum(context.actionArea?.value.surfaceSquareMetres);
+      context.urbanisticFacts?.category.candidates?.forEach(c => addNum(c.parcelPercentage));
+      context.urbanisticFacts?.classification.candidates?.forEach(c => addNum(c.parcelPercentage));
+    }
+
     if (combinedTokens.length > 0) {
       let missingNumber = false
       for (const token of combinedTokens) {
         let supported = false;
-        // If claim has no sourceRefs but has numbers? Invalid.
+        
+        if (contextTokens.has(token)) {
+          supported = true;
+          continue;
+        }
+
         if (claim.sourceRefs.length === 0) {
            missingNumber = true;
            break;
         }
+        
+        const numPart = (t: string) => t.replace(/[^\d.]/g, '');
         for (const ref of claim.sourceRefs) {
           const source = sources[ref - 1]
           if (!source) continue
-          const normalizedContent = source.content.replace(/\s+/g, '').toLowerCase()
-          if (normalizedContent.includes(token)) {
+          const sourceTokens = numericTokens(source.content)
+          if (sourceTokens.some(st => st === token || (numPart(st) === numPart(token) && (st.includes(token) || token.includes(st))))) {
              supported = true;
              break;
           }

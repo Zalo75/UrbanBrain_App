@@ -95,6 +95,8 @@ function isSpeculativeHypothesis(claim: ReasonerClaim) {
   return /\b(?:si\s+(?:se\s+trata|existe|es|la\s+parcela|el\s+ambito|suelo)|en\s+(?:el\s+)?supuesto|en\s+(?:el\s+)?caso\s+de\s+(?:que|tratarse)|dependera\s+de|podria|salvo\s+que)\b/.test(text)
 }
 
+
+
 export function classifyQuestionIntent(
   question: string,
   questionScope: ParcelQuestionScope,
@@ -169,7 +171,10 @@ export function evaluateClaimRelevance(
       }
       return { code: 'DIRECT', role: 'PRIMARY', reason: 'conditional-viability-evidence' }
     }
-    if ((claim.type === 'normative_fact' || claim.type === 'territorial_fact') && applicable && claimIsMateriallyViable(claim)) {
+    if (claim.type === 'territorial_fact') {
+      return { code: 'SUPPORTING', role: 'SUPPORTING', reason: 'territorial-context' }
+    }
+    if (claim.type === 'normative_fact' && applicable && claimIsMateriallyViable(claim)) {
       return { code: 'SUPPORTING', role: 'SUPPORTING', reason: 'viability-support' }
     }
     return { code: 'IRRELEVANT', role: 'IRRELEVANT', reason: 'not-material-to-viability' }
@@ -327,58 +332,99 @@ export function composeSemanticAnswer(
 
   let semanticFallbackReason: SemanticFallbackReason | null = null
   let fallbackText: string | null = null
+  let isStructuredConditional = false
+
   if (primaryClaims.length === 0) {
     if (questionIntent === 'parcel_parameter' && applicability.applicable.length === 0 && (applicability.review ?? []).length > 0) {
       semanticFallbackReason = 'NO_APPLICABLE_PARAMETER_EVIDENCE'
       fallbackText = parameterFallback(question)
     } else if (questionIntent === 'parcel_viability' && applicability.canAnswerConditionalViability) {
-      semanticFallbackReason = 'CONDITIONAL_VIABILITY_ONLY'
-      fallbackText = viabilityFallback(deterministicMissingFacts, context)
+      const hasTerritorial = supportClaims.some(c => c.type === 'territorial_fact')
+      const hasNormative = supportClaims.some(c => c.type === 'normative_fact' || c.type === 'normative_conditional')
+      const hasLimitation = limitationClaims.length > 0 || deterministicMissingFacts.length > 0
+      
+      if (hasTerritorial && hasNormative && hasLimitation) {
+        semanticFallbackReason = 'CONDITIONAL_VIABILITY_ONLY'
+        isStructuredConditional = true
+      } else {
+        semanticFallbackReason = 'CONDITIONAL_VIABILITY_ONLY'
+        fallbackText = viabilityFallback(deterministicMissingFacts, context)
+      }
     } else {
       semanticFallbackReason = 'NO_RELEVANT_PRIMARY_CLAIM'
       fallbackText = limitationClaims[0] ? stripInlineCitations(limitationClaims[0].text) : 'La evidencia recuperada no permite cerrar una respuesta material a la pregunta.'
     }
   }
 
-  const lines: string[] = ['CONCLUSIÓN']
-  if (primaryClaims.length > 0) {
-    primaryClaims.forEach((claim) => lines.push(renderClaim(claim)))
-    if (deterministicMissingFacts.length > 0 && limitationClaims.length > 0) {
-      lines.push(renderClaim(limitationClaims[0]))
+  const lines: string[] = []
+  let contextClaimsCount = 0;
+  
+  if (isStructuredConditional) {
+    lines.push('CONCLUSIÓN')
+    lines.push('- La viabilidad urbanística de esta parcela no puede confirmarse todavía de forma categórica porque falta concretar el régimen urbanístico aplicable.')
+    
+    const territorial = supportClaims.filter(c => c.type === 'territorial_fact')
+    if (territorial.length > 0) {
+      lines.push('', 'SITUACIÓN TERRITORIAL')
+      territorial.forEach(c => lines.push(renderClaim(c)))
     }
-  } else if (fallbackText) lines.push(`- ${fallbackText}`)
-
-  if (primaryClaims.length === 0 && limitationClaims.length > 0 && semanticFallbackReason === 'NO_RELEVANT_PRIMARY_CLAIM') {
-    limitationClaims.slice(1).forEach((claim) => lines.push(renderClaim(claim)))
-  }
-
-  const contextClaims = primaryClaims.length === 0
-    ? [...supportClaims, ...limitationClaims]
-    : [...supportClaims, ...limitationClaims.slice(deterministicMissingFacts.length > 0 ? 1 : 0)]
-  if (contextClaims.length > 0) {
-    lines.push('', 'FUNDAMENTO')
-    contextClaims.forEach((claim) => {
-      const evaluation = evaluationById.get(claim.id)
-      const prefix = evaluation?.role === 'CONTEXT'
-        ? 'Normativa localizada cuya aplicación concreta a esta parcela no ha podido confirmarse: '
-        : evaluation?.role === 'LIMITATION'
-          ? 'Información cuya vinculación concreta con esta parcela sigue pendiente: '
-          : ''
-      lines.push(renderClaim(claim, prefix))
-    })
-  }
-
-  const visibleMissingFacts = humanizeMissingFacts(deterministicMissingFacts)
-  if (visibleMissingFacts.length > 0) {
-    lines.push('', 'PENDIENTE DE COMPROBAR')
+    
+    const normative = supportClaims.filter(c => c.type === 'normative_fact' || c.type === 'normative_conditional')
+    if (normative.length > 0) {
+      lines.push('', 'NORMATIVA RELEVANTE')
+      normative.forEach(c => lines.push(renderClaim(c)))
+    }
+    
+    contextClaimsCount = territorial.length + normative.length + limitationClaims.length;
+    lines.push('', 'PENDIENTE DE RESOLVER')
+    limitationClaims.forEach(c => lines.push(renderClaim(c)))
+    const visibleMissingFacts = humanizeMissingFacts(deterministicMissingFacts)
     visibleMissingFacts.forEach((fact) => lines.push(`- ${fact}`))
+  } else {
+    lines.push('CONCLUSIÓN')
+    if (primaryClaims.length > 0) {
+      primaryClaims.forEach((claim) => lines.push(renderClaim(claim)))
+      if (deterministicMissingFacts.length > 0 && limitationClaims.length > 0) {
+        lines.push(renderClaim(limitationClaims[0]))
+      }
+    } else if (fallbackText) {
+      lines.push(`- ${fallbackText}`)
+    }
+
+    if (primaryClaims.length === 0 && limitationClaims.length > 0 && semanticFallbackReason === 'NO_RELEVANT_PRIMARY_CLAIM') {
+      limitationClaims.slice(1).forEach((claim) => lines.push(renderClaim(claim)))
+    }
+
+    const contextClaims = primaryClaims.length === 0
+      ? [...supportClaims, ...limitationClaims]
+      : [...supportClaims, ...limitationClaims.slice(deterministicMissingFacts.length > 0 ? 1 : 0)]
+    
+    contextClaimsCount = contextClaims.length;
+    if (contextClaims.length > 0) {
+      lines.push('', 'FUNDAMENTO')
+      contextClaims.forEach((claim) => {
+        const evaluation = evaluationById.get(claim.id)
+        const prefix = evaluation?.role === 'CONTEXT'
+          ? 'Normativa localizada cuya aplicación concreta a esta parcela no ha podido confirmarse: '
+          : evaluation?.role === 'LIMITATION'
+            ? 'Información cuya vinculación concreta con esta parcela sigue pendiente: '
+            : ''
+        lines.push(renderClaim(claim, prefix))
+      })
+    }
+    
+    const visibleMissingFacts = humanizeMissingFacts(deterministicMissingFacts)
+    if (visibleMissingFacts.length > 0) {
+      lines.push('', 'PENDIENTE DE COMPROBAR')
+      visibleMissingFacts.forEach((fact) => lines.push(`- ${fact}`))
+    }
   }
 
   return {
     answer: lines.join('\n').trim(),
     questionIntent,
     primaryClaimCount: primaryClaims.length,
-    contextClaimCount: contextClaims.length,
+    contextClaimCount: contextClaimsCount,
     irrelevantClaimCount,
     semanticFallbackUsed: semanticFallbackReason !== null,
     semanticFallbackReason,

@@ -16,8 +16,8 @@ async function run() {
 
   const extractor = new StructuredPdfExtractor();
   let globalMd = `# Auditoría Estructural Global (CTE V2)\n\n`;
-  let sampleChunks: any[] = [];
-  let longChunks: any[] = [];
+  const sampleChunks: any[] = [];
+  const longChunks: any[] = [];
   
   for (const doc of docsToProcess) {
     console.log(`Extrayendo ${doc.code}...`);

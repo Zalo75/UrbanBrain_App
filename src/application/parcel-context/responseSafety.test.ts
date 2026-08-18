@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   validateReasonerOutput,
+  canonicalizeNumericToken,
   renderFinalAnswer,
   buildSafeAbstention,
   parseReasonerOutput,
@@ -160,6 +161,56 @@ describe('V3-B Claim-level validation & rendering', () => {
       expect(result.validClaims).toHaveLength(1)
     })
   })
+
+  
+  describe('Numeric validation robustness (Part A)', () => {
+    it('canonicalizes thousands separators, decimals, and units correctly', () => {
+      
+      
+      expect(canonicalizeNumericToken('1.000 m2')).toBe('1000m2');
+      expect(canonicalizeNumericToken('1000 m²')).toBe('1000m2');
+      expect(canonicalizeNumericToken('5,00 metros')).toBe('5m');
+      expect(canonicalizeNumericToken('5 m')).toBe('5m');
+      expect(canonicalizeNumericToken('5,0 m')).toBe('5m');
+      expect(canonicalizeNumericToken('50 %')).toBe('50%');
+      expect(canonicalizeNumericToken('50%')).toBe('50%');
+      expect(canonicalizeNumericToken('98,53 %')).toBe('98.53%');
+      expect(canonicalizeNumericToken('98.53%')).toBe('98.53%');
+      expect(canonicalizeNumericToken('1,47 %')).toBe('1.47%');
+      expect(canonicalizeNumericToken('1.47%')).toBe('1.47%');
+
+      expect(canonicalizeNumericToken('5 m')).not.toBe(canonicalizeNumericToken('5 %'));
+      expect(canonicalizeNumericToken('5 m')).not.toBe(canonicalizeNumericToken('5 m²'));
+      expect(canonicalizeNumericToken('5000')).not.toBe(canonicalizeNumericToken('500'));
+    });
+
+    it('matches normalized numbers against context values', () => {
+      
+      const ctx = {
+        parcelSurfaceSquareMetres: 1790.46,
+        urbanisticFacts: {
+          classification: { candidates: [{ parcelPercentage: 98.53 }] },
+          category: { candidates: [] }
+        }
+      };
+      const out = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'El área es de 1790,46 m2', sourceRefs: [], appliesToParcel: 'unknown', numericTokens: [] }]
+      };
+      const res = validateReasonerOutput(out, [], { canAnswerConcreteParameters: true }, ctx);
+      expect(res.invalidClaimCount).toBe(0);
+    });
+
+    it('rejects unsupported numbers normally', () => {
+      
+      const out = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'El área es de 100 m2', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }]
+      };
+      const res = validateReasonerOutput(out, [{ id: 's1', content: 'El área es de 200 m2' }], { canAnswerConcreteParameters: true });
+      expect(res.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1);
+    });
+  });
 
   describe('Citation and provenance guarantees', () => {
     it('rejects a numeric claim without sourceRefs', () => {

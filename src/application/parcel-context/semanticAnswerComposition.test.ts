@@ -179,3 +179,39 @@ describe('V3-E relevance and semantic composition', () => {
     expect(result.answer.match(/\[Fuente 2\]/g)).toHaveLength(1)
   })
 })
+
+  describe('Structured conditional fallback (Part B)', () => {
+    it('composes a structured conditional answer when NO primary claims exist but valid context/normative claims exist', () => {
+      
+      const output = { answerMode: 'partial', claims: [], missingFacts: [] };
+      const validClaims = [
+        { id: '1', type: 'territorial_fact', text: 'SNRC ocupa el 98,53 %', sourceRefs: [], appliesToParcel: true, numericTokens: [] },
+        { id: '2', type: 'normative_fact', text: 'La parcela mínima en SNRC es de 5000 m2', sourceRefs: [1], appliesToParcel: 'conditional', numericTokens: [] },
+        { id: '3', type: 'limitation', text: 'No se puede confirmar por heterogeneidad', sourceRefs: [], appliesToParcel: 'conditional', numericTokens: [] }
+      ];
+      const applicability = {
+        applicable: [],
+        review: [{ id: 's1' }],
+        canAnswerConditionalViability: true,
+        canAnswerConcreteParameters: false
+      };
+      
+      const result = composeSemanticAnswer(output, validClaims, '¿Se puede construir?', 'parcel_viability', [{ id: 's1', content: 'SNRC parcela minima 5000 m2' }], applicability, [], {});
+      
+      expect(result.semanticFallbackReason).toBe('CONDITIONAL_VIABILITY_ONLY');
+      
+      // Should contain structured headers
+      console.log('ANSWER:', result.answer);
+      expect(result.answer).toContain('SITUACIÓN TERRITORIAL');
+      expect(result.answer).toContain('NORMATIVA RELEVANTE');
+      expect(result.answer).toContain('PENDIENTE DE RESOLVER');
+      
+      // Should contain the claims
+      expect(result.answer).toContain('SNRC ocupa el 98,53 %');
+      expect(result.answer).toContain('La parcela mínima en SNRC es de 5000 m2');
+      expect(result.answer).toContain('No se puede confirmar por heterogeneidad');
+      
+      // Should NOT make SNRC categorical
+      // (because it is under NORMATIVA RELEVANTE which is conditioned by the fallback text)
+    });
+  });
