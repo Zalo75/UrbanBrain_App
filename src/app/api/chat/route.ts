@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 import { GoogleGenerativeAI, TaskType } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
@@ -1138,6 +1140,29 @@ ${usedV2 ? v2Citas : 'N/A'}
           continue;
         } else {
           break;
+        }
+      }
+
+      if (process.env.NODE_ENV !== 'production' && (process.env.URBANBRAIN_CAPTURE_REASONER_OUTPUT === '1' || process.env.URBANBRAIN_CAPTURE_REASONER_REQUEST === '1')) {
+        try {
+          const captureData = {
+            answerMode: parsed.answerMode,
+            claims: parsed.claims.map(c => ({
+              id: c.id,
+              type: c.type,
+              text: c.text,
+              sourceRefs: c.sourceRefs,
+              appliesToParcel: c.appliesToParcel,
+              numericTokens: c.numericTokens
+            })),
+            missingFacts: parsed.missingFacts
+          };
+          fs.writeFileSync(
+            path.join(process.cwd(), '.reasoner_output_capture.json'),
+            JSON.stringify(captureData, null, 2)
+          );
+        } catch (e) {
+          console.error('Failed to capture reasoner output:', e);
         }
       }
 

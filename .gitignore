@@ -27,6 +27,7 @@
 
 # Local benchmark capture
 .reasoner_request_capture.json
+.reasoner_output_capture.json
 
 # debug
 npm-debug.log*
