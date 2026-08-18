@@ -67,14 +67,14 @@ export function processDocumentChunks(chunks: ChunkForBackfill[]): EnrichedChunk
       // 3. Continuity / Herencia jerárquica
       if (currentRegime && currentRegime.kind !== 'general') {
         chunkRegime = {
-          ...currentRegime,
+          ...(currentRegime as NormativeRegimeIdentity),
           provenance: 'inherited_heading',
           // Reduce confidence slightly for inherited, unless we have AI confirmation
           confidence: currentRegime.confidence === 'high' ? 'medium' : currentRegime.confidence
         }
       } else if (currentRegime && currentRegime.kind === 'general') {
         chunkRegime = {
-          ...currentRegime,
+          ...(currentRegime as NormativeRegimeIdentity),
           provenance: 'inherited_heading',
           confidence: 'high'
         }
