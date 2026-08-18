@@ -1,7 +1,8 @@
 -- Migration to add structured normative regime metadata
 
--- 1. Add metadata column to normative_chunks_v2 (V1 already has it, but it might be null)
-ALTER TABLE public.normative_chunks_v2 ADD COLUMN metadata jsonb;
+-- 1. Add metadata column to V1 and V2 tables
+ALTER TABLE public.normativa_chunks ADD COLUMN IF NOT EXISTS metadata jsonb;
+ALTER TABLE public.normative_chunks_v2 ADD COLUMN IF NOT EXISTS metadata jsonb;
 
 -- 2. Update RPC to return metadata
 DROP FUNCTION IF EXISTS public.match_normativa_chunks_scoped(vector, integer, text, text[], text);
