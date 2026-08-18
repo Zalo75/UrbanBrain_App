@@ -191,12 +191,20 @@ function buildConsolidation(facts: UrbanisticRegimeFacts): FactualConsolidation 
 function buildPlanningAreas(planningArea?: ParcelContextField<string>): FactualPlanningArea[] | undefined {
   if (!planningArea) return undefined
 
+  const manuallySelected = planningArea.source === 'manual'
+  const status = planningArea.verification === 'confirmed'
+    ? manuallySelected ? 'technician_validated' as const : 'automatic_confirmed' as const
+    : manuallySelected ? 'manual_review_required' as const : 'automatic_probable' as const
+  const determination: FactDeterminationType = planningArea.verification === 'confirmed'
+    ? manuallySelected ? 'effective' : 'automatic'
+    : manuallySelected ? 'manual' : 'automatic'
+
   return [
     {
       code: planningArea.value,
       semanticCompleteness: semanticCompletenessFor(planningArea.value, undefined),
-      status: 'automatic_confirmed',
-      determination: 'automatic',
+      status,
+      determination,
       provenance: { sourceType: planningArea.source },
     },
   ]

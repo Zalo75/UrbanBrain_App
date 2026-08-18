@@ -12,6 +12,7 @@ import type {
   TerritorialWarning,
   UrbanisticRegimeFacts,
 } from '@/domain/territorial-resolver/types'
+import { deriveParcelRegimeIdentity } from './parcelRegimeIdentity'
 import type {
   NormalizedParcelContext,
   ParcelContextField,
@@ -1143,6 +1144,8 @@ export function buildNormalizedParcelContext(
       'La parcela catastral completa contiene varios regímenes; el contexto operativo se limita al área de actuación seleccionada.'
     )
   }
+
+  context.regimeIdentity = deriveParcelRegimeIdentity(context)
 
   return context
 }

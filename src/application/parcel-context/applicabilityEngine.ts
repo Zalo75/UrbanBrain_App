@@ -3,8 +3,11 @@ import type {
   NormalizedParcelContext,
   NormativeCandidate,
   NormativeHierarchyLevel,
+  ParcelRegimeIdentity,
+  ParcelRegimeIdentityScope,
 } from '@/domain/parcel-context/types'
 import { normalizeComparable } from './normalizeParcelContext'
+import { deriveParcelRegimeIdentity } from './parcelRegimeIdentity'
 
 const HISTORICAL_PATTERN = /\b(?:derogad[oa]|hist[oó]ric[oa]|no\s+vigente|sustituid[oa])\b/i
 
@@ -146,6 +149,45 @@ function hasCompatibleOrdinance(candidate: NormativeCandidate, expected: string)
     : matchesExpected(candidate, expected)
 }
 
+function structuredIdentityMatch(
+  candidate: NormativeCandidate,
+  identity: ParcelRegimeIdentity
+): boolean | null {
+  const metadata = candidate.regimeMetadata
+  if (!metadata) return null
+  if (metadata.confidence === 'low') return null
+  if (metadata.kind === 'general') return true
+  const scopes = identity.scopes.filter((scope) => scope.status === 'effective' || scope.status === 'automatic')
+  if (scopes.length === 0) return null
+
+  const matchesScope = (scope: ParcelRegimeIdentityScope) => {
+    if (metadata.kind === 'ordinance') {
+      const expected = scope.qualification
+      return Boolean(expected && (
+        normalizeComparable(expected) === normalizeComparable(metadata.code ?? '') ||
+        normalizeComparable(expected) === normalizeComparable(metadata.label ?? '')
+      ))
+    }
+    if (metadata.kind === 'planning_area') {
+      const expected = scope.planningArea
+      return Boolean(expected && (
+        normalizeComparable(expected) === normalizeComparable(metadata.code ?? '') ||
+        normalizeComparable(expected) === normalizeComparable(metadata.label ?? '')
+      ))
+    }
+    if (metadata.kind === 'land_class') {
+      const expected = scope.classification?.code ?? scope.classification?.label
+      return Boolean(expected && (
+        normalizeComparable(expected) === normalizeComparable(metadata.code ?? '') ||
+        normalizeComparable(expected) === normalizeComparable(metadata.label ?? '')
+      ))
+    }
+    return false
+  }
+
+  return scopes.some(matchesScope)
+}
+
 function normalizeOrdinanceIdentifier(value: string) {
   return normalizeComparable(value).replace(/^ordenanza(?:\s+n(?:umero)?)?\s+/, '')
 }
@@ -192,6 +234,9 @@ export function evaluateApplicability(
   concreteParameterRequested: boolean,
   conditionalViabilityRequested = false
 ): ApplicabilityResult {
+  // Derive from the current normalized fields so callers that enrich the
+  // context after normalization cannot accidentally use a stale identity.
+  const parcelRegime = deriveParcelRegimeIdentity(context)
   const result: ApplicabilityResult = {
     status: 'NO_DETERMINADO',
     applicable: [],
@@ -310,6 +355,7 @@ export function evaluateApplicability(
   )
 
   for (const candidate of candidates) {
+    let structuredIdentityAccepted = false
     const municipalDetailed = isMunicipalDetailedCandidate(candidate)
     if (municipalDetailed) {
       if (!candidate.municipalityName) {
@@ -342,6 +388,19 @@ export function evaluateApplicability(
       continue
     }
 
+    if (municipalDetailed && concreteParameterRequested) {
+      const structuredMatch = structuredIdentityMatch(candidate, parcelRegime)
+      if (structuredMatch === false && (parcelRegime.status === 'effective' || parcelRegime.status === 'automatic')) {
+        result.rejected.push({ candidate, reason: 'El régimen normativo no coincide con la identidad efectiva de la parcela.' })
+        continue
+      }
+      if (structuredMatch === null && ['review', 'conflict', 'unresolved'].includes(parcelRegime.status)) {
+        result.review.push(candidate)
+        continue
+      }
+      structuredIdentityAccepted = structuredMatch === true
+    }
+
     // Low-confidence extracted metadata is useful provenance, but never enough
     // to make a detailed municipal parameter applicable by itself.
     if (
@@ -357,6 +416,7 @@ export function evaluateApplicability(
     if (
       municipalDetailed &&
       expectedArea &&
+      !structuredIdentityAccepted &&
       (candidate.regimeMetadata || extractPlanningAreas(candidate).length > 0) &&
       !hasCompatiblePlanningArea(candidate, expectedArea)
     ) {
@@ -367,6 +427,7 @@ export function evaluateApplicability(
     if (
       municipalDetailed &&
       expectedQualification &&
+      !structuredIdentityAccepted &&
       (candidate.regimeMetadata || extractOrdinances(candidate).length > 0) &&
       !hasCompatibleOrdinance(candidate, expectedQualification)
     ) {

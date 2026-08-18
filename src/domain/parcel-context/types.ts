@@ -1,6 +1,7 @@
 import type {
   ActionAreaSelection,
   ParcelGeometry,
+  TerritorialEvidence,
   UrbanisticRegimeFacts,
 } from '@/domain/territorial-resolver/types'
 
@@ -71,6 +72,7 @@ export interface NormalizedParcelContext {
     usingPreviousOfficialContext?: boolean
     sourceIssues: string[]
   }
+  regimeIdentity?: ParcelRegimeIdentity
 }
 
 export type ApplicabilityStatus =
@@ -96,6 +98,51 @@ export interface NormativeRegimeIdentity {
   provenance: 'explicit_heading' | 'inherited_heading' | 'deterministic_inference' | 'ai_assisted' | 'manual'
   confidence: 'high' | 'medium' | 'low'
   ambiguity?: string[]
+}
+
+export type ParcelRegimeIdentityStatus =
+  | 'effective'
+  | 'automatic'
+  | 'review'
+  | 'conflict'
+  | 'unresolved'
+
+export type ParcelRegimeGeometryScope = 'whole_parcel' | 'action_area' | 'partial' | 'unknown'
+
+export interface ParcelRegimeIdentityScope {
+  scope: 'parcel' | 'action_area'
+  classification?: { code?: string; label?: string }
+  category?: {
+    code?: string
+    label?: string
+    parcelPercentage?: number
+    intersectionAreaSquareMetres?: number
+  }
+  qualification?: string
+  planningArea?: string
+  instrumentId?: string
+  status: ParcelRegimeIdentityStatus
+  confidence: number | 'unknown'
+  geometryScope: ParcelRegimeGeometryScope
+  provenance: string[]
+  evidence: TerritorialEvidence[]
+  conflicts: string[]
+  automaticCandidates?: Array<{
+    code?: string
+    label?: string
+    parcelPercentage?: number
+    intersectionAreaSquareMetres?: number
+  }>
+}
+
+/** Derived, in-memory projection used to compare parcel facts with normative metadata. */
+export interface ParcelRegimeIdentity {
+  scopes: ParcelRegimeIdentityScope[]
+  status: ParcelRegimeIdentityStatus
+  confidence: number | 'unknown'
+  provenance: string[]
+  evidence: TerritorialEvidence[]
+  conflicts: string[]
 }
 
 export interface NormativeCandidate {

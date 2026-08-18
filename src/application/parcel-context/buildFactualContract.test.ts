@@ -395,4 +395,28 @@ describe('Territorial Factual Contract', () => {
     expect(stringified).not.toContain('Suelo no urbanizable')
     expect(stringified).not.toContain('Suelo de núcleo rural')
   })
+
+  it('preserva la provenance real de planningArea manual validado', () => {
+    const contract = buildTerritorialFactualContract({
+      planningArea: { value: 'O1', source: 'manual', confidence: 1, verification: 'confirmed' },
+      knownConstraints: [], conflicts: [], pendingValidation: [],
+    })
+    expect(contract.planningAreas[0]).toMatchObject({
+      status: 'technician_validated',
+      determination: 'effective',
+      provenance: { sourceType: 'manual' },
+    })
+  })
+
+  it('no convierte planningArea manual pendiente en automatic_confirmed', () => {
+    const contract = buildTerritorialFactualContract({
+      planningArea: { value: 'O1', source: 'manual', confidence: 0.5, verification: 'unverified' },
+      knownConstraints: [], conflicts: [], pendingValidation: [],
+    })
+    expect(contract.planningAreas[0]).toMatchObject({
+      status: 'manual_review_required',
+      determination: 'manual',
+      provenance: { sourceType: 'manual' },
+    })
+  })
 })

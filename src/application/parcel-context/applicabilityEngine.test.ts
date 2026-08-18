@@ -66,6 +66,54 @@ describe('requiresDeterminedParcelRegime', () => {
     expect(isConditionalViabilityQuestion('¿Se puede construir en esta parcela?')).toBe(true)
     expect(isConditionalViabilityQuestion('¿Cuál es la ocupación máxima?')).toBe(false)
   })
+
+  it('compara metadata estructurada con la identidad parcelaria derivada', () => {
+    const context = completeContext()
+    context.qualification = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    context.planningArea = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    const result = evaluateApplicability(context, [candidate({
+      ordinance: null,
+      title: 'Determinaciones O1',
+      content: 'Regla de O1.',
+      regimeMetadata: { kind: 'ordinance', code: 'O1', provenance: 'explicit_heading', confidence: 'high' },
+    })], true)
+    expect(result.status).toBe('DETERMINADO')
+    expect(result.applicable).toHaveLength(1)
+  })
+
+  it('rechaza metadata estructurada de otra ordenanza', () => {
+    const context = completeContext()
+    context.qualification = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    context.planningArea = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    const result = evaluateApplicability(context, [candidate({
+      regimeMetadata: { kind: 'ordinance', code: 'O2', provenance: 'explicit_heading', confidence: 'high' },
+    })], true)
+    expect(result.applicable).toHaveLength(0)
+    expect(result.rejected[0].reason).toMatch(/identidad efectiva/i)
+  })
+
+  it('mantiene en review un régimen parcelario no resuelto', () => {
+    const context = completeContext()
+    context.qualification = undefined
+    context.planningArea = undefined
+    context.canAnswerConcreteParameters = false
+    const result = evaluateApplicability(context, [candidate({
+      regimeMetadata: { kind: 'ordinance', code: 'O1', provenance: 'explicit_heading', confidence: 'high' },
+    })], true)
+    expect(result.applicable).toHaveLength(0)
+    expect(result.review).toHaveLength(1)
+  })
+
+  it('no permite metadata normativa de confianza baja por sí sola', () => {
+    const context = completeContext()
+    context.qualification = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    context.planningArea = { value: 'O1', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    const result = evaluateApplicability(context, [candidate({
+      regimeMetadata: { kind: 'ordinance', code: 'O1', provenance: 'inherited_heading', confidence: 'low' },
+    })], true)
+    expect(result.applicable).toHaveLength(0)
+    expect(result.review).toHaveLength(1)
+  })
 })
 
 describe('classifyParcelQuestionScope', () => {
