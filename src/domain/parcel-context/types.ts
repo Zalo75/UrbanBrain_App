@@ -95,6 +95,7 @@ export interface NormativeRegimeIdentity {
   instrumentId?: string
   provenance: 'explicit_heading' | 'inherited_heading' | 'deterministic_inference' | 'ai_assisted' | 'manual'
   confidence: 'high' | 'medium' | 'low'
+  ambiguity?: string[]
 }
 
 export interface NormativeCandidate {

@@ -342,6 +342,18 @@ export function evaluateApplicability(
       continue
     }
 
+    // Low-confidence extracted metadata is useful provenance, but never enough
+    // to make a detailed municipal parameter applicable by itself.
+    if (
+      municipalDetailed &&
+      concreteParameterRequested &&
+      candidate.regimeMetadata?.confidence === 'low' &&
+      (expectedQualification || expectedArea)
+    ) {
+      result.review.push(candidate)
+      continue
+    }
+
     if (
       municipalDetailed &&
       expectedArea &&
