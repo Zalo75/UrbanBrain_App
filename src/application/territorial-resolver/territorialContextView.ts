@@ -294,6 +294,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     urbanisticFacts,
     officialLinks: effective ? officialResourceLinks(effective) : [],
     planningDocuments: effective?.planning.documents,
+    resources: effective?.planning.resources ?? result.planning.resources,
     areas:
       actionArea?.selectionType === 'detected_zone'
         ? actionArea.planningZones ?? []
