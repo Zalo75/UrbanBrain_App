@@ -9,6 +9,8 @@ import type {
   OfficialSourceCheck,
   TerritorialResolution,
   UrbanisticRegimeFacts,
+  TerritorialResourceCatalog,
+  ContextDeterminationState,
 } from '@/domain/territorial-resolver/types';
 import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts';
 import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks';
@@ -45,6 +47,9 @@ export interface TerritorialContextView {
   urbanisticFacts?: UrbanisticRegimeFacts;
   officialLinks?: OfficialResourceLink[];
   planningDocuments?: PlanningDocumentReference[];
+  resources?: TerritorialResourceCatalog;
+  planningStatus?: 'determined' | 'conflict' | 'not_determined' | 'partial';
+  ordinanceDetermination?: ContextDeterminationState<string>;
   areas: string[];
   instrument?: string;
   affects: Array<{
@@ -241,8 +246,19 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
         (classificationResolution?.candidates.length ?? 0) > 1)
   );
 
+  const ordinanceCandidates = effective?.planning.ordinanceCandidates ?? [];
+  let ordStatus: 'automatically_determined' | 'assisted_confirmation_required' | 'manual_confirmation_required' | 'not_available' | undefined = undefined;
+  if (effective?.planning.status === 'determined') {
+    ordStatus = ordinanceCandidates.length > 0 ? 'assisted_confirmation_required' : 'manual_confirmation_required';
+  }
+  const ordinanceDetermination = manual?.ordinanceDetermination
+    ? { ...manual.ordinanceDetermination, candidates: ordinanceCandidates, status: ordStatus ?? manual.ordinanceDetermination.status }
+    : { candidates: ordinanceCandidates, status: ordStatus };
+
   return {
     status,
+    planningStatus: effective?.planning.status ?? result.planning.status,
+    ordinanceDetermination,
     confidence: effective?.confidence ?? result.confidence,
     resolvedAt: result.resolvedAt,
     inputMethod: result.inputMethod,

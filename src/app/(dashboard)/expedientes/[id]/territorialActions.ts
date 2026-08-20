@@ -358,8 +358,8 @@ export async function resolveTerritorialContextAction(
           ? { technician: catTech }
           : preservedManual?.categoryDetermination,
         ordinanceDetermination: finalOrdinanceDetermination
-          ? { technician: finalOrdinanceDetermination }
-          : undefined,
+          ? { ...preservedManual?.ordinanceDetermination, technician: finalOrdinanceDetermination }
+          : preservedManual?.ordinanceDetermination,
         actionAreaSelection,
         affectDecisions: finalAffectDecisions,
         urbanisticFacts: previousManual?.urbanisticFacts,

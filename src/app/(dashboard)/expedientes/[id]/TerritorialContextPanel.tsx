@@ -4,13 +4,13 @@ import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   ExternalLink,
   Loader2,
   MapPinned,
   Search,
 } from 'lucide-react';
-
 import type { TerritorialContextView } from '@/application/territorial-resolver/territorialContextView';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +22,7 @@ import { GeometricAuditAccordion } from '@/components/territorial/GeometricAudit
 import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap';
 import { PordPlanViewer } from '@/components/territorial/PordPlanViewer';
-import { getMunicipalPilotRegistry } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
+import { getDetailedPlanningLayer } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
 import {
   resolveTerritorialContextAction,
   type TerritorialResolutionActionState,
@@ -515,6 +515,73 @@ export function TerritorialContextPanel({
                   </div>
                 </div>
 
+                {/* INICIO BETA EXPRESS: ZONA NORMATIVA */}
+                {context.planningStatus === 'determined' && (
+                  <div className="bg-background rounded-lg border border-blue-200 shadow-sm overflow-hidden mt-4">
+                    <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold text-blue-900">CALIFICACI&Oacute;N / ZONA NORMATIVA</h3>
+                        {context.ordinanceDetermination?.technician ? (
+                          <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
+                            <CheckCircle2 className="h-3 w-3" /> CONFIRMADO POR T&Eacute;CNICO
+                          </p>
+                        ) : (
+                          <p className="text-xs font-medium text-amber-700 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3 w-3" /> Requiere confirmaci&oacute;n t&eacute;cnica
+                          </p>
+                        )}
+                      </div>
+                      
+                      <details className="group relative">
+                        <summary className="text-sm font-semibold cursor-pointer outline-none bg-blue-100 text-blue-800 px-3 py-1.5 rounded hover:bg-blue-200 transition-colors list-none">
+                          Ver plano oficial (PORD)
+                        </summary>
+                        <div className="absolute right-0 z-50 mt-2 w-[800px] max-w-[90vw] origin-top-right rounded-md bg-white p-4 shadow-xl border">
+                          <PordPlanViewer
+                            municipality={context.municipality || undefined}
+                            instrument={context.instrument || undefined}
+                            wmsLayer={context.resources?.detailedPlanningLayer ?? getDetailedPlanningLayer(context.municipalityCode)?.name}
+                            parcelGeometry={context.parcelGeometry}
+                            actionAreaGeometry={context.actionArea?.geometry}
+                            classificationCode={context.classification?.code}
+                            categoryCode={context.classification?.categoryCode}
+                            affects={context.affects}
+                          />
+                        </div>
+                      </details>
+                    </div>
+                    
+                    <form action={formAction} className="p-4 bg-white flex flex-col gap-3">
+                      <input type="hidden" name="intent" value="manual" />
+                      <input type="hidden" name="refCatastral" value={context.cadastralReference ?? initialInput.cadastralReference ?? ''} />
+                      <input type="hidden" name="address" value={context.address ?? initialInput.address ?? ''} />
+                      {Number.isFinite(context.coordinates?.lat ?? initialInput.lat) ? <input type="hidden" name="lat" value={context.coordinates?.lat ?? initialInput.lat ?? ''} /> : null}
+                      {Number.isFinite(context.coordinates?.lng ?? initialInput.lng) ? <input type="hidden" name="lng" value={context.coordinates?.lng ?? initialInput.lng ?? ''} /> : null}
+                      <input type="hidden" name="manualValidated" value="on" />
+                      
+                      <div className="grid gap-2">
+                        <Label htmlFor="territorial-manual-ordinance-main">Identidad de la zona / ordenanza</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="territorial-manual-ordinance-main"
+                            name="manualOrdinance"
+                            className="max-w-md"
+                            defaultValue={context.ordinanceDetermination?.technician?.value ?? context.manualContext?.ordinance ?? ''}
+                            placeholder="Ej. R1, ORD-3, Residencial extensiva..."
+                          />
+                          <Button type="submit" disabled={pending}>
+                            Guardar confirmaci&oacute;n
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Introduzca la clave o denominaci&oacute;n que aparece en el plano oficial de ordenaci&oacute;n.
+                        </p>
+                      </div>
+                    </form>
+                  </div>
+                )}
+                {/* FIN BETA EXPRESS: ZONA NORMATIVA */}
+
                 {context.classificationResolution && (
                   <MapcentricWorkspace
                     mapSlot={
@@ -759,7 +826,7 @@ export function TerritorialContextPanel({
                     <PordPlanViewer
                       municipality={context.municipality || undefined}
                       instrument={context.instrument || undefined}
-                      wmsLayer={getMunicipalPilotRegistry(context.municipalityCode)?.layers.detailedPlanningWms}
+                      wmsLayer={context.resources?.detailedPlanningLayer ?? getDetailedPlanningLayer(context.municipalityCode)?.name}
                       parcelGeometry={context.parcelGeometry}
                       actionAreaGeometry={context.actionArea?.geometry}
                       classificationCode={context.classification?.code}
