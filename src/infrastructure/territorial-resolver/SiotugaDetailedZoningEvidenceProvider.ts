@@ -139,13 +139,29 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
       if (!resources?.detailedPlanningLayer && !resources?.planningTileIndex) return []
 
       const { lat, lng } = context.coordinates
-      const baseDelta = 0.00015
-      const bboxForLevel = (level: number) => {
-        const delta = baseDelta / 2 ** level
-        return { minLat: lat - delta, minLng: lng - delta, maxLat: lat + delta, maxLng: lng + delta }
-      }
       const bboxText = (value: GeographicBbox) => `${value.minLat},${value.minLng},${value.maxLat},${value.maxLng}`
-      const initialBbox = bboxForLevel(0)
+
+      // Derive BBOX from parcel geometry when available so that the GetMap
+      // window always contains the full parcel regardless of its size.
+      // A fixed baseDelta fails for large/elongated parcels (e.g. rural 36059A039*).
+      function parcelBboxFromGeometry(geom: ParcelGeometry, padFactor = 0.4): GeographicBbox {
+        const points = geom.coordinates.flat(2) as [number, number][]
+        const lngs = points.map((p) => p[0])
+        const lats = points.map((p) => p[1])
+        const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
+        const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+        const dLng = (maxLng - minLng) * padFactor || 0.0002
+        const dLat = (maxLat - minLat) * padFactor || 0.0002
+        return { minLat: minLat - dLat, maxLat: maxLat + dLat, minLng: minLng - dLng, maxLng: maxLng + dLng }
+      }
+      const baseDelta = 0.00015
+      const fallbackBbox = { minLat: lat - baseDelta, minLng: lng - baseDelta, maxLat: lat + baseDelta, maxLng: lng + baseDelta }
+      const initialBbox = context.geometry
+        ? parcelBboxFromGeometry(context.geometry as ParcelGeometry, 0.1)
+        : fallbackBbox
+      const getMapBbox = context.geometry
+        ? parcelBboxFromGeometry(context.geometry as ParcelGeometry, 0.4)
+        : fallbackBbox
       let tile: TileIndexFeature | undefined
       if (resources.planningTileIndex) {
         const tileInfo = new URL(SIOTUGA_WMS_URL)
@@ -211,8 +227,13 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
       let selectedQuery: URL | undefined
       let selectedBbox: GeographicBbox | undefined
       
-      for (let level = 0; level < 3 && visuals.length === 0; level += 1) {
-        const currentBbox = bboxForLevel(level)
+      for (let pass = 0; pass < 2 && visuals.length === 0; pass += 1) {
+        // pass 0: tight window from geometry (40% pad around parcel extent)
+        // pass 1: looser window (80% pad) to catch parcels near zone boundaries
+        const padFactor = pass === 0 ? 0.4 : 0.8
+        const currentBbox = context.geometry
+          ? parcelBboxFromGeometry(context.geometry as ParcelGeometry, padFactor)
+          : getMapBbox
         const query = new URL(SIOTUGA_WMS_URL)
         query.search = new URLSearchParams({
           codine: municipalityCode,
