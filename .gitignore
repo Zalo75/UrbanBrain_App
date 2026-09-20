@@ -16,6 +16,10 @@
 /artifacts/
 /diagnose_out/
 /scratch/
+/playwright-report/
+/test-results/
+/scratch_*.py
+/scratch_*.ts
 
 # next.js
 /.next/
