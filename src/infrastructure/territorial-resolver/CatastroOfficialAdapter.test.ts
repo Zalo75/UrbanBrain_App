@@ -75,6 +75,39 @@ describe('CatastroOfficialAdapter', () => {
     expect(result?.evidence).toHaveLength(3)
   })
 
+  it('acepta la forma bico.bi de Consulta_DNPRC y conserva identidad territorial', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('Consulta_DNPRC')) return json({ consulta_dnprcResult: { bico: { bi: { dt: { loine: { cp: '36', cm: '059' }, np: 'PONTEVEDRA', nm: 'VILA DE CRUCES' } } } } })
+      if (url.includes('Consulta_CPMRC')) return json({ Consulta_CPMRCResult: { coordenadas: { coord: [{ geo: { xcen: '-8.12', ycen: '42.79' } }] } } })
+      return new Response(GML, { status: 200 })
+    })
+    const result = await new CatastroOfficialAdapter(fetcher).resolveReference('36059A035001180000MM')
+    expect(result).toMatchObject({ municipality: 'VILA DE CRUCES', municipalityCode: '36059', province: 'PONTEVEDRA', provinceCode: '36' })
+  })
+
+  it('usa INSPIRE GetParcel como fallback oficial cuando fallan los servicios JSON', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('Consulta_DNPRC') || url.includes('Consulta_CPMRC')) {
+        throw new Error('Catastro temporalmente indisponible')
+      }
+      return new Response(GML, { status: 200 })
+    })
+
+    const result = await new CatastroOfficialAdapter(fetcher).resolveReference('1503001NH4082S0001AY')
+
+    expect(result).toMatchObject({
+      cadastralReference: '1503001NH4082S',
+      municipalityCode: '15030',
+      geometry: { type: 'MultiPolygon' },
+      sourceChecks: [{ source: 'catastro', status: 'partial' }],
+    })
+    expect(result?.coordinates?.lat).toBeCloseTo(43.37)
+    expect(result?.coordinates?.lng).toBeCloseTo(-8.4075)
+    expect(result?.evidence[0]?.method).toContain('identity fallback')
+  })
+
   it('normaliza municipio e INE desde el catálogo cuando Catastro sólo aporta la localidad en la dirección', async () => {
     const fetcher = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)

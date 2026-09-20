@@ -1,18 +1,21 @@
+import { detectionSummary } from '@/application/parcel-context/detectionSummary'
 import { resolveParcelLocation } from '@/application/territorial-resolver/resolveParcelLocation'
-import type { TerritorialDetectionSummary } from '@/application/parcel-context/normalizeParcelContext'
 import type {
   ManualTerritorialContext,
   ResolveParcelLocationInput,
   TerritorialResolution,
 } from '@/domain/territorial-resolver/types'
+import { findInstrumentIdentity, getInstrumentIdentityCatalog } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
+import { runtimeCatalogStatus } from '@/domain/planning-knowledge/identityCatalog'
 import {
-  allSourceChecks,
   attachContinuity,
   createManualAttempt,
   officialContextForUse,
+  targetsSameParcel,
 } from '@/application/territorial-resolver/territorialContinuity'
-import { getEffectiveValue, createAutomaticDetermination } from '@/domain/territorial-resolver/determinations'
-import type { ContextDeterminationState } from '@/domain/territorial-resolver/types'
+import {
+  createTechnicianDetermination,
+} from '@/domain/territorial-resolver/determinations'
 import { db } from '@/infrastructure/db/client'
 import { contextDetections, expedientes } from '@/infrastructure/db/schema'
 import { and, eq } from 'drizzle-orm'
@@ -24,25 +27,6 @@ import { BetanzosPlanningAdapter } from '@/infrastructure/territorial-resolver/B
 import { SiotugaClassificationSourceAdapter } from '@/infrastructure/territorial-resolver/SiotugaClassificationAdapter'
 import { MultiSourceClassificationResolver } from '@/application/territorial-resolver/multiSourceClassificationResolver'
 import { IdegAffectAdapter } from '@/infrastructure/territorial-resolver/IdegAffectAdapter'
-import {
-  getMunicipalityByName,
-  getProvinceById,
-  getProvinceByMunicipalityIneCode,
-  getProvinceByName,
-} from '@/shared/territory'
-import { territorialFieldConfirmations } from '@/application/territorial-resolver/fieldConfirmations'
-import {
-  applyManualAffectDecisions,
-  applyManualFactDecisions,
-} from '@/application/territorial-resolver/manualTerritorialContext'
-import { assessClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
-import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts'
-import {
-  applyActionAreaToUrbanisticFacts,
-  clearAutomaticClassificationCandidate,
-  isPureAutomaticDetectedZoneContext,
-  planningZoneNamesFromCandidate,
-} from '@/application/territorial-resolver/actionAreaSelection'
 
 type Resolver = (input: ResolveParcelLocationInput) => Promise<TerritorialResolution>
 
@@ -71,213 +55,6 @@ function officialResolver(): Resolver {
   return (input) => resolveParcelLocation(input, dependencies)
 }
 
-function detectionSummary(result: TerritorialResolution): TerritorialDetectionSummary {
-  const effective = officialContextForUse(result)
-  const classificationAssessment = assessClassificationResolution(
-    effective?.planning.classificationResolution
-  )
-  const manual = result.continuity?.manualContext
-  const actionArea = manual?.actionAreaSelection?.current
-  const automaticClassificationCandidate = clearAutomaticClassificationCandidate(
-    result.planning.classificationResolution,
-    result.planning.classification,
-    result.planning.urbanisticFacts
-  )
-  const pureAutomaticActionArea = isPureAutomaticDetectedZoneContext(result, manual)
-  const actionAreaAutomaticallyConfirmed = Boolean(
-    automaticClassificationCandidate &&
-    result.planning.status === 'determined' &&
-    (result.planning.conflicts?.length ?? 0) === 0 &&
-    (!manual || pureAutomaticActionArea)
-  )
-  const automaticPlanningZones = planningZoneNamesFromCandidate(
-    automaticClassificationCandidate
-  )
-  const automaticPlanningArea = automaticPlanningZones.length === 1
-    ? automaticPlanningZones[0]
-    : undefined
-  const actionAreaCandidate = actionArea?.selectedCandidateId
-    ? effective?.planning.classificationResolution?.candidates.find(
-        (candidate) => candidate.id === actionArea.selectedCandidateId
-      )
-    : undefined
-  const municipality = getMunicipalityByName(effective?.municipality ?? '')
-  const province =
-    getProvinceByMunicipalityIneCode(effective?.municipalityCode) ??
-    (municipality ? getProvinceById(municipality.provinceId) : undefined) ??
-    getProvinceByName(effective?.province ?? '')
-  const automaticLandClass =
-    effective?.planning.classification?.code === 'SU'
-      ? 'urbano'
-      : effective?.planning.classification?.code === 'SNR'
-        ? 'nucleo_rural'
-        : effective?.planning.classification?.code === 'SR'
-          ? 'rustico'
-          : undefined
-
-  const automaticSource = effective?.planning.evidence.some(e => e.source === 'siotuga') ? 'siotuga' : 'urbanbrain'
-  const automaticLandClassDet = automaticLandClass ? createAutomaticDetermination(automaticLandClass, automaticSource) : undefined
-  const actionAreaLandClass = actionAreaCandidate?.kind === 'official_classification' ? (
-    actionAreaCandidate.classification.code === 'SU'
-      ? actionAreaCandidate.classification.categoryCode === 'SUSC' ||
-        actionAreaCandidate.classification.categoryCode === 'SUNC'
-        ? 'urbano_no_consolidado'
-        : actionAreaCandidate.classification.categoryCode === 'SUC'
-          ? 'urbano_consolidado'
-          : 'urbano'
-      : actionAreaCandidate.classification.code === 'SNR'
-        ? 'nucleo_rural'
-        : actionAreaCandidate.classification.code === 'SR'
-          ? 'rustico'
-          : undefined
-  ) : undefined
-  // A work-area choice narrows the spatial context using an official candidate;
-  // it must not manufacture a technician selection of the classification.
-  const actionAreaLandClassDetermination = actionAreaLandClass
-    ? createAutomaticDetermination(actionAreaLandClass, automaticSource)
-    : undefined
-  const classDet: ContextDeterminationState<string> = {
-    automatic: actionAreaLandClassDetermination ?? automaticLandClassDet,
-    technician: manual?.classificationDetermination?.technician
-  }
-
-  const landClass = getEffectiveValue(classDet, manual?.classification ?? automaticLandClass)
-  const parcelAffects = effective?.affects ?? result.affects
-  const automaticAffects = actionArea?.selectionType === 'detected_zone' && actionArea.affects
-    ? actionArea.affects
-    : parcelAffects
-  const affectResolution = applyManualAffectDecisions(
-    automaticAffects.detected,
-    manual?.affectDecisions
-  )
-  const checks = allSourceChecks(result)
-  const hasIncompleteSource = checks.some((check) =>
-    ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
-  )
-  const reliabilityMode = manual && !actionAreaAutomaticallyConfirmed
-    ? manual.verification === 'technician_validated'
-      ? 'technician_validated_manual'
-      : 'manual_unverified'
-    : result.continuity?.usingPreviousOfficialContext
-      ? 'previous_official'
-      : effective
-        ? hasIncompleteSource
-          ? 'partial_official'
-          : 'current_official'
-        : 'unresolved'
-  const baseUrbanisticFacts =
-    effective?.planning.urbanisticFacts ??
-    (effective?.planning.classificationResolution
-      ? urbanisticFactsFromClassificationResolution(effective.planning, result.resolvedAt)
-      : undefined)
-  const urbanisticFacts = baseUrbanisticFacts
-    ? applyActionAreaToUrbanisticFacts(
-        applyManualFactDecisions(baseUrbanisticFacts, manual).effective,
-        effective,
-        actionArea
-      )
-    : undefined
-
-  return {
-    cadastralReference: effective?.cadastralReference,
-    parcelReference: effective?.parcelReference,
-    provinceId: province?.id,
-    provinceName: effective?.province,
-    provinceCode: effective?.provinceCode,
-    municipalityId: municipality?.id,
-    municipalityName: effective?.municipality,
-    municipalityCode: effective?.municipalityCode,
-    address: effective?.normalizedAddress,
-    lat: effective?.coordinates?.lat,
-    lng: effective?.coordinates?.lng,
-    parcelGeometry: effective?.parcelGeometry,
-    locationStatus: effective?.status ?? result.status,
-    locationConfidence: effective?.confidence ?? result.confidence,
-    locationSource: effective?.evidence.some((item) => item.source === 'catastro')
-      ? 'catastro'
-      : effective?.evidence.some((item) => item.source === 'cartociudad')
-        ? 'cartociudad'
-        : undefined,
-    planningInstrument: effective?.planning.instrument,
-    planningStatus: effective?.planning.applicableInstruments?.some(
-      (instrument) => instrument.status === 'current'
-    )
-      ? 'vigente'
-      : effective?.planning.status === 'determined'
-        ? 'vigente'
-        : undefined,
-    planningApplicabilityStatus:
-      actionArea?.selectionType === 'detected_zone'
-        ? actionArea.verification === 'technician_validated'
-          ? 'determined'
-          : actionAreaAutomaticallyConfirmed
-            ? effective?.planning.status ?? 'not_determined'
-          : 'partial'
-        : effective?.planning.status ?? 'not_determined',
-    planningCanAnswerConcreteParameters:
-      effective?.planning.canAnswerConcreteParameters ?? false,
-    classificationConfidenceLevel: classificationAssessment.level,
-    classificationReason: classificationAssessment.reason,
-    classificationSources: classificationAssessment.sources,
-    classificationWarnings: classificationAssessment.warnings,
-    urbanisticFacts,
-    planningWarnings: effective?.planning.warnings ?? [],
-    planningConflicts:
-      actionArea?.selectionType === 'detected_zone'
-        ? []
-        : effective?.planning.conflicts ?? [],
-    parcelPlanningConflicts: effective?.planning.conflicts ?? [],
-    planningSource: effective?.planning.evidence.some((item) => item.source === 'siotuga')
-      ? 'siotuga'
-      : effective?.planning.status === 'determined'
-        ? 'urbanbrain'
-        : undefined,
-    landClass,
-    automaticLandClass,
-    planningArea:
-      actionArea?.selectionType === 'detected_zone'
-        ? actionArea.planningZone
-        : manual?.area ??
-      automaticPlanningArea ??
-      (effective?.planning.status !== 'conflict' && effective?.planning.areas?.length === 1
-        ? effective.planning.areas[0].name
-        : undefined),
-    qualification: manual?.ordinanceDetermination
-      ? getEffectiveValue(manual.ordinanceDetermination, manual.ordinance)
-      : manual?.ordinance,
-    classificationDetermination: classDet,
-    categoryDetermination: manual?.categoryDetermination,
-    ordinanceDetermination: manual?.ordinanceDetermination,
-    manualContext: actionAreaAutomaticallyConfirmed ? undefined : manual,
-    actionAreaSelection: actionAreaAutomaticallyConfirmed
-      ? undefined
-      : manual?.actionAreaSelection,
-    actionAreaAutomaticallyConfirmed,
-    reliability: {
-      mode: reliabilityMode,
-      latestAttemptAt: result.attemptStartedAt ?? result.resolvedAt,
-      officialContextResolvedAt: effective?.resolvedAt,
-      usingPreviousOfficialContext: result.continuity?.usingPreviousOfficialContext ?? false,
-      sourceChecks: checks,
-    },
-    warnings: [
-      ...result.warnings,
-      ...result.planning.warnings,
-      ...result.affects.warnings,
-      ...(effective && effective !== result ? effective.planning.warnings : []),
-    ],
-    conflicts: result.conflicts,
-    affects: {
-      ...automaticAffects,
-      automatic: automaticAffects.detected,
-      parcel: parcelAffects.detected,
-      manualDecisions: manual?.affectDecisions ?? [],
-      detected: affectResolution.effective,
-    },
-    resolvedAt: result.resolvedAt,
-    fieldConfirmations: territorialFieldConfirmations(effective ?? result),
-  }
-}
 
 export class ContextDetectionEngine {
   constructor(private readonly resolver: Resolver = officialResolver()) {}
@@ -338,7 +115,114 @@ export class ContextDetectionEngine {
   ): Promise<TerritorialResolution | null> {
     const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
     if (!authorized) return null
-    const result = createManualAttempt(input, manualContext, authorized.latestDetectionRaw)
+    const continuityRaw = authorized.legacyAuditRaw ?? authorized.latestDetectionRaw
+    const result = createManualAttempt(input, manualContext, continuityRaw)
+    await this.persist(expedienteId, authorized.expediente.ownerId, result)
+    return result
+  }
+
+  /**
+   * Confirms one of the already detected ordinance candidates.  This is an
+   * explicitly local operation: it reads the latest authorized detection,
+   * verifies the selected identity belongs to that same official context and
+   * persists a manual confirmation without invoking any external resolver.
+   */
+  async confirmOrdinanceCandidate(
+    expedienteId: string,
+    userId: string,
+    input: ResolveParcelLocationInput,
+    identity: string,
+    recordedAt = new Date().toISOString(),
+  ): Promise<TerritorialResolution | null> {
+    const authorized = await loadAuthorizedParcelInputs(expedienteId, userId)
+    if (!authorized) return null
+
+    const previousRaw = (authorized.legacyAuditRaw ?? authorized.latestDetectionRaw) as TerritorialResolution | undefined
+    const official = previousRaw ? officialContextForUse(previousRaw) : undefined
+    if (!official || !targetsSameParcel(input, official)) return null
+    const detectedCandidate = official?.planning.ordinanceCandidates?.find(
+      (item) => item.identity
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleUpperCase() === identity
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleUpperCase(),
+    )
+    const instrumentId = official.planning.applicableInstruments?.find((item) => item.status === 'current')?.id ?? official.planning.instrument
+    const catalogIdentity = findInstrumentIdentity(getInstrumentIdentityCatalog(official.municipalityCode, instrumentId), identity)
+    const candidate = detectedCandidate ?? (catalogIdentity ? {
+      identity: catalogIdentity.officialCode,
+      normalizedIdentity: catalogIdentity.officialCode,
+      semanticDimension: catalogIdentity.semanticDimension,
+      instrumentId: instrumentId ?? official.planning.instrument ?? '',
+      instrumentMembership: true,
+      provenance: catalogIdentity.evidence.map((item) => item.sourceId),
+      documentaryEvidence: catalogIdentity.evidence.map((item) => item.quote).filter((quote): quote is string => Boolean(quote)).join(' | '),
+      identityId: catalogIdentity.id,
+      catalogStatus: runtimeCatalogStatus(catalogIdentity.status),
+      normativeReferences: catalogIdentity.normativeReferences,
+    } satisfies NonNullable<TerritorialResolution['planning']['ordinanceCandidates']>[number] : undefined)
+    if (!candidate) return null
+
+    const previousManual = previousRaw?.continuity?.manualContext
+    const manualContext: ManualTerritorialContext = {
+      ...previousManual,
+      cadastralReference:
+        previousManual?.cadastralReference ?? input.cadastralReference ?? official.cadastralReference,
+      municipality: previousManual?.municipality ?? official.municipality,
+      address: previousManual?.address ?? input.address ?? official.normalizedAddress,
+      coordinates: previousManual?.coordinates ?? input.coordinates ?? official.coordinates,
+      ordinance: candidate.identity,
+      ordinanceDetermination: {
+        ...previousManual?.ordinanceDetermination,
+        technician: createTechnicianDetermination(
+          candidate.identity,
+          userId,
+          official.planning.ordinanceResolution?.identity?.code,
+          { verification: 'unverified', now: () => new Date(recordedAt) },
+        ),
+      },
+      provenance: 'manual',
+      verification: previousManual?.verification ?? 'unverified',
+      recordedAt,
+      validatedAt: previousManual?.validatedAt,
+      validatedBy: previousManual?.validatedBy,
+    }
+
+    const result = createManualAttempt(input, manualContext, previousRaw)
+    // Keep the official candidate set and make the explicit user confirmation
+    // part of the persisted territorial result.  Chat can then consume this
+    // fact without re-running any external resolver; the selected identity is
+    // still the exact candidate from the same official context.
+    const confirmedCandidates = (official.planning.ordinanceCandidates ?? []).map((item) =>
+      item.identity.trim().toLocaleUpperCase() === candidate.identity.trim().toLocaleUpperCase()
+        ? { ...item, status: 'user_confirmed' as const, confirmationSource: 'user' as const }
+        : item
+    )
+    if (!detectedCandidate) confirmedCandidates.push({ ...candidate, status: 'user_confirmed', confirmationSource: 'user' })
+    result.planning = {
+      ...official.planning,
+      ordinanceCandidates: confirmedCandidates,
+      ordinanceResolution: {
+        ...official.planning.ordinanceResolution,
+        status: 'USER_CONFIRMED',
+        identity: {
+          code: candidate.identity,
+          label: candidate.identity,
+        },
+        confidence: candidate.confidence ?? official.planning.ordinanceResolution?.confidence ?? 'unknown',
+        provenance: candidate.provenance,
+        confirmationSource: 'user',
+        confirmedByUser: true,
+        identityId: candidate.identityId,
+        normativeReferences: candidate.normativeReferences,
+      },
+    }
     await this.persist(expedienteId, authorized.expediente.ownerId, result)
     return result
   }
@@ -350,13 +234,48 @@ export class ContextDetectionEngine {
     attemptStartedAt: string
   ) {
     const current = await this.resolver(input)
+    console.log('UB-E2E-TRACE resolve-result-before-continuity', JSON.stringify({
+      expedienteId,
+      attemptStartedAt,
+      municipalityCode: current.municipalityCode ?? null,
+      ordinanceCandidates: current.planning.ordinanceCandidates?.map((candidate) => ({
+        identity: candidate.identity,
+        semanticDimension: candidate.semanticDimension ?? null,
+        sourceRef: candidate.sourceRef,
+        sourceDocument: candidate.sourceDocument,
+        provenance: candidate.provenance,
+      })) ?? [],
+      contextualCandidates: current.planning.contextualCandidates?.map((candidate) => ({
+        identity: candidate.identity,
+        semanticDimension: candidate.semanticDimension ?? null,
+        sourceRef: candidate.sourceRef,
+        provenance: candidate.provenance,
+      })) ?? [],
+    }))
     current.attemptStartedAt = attemptStartedAt
-    const result = attachContinuity(current, input, authorized.latestDetectionRaw)
+    const result = attachContinuity(current, input, authorized.legacyAuditRaw ?? authorized.latestDetectionRaw)
     await this.persist(expedienteId, authorized.expediente.ownerId, result)
     return result
   }
 
   private async persist(expedienteId: string, ownerId: string, result: TerritorialResolution) {
+    console.log('UB-E2E-TRACE persist-result', JSON.stringify({
+      expedienteId,
+      resolvedAt: result.resolvedAt,
+      ordinanceCandidates: result.planning.ordinanceCandidates?.map((candidate) => ({
+        identity: candidate.identity,
+        semanticDimension: candidate.semanticDimension ?? null,
+        sourceRef: candidate.sourceRef,
+        sourceDocument: candidate.sourceDocument,
+        provenance: candidate.provenance,
+      })) ?? [],
+      contextualCandidates: result.planning.contextualCandidates?.map((candidate) => ({
+        identity: candidate.identity,
+        semanticDimension: candidate.semanticDimension ?? null,
+        sourceRef: candidate.sourceRef,
+        provenance: candidate.provenance,
+      })) ?? [],
+    }))
     const effective = officialContextForUse(result)
     const allEvidence = [
       ...result.evidence,

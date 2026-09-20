@@ -3,22 +3,31 @@ import type {
   DetailedZoningStrategy,
   DetailedZoningStrategyContext,
 } from '@/application/territorial-resolver/ordinanceCandidateResolver'
-import type { ParcelGeometry, PlanningDocumentReference } from '@/domain/territorial-resolver/types'
+import type {
+  ParcelGeometry,
+  PlanningDocumentReference,
+  VisualZoningInterpretation,
+  VisualZoningObservation,
+  UrbanisticIdentitySemanticType,
+} from '@/domain/territorial-resolver/types'
 import { discoverSiotugaResources } from './SiotugaResourceDiscovery'
 import { isExternalServiceFailure } from './officialHttp'
 import { SiotugaPlanningKnowledgeSource } from '@/infrastructure/planning-knowledge/SiotugaPlanningKnowledgeSource'
+import { getInstrumentIdentityCatalog } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
+import { runtimeCatalogStatus } from '@/domain/planning-knowledge/identityCatalog'
 import { selectOriginalPlanningSheets, type TileIndexFeature } from './originalPlanningSheetSelector'
 import { overlayParcelOnPng, type GeographicBbox } from './parcelMapOverlay'
 
 const SIOTUGA_WMS_URL = 'https://siotuga.xunta.gal/siotuga/ws'
 
-export interface DetailedZoningVisualObservation {
-  observedLabel: string | null
-  observedSymbols?: string[]
-  observedBoundaries?: string[]
-  parcelRelation?: 'contains' | 'intersects' | 'ambiguous' | 'unknown'
-  competingLabels?: string[]
-  confidence?: 'high' | 'medium' | 'low'
+export type DetailedZoningVisualObservation = VisualZoningObservation
+
+export interface DetailedZoningVisualContext {
+  municipalityCode?: string
+  classification?: string
+  category?: string
+  knownIdentities?: string[]
+  evidence?: string[]
 }
 
 export interface InstrumentZoningCatalog {
@@ -29,7 +38,24 @@ export interface InstrumentZoningCatalog {
     aliases?: string[]
     normativeArticle?: string
     evidence?: string
+    identityId?: string
+    semanticDimension?: UrbanisticIdentitySemanticType
+    status?: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED'
+    normativeReferences?: Array<{ documentId: string; chunkIds: string[]; article?: string; relation: 'defines' | 'regulates' | 'mentions'; sourceId: string }>
   }>
+}
+
+export interface DetailedZoningVisualInterpretation extends VisualZoningInterpretation {}
+
+/* Legacy aliases keep injected strategies/tests source-compatible. */
+export interface LegacyDetailedZoningVisualObservation {
+  observedLabel: string | null
+  observedSymbols?: string[]
+  observedBoundaries?: string[]
+  parcelRelation?: 'contains' | 'intersects' | 'ambiguous' | 'unknown'
+  competingLabels?: string[]
+  confidence?: 'high' | 'medium' | 'low'
+  semanticDimension?: UrbanisticIdentitySemanticType
 }
 
 export interface DetailedZoningVisualInterpreter {
@@ -42,9 +68,10 @@ export interface DetailedZoningVisualInterpreter {
     image: Uint8Array
     legendImage?: Uint8Array
     catalog?: InstrumentZoningCatalog
+    context?: DetailedZoningVisualContext
     sourceUrl: string
     instrumentId: string
-  }): Promise<DetailedZoningVisualObservation[]>
+  }): Promise<DetailedZoningVisualInterpretation | DetailedZoningVisualObservation[]>
 }
 
 export interface DetailedZoningDocumentValidator {
@@ -82,6 +109,39 @@ async function bytes(response: Response) {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+function mergeVisualResult(
+  previous: DetailedZoningVisualInterpretation | undefined,
+  next: DetailedZoningVisualInterpretation,
+): DetailedZoningVisualInterpretation {
+  const observations = [...(previous?.observations ?? []), ...next.observations]
+  const seen = new Set<string>()
+  const unique = observations.filter((observation) => {
+    const key = [
+      observation.observedText,
+      observation.observedCode,
+      observation.observedNumber,
+      observation.observedLabel,
+      observation.description,
+      observation.spatialRelation ?? observation.parcelRelation,
+    ].map((value) => value ?? '').join('|').trim()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const states = [previous?.resolutionState, next.resolutionState]
+  return {
+    resolutionState: states.includes('multizone')
+      ? 'multizone'
+      : states.includes('ambiguous')
+        ? 'ambiguous'
+        : states.includes('resolved')
+          ? 'resolved'
+          : 'unresolved',
+    observations: unique,
+    explanation: [previous?.explanation, next.explanation].filter(Boolean).join(' ') || undefined,
+  }
+}
+
 function tileFeature(xml: string, instrumentId: string): TileIndexFeature | undefined {
   const coordinateMatch = xml.match(/<gml:coordinates>([^<]+)<\/gml:coordinates>/i)
   if (!coordinateMatch) return undefined
@@ -108,6 +168,9 @@ function tileFeature(xml: string, instrumentId: string): TileIndexFeature | unde
  */
 export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStrategy {
   readonly id = 'siotuga-detailed-zoning'
+  private sourceFailure?: string
+  getSourceFailure() { return this.sourceFailure }
+  private visualResult?: DetailedZoningVisualInterpretation
 
   private readonly fetcher: typeof fetch
   private readonly interpreter?: DetailedZoningVisualInterpreter
@@ -121,7 +184,25 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
     this.timeoutMs = options.timeoutMs ?? 10_000
   }
 
+  getVisualResult() {
+    return this.visualResult
+  }
+
   async resolve(context: DetailedZoningStrategyContext): Promise<DetailedZoningObservation[]> {
+    const startedAt = Date.now()
+    const timedFetch = async (phase: string, url: string) => {
+      const phaseStartedAt = Date.now()
+      try {
+        const response = await this.fetcher(url, { signal: AbortSignal.timeout(this.timeoutMs) })
+        console.log('UB-DIAG detailed-phase', JSON.stringify({ phase, status: response.status, durationMs: Date.now() - phaseStartedAt }))
+        return response
+      } catch (error) {
+        console.log('UB-DIAG detailed-phase', JSON.stringify({ phase, status: 'error', durationMs: Date.now() - phaseStartedAt, error: error instanceof Error ? error.name : 'unknown' }))
+        throw error
+      }
+    }
+    this.visualResult = undefined
+    this.sourceFailure = undefined
     const instrumentId = currentInstrumentId(context)
     const municipalityCode = context.municipalityCode
     if (!instrumentId || !municipalityCode || !context.coordinates || !this.interpreter || !this.documentValidator) {
@@ -135,6 +216,7 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
         this.fetcher,
         this.timeoutMs,
       )
+      console.log('UB-DIAG detailed-discovery', JSON.stringify({ municipalityCode, instrumentId, durationMs: Date.now() - startedAt, hasDetailedLayer: Boolean(discovered.catalog?.detailedPlanningLayer), hasTileIndex: Boolean(discovered.catalog?.planningTileIndex) }))
       const resources = discovered.catalog
       if (!resources?.detailedPlanningLayer && !resources?.planningTileIndex) return []
 
@@ -172,7 +254,7 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
           INFO_FORMAT: 'application/vnd.ogc.gml', CRS: 'EPSG:4326',
           BBOX: bboxText(initialBbox), WIDTH: '101', HEIGHT: '101', I: '50', J: '50', FEATURE_COUNT: '10',
         }).toString()
-        const response = await this.fetcher(tileInfo.toString())
+        const response = await timedFetch('planning-tile-getfeatureinfo', tileInfo.toString())
         if (response.ok) tile = tileFeature(await response.text(), instrumentId)
       }
       // FASE 1: GetFeatureInfo on detailedPlanningLayer
@@ -185,13 +267,14 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
           INFO_FORMAT: 'application/vnd.ogc.gml', CRS: 'EPSG:4326',
           BBOX: bboxText(initialBbox), WIDTH: '101', HEIGHT: '101', I: '50', J: '50', FEATURE_COUNT: '10',
         }).toString()
-        const gfiRes = await this.fetcher(gfiUrl.toString())
+        const gfiRes = await timedFetch('detailed-getfeatureinfo', gfiUrl.toString())
         if (gfiRes.ok) {
           const gfiXml = await gfiRes.text()
           const codeMatch = gfiXml.match(/<(?:codigo|etiqueta|zona|ordenanza|calificacion)>([^<]+)<\//i)
           if (codeMatch && codeMatch[1]?.trim()) {
             return [{
               identity: codeMatch[1].trim(),
+              semanticDimension: 'zoning',
               instrumentId,
               sourceRef: gfiUrl.toString(),
               spatialEvidence: `GetFeatureInfo on ${resources.detailedPlanningLayer}`,
@@ -215,12 +298,27 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
         FORMAT: 'image/png',
         LAYER: resources.detailedPlanningLayer ?? resources.planningTileIndex ?? '',
       }).toString()
-      const legendImage = await bytes(await this.fetcher(legend.toString()))
-      
-      let catalog: InstrumentZoningCatalog | null = null
-      if (legendImage && this.interpreter.extractCatalog) {
+      const legendImage = await bytes(await timedFetch('pord-legend-download', legend.toString()))
+      const canonicalCatalog = getInstrumentIdentityCatalog(municipalityCode, instrumentId)
+      let catalog: InstrumentZoningCatalog | null = canonicalCatalog
+        ? {
+            instrumentId,
+            identities: canonicalCatalog.identities.map((identity) => ({
+              code: identity.officialCode,
+              label: identity.officialName,
+              aliases: [],
+              evidence: identity.evidence.map((item) => item.quote).filter((quote): quote is string => Boolean(quote)).join(' | '),
+              identityId: identity.id,
+              semanticDimension: identity.semanticDimension,
+          status: runtimeCatalogStatus(identity.status),
+              normativeReferences: identity.normativeReferences,
+            })),
+          }
+        : null
+      if (!catalog && legendImage && this.interpreter.extractCatalog) {
         catalog = await this.interpreter.extractCatalog({ legendImage, instrumentId })
       }
+      console.log('UB-DIAG detailed-phase', JSON.stringify({ phase: 'catalog-preparation', status: canonicalCatalog ? 'canonical' : legendImage ? 'legend-derived' : 'absent', identityCount: catalog?.identities.length ?? 0, durationMs: Date.now() - startedAt }))
 
       let visuals: DetailedZoningVisualObservation[] = []
       let selectedImage: Uint8Array | undefined
@@ -242,18 +340,51 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
           STYLES: '', FORMAT: 'image/png', CRS: 'EPSG:4326',
           BBOX: bboxText(currentBbox), WIDTH: '1600', HEIGHT: '1600',
         }).toString()
-        const image = await bytes(await this.fetcher(query.toString()))
+        const image = await bytes(await timedFetch(`pord-map-download-pass-${pass + 1}`, query.toString()))
         if (!image || !context.geometry) continue
+        const overlayStartedAt = Date.now()
         const markedImage = overlayParcelOnPng(image, context.geometry as ParcelGeometry, currentBbox)
+        console.log('UB-DIAG detailed-phase', JSON.stringify({ phase: `parcel-overlay-pass-${pass + 1}`, status: markedImage ? 'ok' : 'empty', durationMs: Date.now() - overlayStartedAt }))
         if (!markedImage) continue
-        const candidates = await this.interpreter.inspect({
+        const vlmStartedAt = Date.now()
+        const visualResponse = await this.interpreter.inspect({
           image: markedImage,
           legendImage,
           catalog: catalog ?? undefined,
+          context: {
+            municipalityCode,
+            classification: context.planning.classification
+              ? `${context.planning.classification.code}: ${context.planning.classification.label}`
+              : undefined,
+            category: context.planning.classification?.categoryCode
+              ? `${context.planning.classification.categoryCode}: ${context.planning.classification.categoryLabel ?? ''}`.trim()
+              : undefined,
+            knownIdentities: catalog?.identities.map((identity) => `${identity.code}: ${identity.label}`),
+            evidence: context.planning.evidence.slice(0, 8).map((item) => `${item.method}: ${item.sourceUrl}`),
+          },
           sourceUrl: query.toString(),
           instrumentId,
         })
-        const validCandidates = candidates.filter(c => c.observedLabel?.trim() && c.parcelRelation !== 'ambiguous' && c.parcelRelation !== 'unknown')
+        console.log('UB-DIAG detailed-phase', JSON.stringify({ phase: `vlm-inspect-pass-${pass + 1}`, status: 'ok', durationMs: Date.now() - vlmStartedAt }))
+        const interpretation: DetailedZoningVisualInterpretation = Array.isArray(visualResponse)
+          ? { resolutionState: visualResponse.length ? 'resolved' : 'unresolved', observations: visualResponse }
+          : visualResponse
+        this.visualResult = mergeVisualResult(this.visualResult, {
+          ...interpretation,
+          observations: interpretation.observations.map((observation) => ({
+            ...observation,
+            provenance: [...new Set([
+              ...(observation.provenance ?? []),
+              query.toString(),
+              ...(legend ? [legend.toString()] : []),
+            ])],
+          })),
+        })
+        const validCandidates = interpretation.observations.filter(c => (
+          (c.observedLabel?.trim() || c.observedCode?.trim() || c.observedText?.trim() || c.observedNumber?.trim()) &&
+          (c.spatialRelation ?? c.parcelRelation) !== 'ambiguous' &&
+          (c.spatialRelation ?? c.parcelRelation) !== 'unknown'
+        ))
         if (validCandidates.length > 0) {
           visuals = validCandidates
           selectedImage = markedImage
@@ -269,6 +400,7 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
         instrumentId,
         new Date().toISOString(),
       )
+      console.log('UB-DIAG detailed-documents', JSON.stringify({ documentCount: collected.documents.length, durationMs: Date.now() - startedAt }))
       const documents = collected.documents
         .filter((document) => document.instrumentId === instrumentId)
         .map((document) => ({
@@ -285,19 +417,23 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
         
       const validatedObservations: DetailedZoningObservation[] = []
       for (const visual of visuals) {
-        if (!visual.observedLabel) continue
+        const observedIdentity = visual.observedCode?.trim() || visual.observedLabel?.trim() || visual.observedText?.trim() || visual.observedNumber?.trim()
+        if (!observedIdentity) continue
         
+        const validationStartedAt = Date.now()
         let validated = await this.documentValidator.validate({
-          observedLabel: visual.observedLabel,
+          observedLabel: observedIdentity,
           instrumentId,
           documents: [...documents, ...imageDocuments(documents)],
         })
+        console.log('UB-DIAG detailed-phase', JSON.stringify({ phase: 'document-validation', status: validated ? 'matched' : 'not_matched', durationMs: Date.now() - validationStartedAt }))
         
         // If not found in documents, check the catalog if present
         if (!validated && catalog) {
            const match = catalog.identities.find(i => 
-             i.code.toUpperCase() === visual.observedLabel!.toUpperCase() || 
-             i.label.toUpperCase().includes(visual.observedLabel!.toUpperCase())
+             i.code.toUpperCase() === observedIdentity.toUpperCase() ||
+             i.label.toUpperCase().includes(observedIdentity.toUpperCase()) ||
+             i.aliases?.some((alias) => alias.toUpperCase() === observedIdentity.toUpperCase())
            )
            if (match) {
              validated = {
@@ -315,8 +451,12 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
           sourceRef: selectedQuery.toString(),
           sourceDocument: validated.sourceDocument,
           spatialEvidence: `SIOTUGA WMS ${resources.detailedPlanningLayer ?? resources.planningTileIndex}; BBOX ${bboxText(selectedBbox)}; parcel overlay applied`,
-          graphicEvidence: `observedLabel=${visual.observedLabel}`,
-          legendEvidence: visual.observedSymbols?.join('; ') ?? 'legend inspected by interpreter',
+          graphicEvidence: visual.description ?? `observed=${observedIdentity}`,
+          legendEvidence: [
+            ...(visual.observedSymbols ?? []),
+            ...(visual.observedColors ?? []),
+            ...(visual.observedPatterns ?? []),
+          ].join('; ') || 'legend inspected by interpreter',
           documentaryEvidence: validated.documentaryEvidence,
           instrumentMembership: true,
           provenance: [
@@ -327,12 +467,22 @@ export class SiotugaDetailedZoningEvidenceProvider implements DetailedZoningStra
             validated.sourceDocument ?? collected.rawSource.id,
           ],
           confidence: visual.confidence ?? 'medium',
+          semanticDimension: visual.semanticDimension,
+          reason: visual.description,
+          reviewMaterials: {
+            mapUrl: selectedQuery.toString(),
+            legendUrl: legend.toString(),
+            candidateOrdinances: [],
+            sourceEvidence: [selectedQuery.toString(), legend.toString()],
+          },
         })
       }
+      console.log('UB-DIAG detailed-result', JSON.stringify({ municipalityCode, instrumentId, visualCount: visuals.length, validatedCount: validatedObservations.length, durationMs: Date.now() - startedAt }))
       return validatedObservations
     } catch (error) {
       console.log("ERROR in Siotuga:", error)
-      if (isExternalServiceFailure(error)) {
+      if (isExternalServiceFailure(error) || (error instanceof Error && error.name === 'RuntimeBudgetExceeded')) {
+        this.sourceFailure = error instanceof Error ? error.name : 'External cartographic source failure'
         return []
       }
       throw error

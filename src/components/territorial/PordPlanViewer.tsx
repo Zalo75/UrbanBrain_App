@@ -27,6 +27,7 @@ interface Props {
   classificationCode?: string
   categoryCode?: string
   affects?: Array<{ category: string; name: string; confidence: string }>
+  officialLegendUrl?: string
 }
 
 export function PordPlanViewer(props: Props) {

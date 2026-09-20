@@ -33,28 +33,83 @@ function evidence(sourceUrl: string, retrievedAt: string, method: string): Terri
 
 async function officialGeometry(response: Response) {
   const xml = await response.text()
-  if (!/<(?:\w+:)?FeatureCollection\b/i.test(xml) || !/numberMatched="\d+"/i.test(xml)) {
-    throw new OfficialServiceError(
+  const numberMatched = /numberMatched="(\d+)"/i.exec(xml)?.[1] ?? null
+  const firstFeature = /<(?:(?:\w+):)?featureMember\b[^>]*>\s*<([\w.-]*:)?([\w.-]+)\b/i.exec(xml)?.[2] ?? null
+  const hasGeometry = /<(?:gml:)?(?:Surface|Polygon|MultiSurface)\b/i.test(xml)
+  const hasFeatureCollection = /<(?:(?:\w+):)?FeatureCollection\b/i.test(xml)
+  const rootElement = /^\s*<\?xml[^>]*>\s*<([\w.-]*:)?([\w.-]+)/i.exec(xml)?.[2] ?? null
+  const exceptionCode = /<(?:\w+:)?Exception[^>]*(?:code|exceptionCode)=["']([^"']+)["']/i.exec(xml)?.[1] ?? null
+  const exceptionText = /<(?:\w+:)?ExceptionText[^>]*>([\s\S]*?)<\//i.exec(xml)?.[1]?.replace(/\s+/g, ' ').trim().slice(0, 240) ?? null
+  console.log('UB-DIAG catastro-inspire-structure', JSON.stringify({ rootElement, numberMatched, firstFeature, hasGeometry, hasFeatureCollection, exceptionCode, exceptionText }))
+  if (!hasFeatureCollection || !/numberMatched="\d+"/i.test(xml)) {
+    const error = new OfficialServiceError(
       'Catastro INSPIRE',
       'malformed',
       'Catastro INSPIRE devolvió una respuesta no válida.'
     )
+    console.log('UB-DIAG catastro-inspire-error', JSON.stringify({ message: error.message }))
+    throw error
   }
   if (/numberMatched="0"/i.test(xml)) return undefined
   const geometry = parseCatastroGeometry(xml)
   if (!geometry) {
-    throw new OfficialServiceError(
+    const error = new OfficialServiceError(
       'Catastro INSPIRE',
       'malformed',
       'Catastro INSPIRE devolvió una geometría que no puede validarse.'
     )
+    console.log('UB-DIAG catastro-inspire-error', JSON.stringify({ message: error.message }))
+    throw error
   }
   return geometry
+}
+
+function jsonShape(payload: unknown, kind: 'dnprc' | 'cpmrc') {
+  if (!payload || typeof payload !== 'object') return { rootKeys: [], result: false }
+  const root = payload as Record<string, unknown>
+  const resultKey = kind === 'dnprc'
+    ? (Object.hasOwn(root, 'consulta_dnprcResult') ? 'consulta_dnprcResult' : Object.hasOwn(root, 'Consulta_DNPRCResult') ? 'Consulta_DNPRCResult' : null)
+    : (Object.hasOwn(root, 'Consulta_CPMRCResult') ? 'Consulta_CPMRCResult' : Object.hasOwn(root, 'consulta_cpmrcResult') ? 'consulta_cpmrcResult' : null)
+  const result = resultKey && root[resultKey] && typeof root[resultKey] === 'object'
+    ? root[resultKey] as Record<string, unknown>
+    : undefined
+  const rcdnp = (result?.lrcdnp as Record<string, unknown> | undefined)?.rcdnp
+  const bi = (result?.bico as Record<string, unknown> | undefined)?.bi
+  const coordinates = result?.coordenadas as Record<string, unknown> | undefined
+  const coord = coordinates?.coord
+  const first = (Array.isArray(coord) ? coord[0] : coord) as Record<string, unknown> | undefined
+  const geo = first?.geo as Record<string, unknown> | undefined
+  const wrapperKeys = result ? Object.keys(result) : []
+  const functionalFields = [...Object.keys(root), ...wrapperKeys].filter((key) => /error|fault|message|mensaje|status|estado|control|cuerr|lerr|code|codigo|text|texto/i.test(key))
+  const functionalValues = [root, result].filter(Boolean).flatMap((value) =>
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => /error|fault|message|mensaje|status|estado|control|cuerr|lerr|code|codigo|text|texto/i.test(key))
+      .map(([key, item]) => ({ key, value: typeof item === 'string' ? item.slice(0, 240) : typeof item === 'number' || typeof item === 'boolean' ? item : Array.isArray(item) ? `array(${item.length})` : item && typeof item === 'object' ? 'object' : item }))
+  )
+  return {
+    rootKeys: Object.keys(root).slice(0, 20),
+    resultKey,
+    wrapperKeys: wrapperKeys.slice(0, 30),
+    hasLrcdnp: Boolean(result?.lrcdnp),
+    rcdnpCount: Array.isArray(rcdnp) ? rcdnp.length : rcdnp ? 1 : 0,
+    hasBico: Boolean(result?.bico),
+    biCount: Array.isArray(bi) ? bi.length : bi ? 1 : 0,
+    hasCoordinates: Boolean(coordinates),
+    coordCount: Array.isArray(coord) ? coord.length : coord ? 1 : 0,
+    hasXcen: typeof geo?.xcen !== 'undefined',
+    hasYcen: typeof geo?.ycen !== 'undefined',
+    validXcen: Number.isFinite(Number(geo?.xcen)),
+    validYcen: Number.isFinite(Number(geo?.ycen)),
+    functionalFields: [...new Set(functionalFields)].slice(0, 30),
+    functionalValues: functionalValues.slice(0, 30),
+  }
 }
 
 async function officialJson(response: Response, service: string, expectedRoots: string[]) {
   try {
     const payload = await response.json()
+    const kind = expectedRoots.some((root) => root.toLowerCase().includes('dnprc')) ? 'dnprc' : 'cpmrc'
+    console.log(`UB-DIAG catastro-${kind}-structure`, JSON.stringify(jsonShape(payload, kind)))
     if (
       !payload ||
       typeof payload !== 'object' ||
@@ -80,7 +135,13 @@ function firstRecord(payload: unknown): CatastroRecord | null {
     | undefined
   const list = (result?.lrcdnp as Record<string, unknown> | undefined)?.rcdnp
   if (Array.isArray(list)) return (list[0] as CatastroRecord | undefined) ?? null
-  return list && typeof list === 'object' ? (list as CatastroRecord) : null
+  if (list && typeof list === 'object') return list as CatastroRecord
+  // Consulta_DNPRC has two official JSON shapes in production. Newer
+  // responses expose the cadastral unit under bico.bi instead of lrcdnp.rcdnp.
+  const bico = result?.bico as Record<string, unknown> | undefined
+  const bi = bico?.bi
+  if (Array.isArray(bi)) return (bi[0] as CatastroRecord | undefined) ?? null
+  return bi && typeof bi === 'object' ? (bi as CatastroRecord) : null
 }
 
 function addressFromRecord(record: CatastroRecord | null) {
@@ -122,6 +183,20 @@ function referenceResult(payload: unknown) {
   return reference.length === 14 ? reference : null
 }
 
+function representativePoint(geometry: ParcelGeometry): TerritorialCoordinates | undefined {
+  const points = geometry.coordinates.flat(2)
+  if (!points.length) return undefined
+  const valid = points.filter(
+    (point): point is [number, number] =>
+      Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]),
+  )
+  if (!valid.length) return undefined
+  return {
+    lng: valid.reduce((sum, point) => sum + point[0], 0) / valid.length,
+    lat: valid.reduce((sum, point) => sum + point[1], 0) / valid.length,
+  }
+}
+
 export function parseCatastroGeometry(xml: string): ParcelGeometry | undefined {
   if (!/numberMatched="[1-9]\d*"/i.test(xml)) return undefined
   const polygons: number[][][][] = []
@@ -148,6 +223,7 @@ export class CatastroOfficialAdapter implements CatastroPort {
   ) {}
 
   async resolveReference(reference: string): Promise<CatastroParcel | null> {
+    const startedAt = Date.now()
     const parcelReference = reference.slice(0, 14)
     const detailsUrl = new URL(`${CATASTRO_STREET}/Consulta_DNPRC`)
     detailsUrl.search = new URLSearchParams({
@@ -183,14 +259,44 @@ export class CatastroOfficialAdapter implements CatastroPort {
       ),
     ])
 
-    if (detailsState.status === 'rejected' && coordinatesState.status === 'rejected') {
-      throw detailsState.reason
-    }
-
     const record = detailsState.status === 'fulfilled' ? firstRecord(detailsState.value) : null
     const coordinate =
       coordinatesState.status === 'fulfilled' ? coordinateResult(coordinatesState.value) : null
-    if (!record && !coordinate) return null
+    const geometry = geometryState.status === 'fulfilled' ? geometryState.value : undefined
+    console.log('UB-DIAG catastro-reference', JSON.stringify({ reference: parcelReference, durationMs: Date.now() - startedAt, details: detailsState.status, coordinates: coordinatesState.status, geometry: geometryState.status, hasRecord: Boolean(record), hasCoordinates: Boolean(coordinate), hasGeometry: Boolean(geometry) }))
+    if (!record && !coordinate) {
+      if (!geometry) {
+        console.log('UB-DIAG catastro-null', JSON.stringify({ reference: parcelReference, reason: detailsState.status === 'rejected' && coordinatesState.status === 'rejected' ? 'details_and_coordinates_failed_without_geometry' : 'no_record_or_coordinates_without_geometry', durationMs: Date.now() - startedAt }))
+        if (detailsState.status === 'rejected' && coordinatesState.status === 'rejected') {
+          throw detailsState.reason
+        }
+        return null
+      }
+
+      // INSPIRE GetParcel is an official, reference-scoped fallback. The first
+      // five cadastral characters encode the municipality identity; use the
+      // shared catalogue only to present that canonical code, never a name map.
+      const retrievedAt = this.now().toISOString()
+      const municipalityCode = parcelReference.slice(0, 5)
+      const municipality = resolveMunicipalityIdentity({ municipalityCode })
+      console.log('UB-DIAG catastro-fallback', JSON.stringify({ reference: parcelReference, reason: 'geometry_only', municipalityCode, durationMs: Date.now() - startedAt }))
+      return {
+        cadastralReference: parcelReference,
+        municipality: municipality?.name,
+        municipalityCode: municipality?.ineCode ?? municipalityCode,
+        coordinates: representativePoint(geometry),
+        geometry,
+        evidence: [evidence(geometryUrl.toString(), retrievedAt, 'WFS GetParcel (identity fallback)')],
+        sourceChecks: [
+          {
+            source: 'catastro',
+            status: 'partial',
+            checkedAt: retrievedAt,
+            message: 'Catastro INSPIRE confirmó la parcela; los servicios JSON auxiliares no estaban disponibles.',
+          },
+        ],
+      }
+    }
 
     const retrievedAt = this.now().toISOString()
     const normalizedAddress = coordinate?.address ?? addressFromRecord(record)
@@ -211,10 +317,7 @@ export class CatastroOfficialAdapter implements CatastroPort {
       province: record?.dt?.np,
       provinceCode: record?.dt?.loine?.cp,
       coordinates: coordinate?.coordinates,
-      geometry:
-        geometryState.status === 'fulfilled'
-          ? geometryState.value
-          : undefined,
+      geometry,
       evidence: [],
       sourceChecks: [
         {
@@ -244,6 +347,7 @@ export class CatastroOfficialAdapter implements CatastroPort {
     if (geometryState.status === 'fulfilled' && result.geometry) {
       result.evidence.push(evidence(geometryUrl.toString(), retrievedAt, 'WFS GetParcel'))
     }
+    console.log('UB-DIAG catastro-success', JSON.stringify({ reference: parcelReference, durationMs: Date.now() - startedAt, municipalityCode: result.municipalityCode ?? null, hasRecord: Boolean(record), hasCoordinates: Boolean(coordinate), hasGeometry: Boolean(result.geometry) }))
     return result
   }
 

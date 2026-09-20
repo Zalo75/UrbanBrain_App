@@ -253,6 +253,7 @@ export interface PlanningKnowledgeGenerationInput {
     capabilitiesXml: string
     inventory: PlanningInstrumentKnowledge[]
     normativeDocuments?: PlanningNormativeDocument[]
+    contractVariantRecoveries?: string[]
     layerSchemas: Record<string, { sourceId: string; xml: string }>
     sourceIds: string[]
   }>

@@ -466,7 +466,7 @@ describe('ContextDetectionEngine tenant boundary', () => {
       planningArea: 'Núcleo rural común',
     })
     expect(summary.manualContext).toBeUndefined()
-    expect(summary.actionAreaSelection).toBeUndefined()
+    expect(summary.actionAreaSelection.current.surfaceSquareMetres).toBeGreaterThan(0)
     expect(summary.urbanisticFacts.classification.status).toBe('automatic_confirmed')
     expect(summary.urbanisticFacts.category.status).toBe('automatic_confirmed')
 
@@ -494,7 +494,7 @@ describe('ContextDetectionEngine tenant boundary', () => {
     expect(normalized.pendingValidation).not.toContain(
       'El área de actuación seleccionada está pendiente de validación técnica.'
     )
-    expect(normalized.actionArea).toBeUndefined()
+    expect(normalized.actionArea?.value.surfaceSquareMetres).toBe(1000)
 
     const currentOnly = { ...exactResolution, continuity: undefined }
     await new ContextDetectionEngine(vi.fn(async () => currentOnly)).persistAuthorizedDetection(

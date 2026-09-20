@@ -1,6 +1,6 @@
 export type CitationToken =
   | { type: 'text'; value: string }
-  | { type: 'citation'; sourceIndex: number; originalText: string }
+  | { type: 'citation'; sourceIndex?: number; sourceRef?: string; originalText: string }
   | { type: 'context'; originalText: string }
 
 export interface CitationPresentation {
@@ -72,7 +72,7 @@ function positiveInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-function citationIndex(label: string): number | null {
+function parseCitationTarget(label: string): { sourceIndex?: number; sourceRef?: string } | null {
   const trimmed = label.trim()
   const separator = trimmed.indexOf(' ')
   if (separator < 0) return null
@@ -80,12 +80,22 @@ function citationIndex(label: string): number | null {
   const keyword = trimmed.slice(0, separator)
   const value = trimmed.slice(separator).trim()
   if (keyword.toLocaleLowerCase('es-ES') !== 'fuente') return null
+  if (!value) return null
 
-  return positiveInteger(value)
+  const parsedInt = positiveInteger(value)
+  if (parsedInt !== null) {
+    return { sourceIndex: parsedInt }
+  }
+
+  if (/^(?:instrument-document|candidate|planning|cartographic-view):/i.test(value) || value.includes(':')) {
+    return { sourceRef: value }
+  }
+
+  return null
 }
 
 /**
- * Tokenizes only the citation syntax emitted by the chat contract: [Fuente N].
+ * Tokenizes the citation syntax emitted by the chat contract: [Fuente N] or [Fuente stableSourceRef].
  * It deliberately leaves Markdown and malformed bracketed text untouched.
  */
 export function parseCitations(content: string): CitationToken[] {
@@ -105,12 +115,12 @@ export function parseCitations(content: string): CitationToken[] {
 
     const originalText = content.slice(openingBracket, closingBracket + 1)
     const label = content.slice(openingBracket + 1, closingBracket)
-    const sourceIndex = citationIndex(label)
+    const target = parseCitationTarget(label)
     const isContext = label.trim().toLocaleLowerCase('es-ES') === 'contexto'
     const isInvalidTechnicalPlaceholder = isTechnicalPlaceholder(label)
     if (
-      (!isContext && !isInvalidTechnicalPlaceholder && sourceIndex === null) ||
-      (sourceIndex !== null && content[closingBracket + 1] === '(')
+      (!isContext && !isInvalidTechnicalPlaceholder && target === null) ||
+      (target !== null && content[closingBracket + 1] === '(')
     ) {
       cursor = closingBracket + 1
       continue
@@ -121,7 +131,14 @@ export function parseCitations(content: string): CitationToken[] {
     }
     transformed = true
     if (isContext) tokens.push({ type: 'context', originalText })
-    else if (sourceIndex !== null) tokens.push({ type: 'citation', sourceIndex, originalText })
+    else if (target !== null) {
+      tokens.push({
+        type: 'citation',
+        ...(target.sourceIndex !== undefined ? { sourceIndex: target.sourceIndex } : {}),
+        ...(target.sourceRef !== undefined ? { sourceRef: target.sourceRef } : {}),
+        originalText,
+      })
+    }
     cursor = closingBracket + 1
     textStart = cursor
   }

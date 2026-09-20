@@ -13,6 +13,9 @@
 # testing
 /coverage
 .artifacts/
+/artifacts/
+/diagnose_out/
+/scratch/
 
 # next.js
 /.next/
@@ -34,6 +37,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+.cache/
+models/translation/**/.cache/
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -62,4 +72,5 @@ public/sw.js
 corpus_v2/*.pdf
 scripts/*.md
 scripts/*.txt
+!scripts/requirements-local-translation.txt
 data/

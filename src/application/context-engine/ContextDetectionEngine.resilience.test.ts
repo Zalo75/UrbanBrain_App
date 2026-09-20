@@ -124,6 +124,60 @@ describe('ContextDetectionEngine source resilience', () => {
     })
   })
 
+  it('persiste los candidatos previos cuando falla transitoriamente el proveedor de zoning', async () => {
+    const previous = JSON.parse(JSON.stringify(official)) as TerritorialResolution
+    previous.planning.applicableInstruments = [{
+      id: 'instrument-teo',
+      name: 'Plan oficial',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:plan',
+    }]
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+      status: 'active',
+    }]
+    previous.planning.contextualCandidates = [{
+      identity: 'SU-C',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'category',
+      provenance: ['official:previous-classification'],
+      status: 'active',
+    }]
+    mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
+      expediente: { id: 'exp-a', orgId: 'org-a', municipio: 'betanzos' },
+      detected: null,
+      latestDetectionRaw: previous,
+      userMessages: [],
+      constraints: [],
+    })
+
+    const current = JSON.parse(JSON.stringify(official)) as TerritorialResolution
+    current.planning.applicableInstruments = previous.planning.applicableInstruments
+    current.planning.ordinanceCandidates = []
+    current.planning.contextualCandidates = []
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'unavailable',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'fetch failed',
+    }]
+
+    await new ContextDetectionEngine(vi.fn(async () => current)).detectContextFromInput(
+      'exp-a',
+      'user-a',
+      { cadastralReference: '1234567NH4913S' },
+    )
+
+    const persisted = mocks.values.mock.calls[0][0]
+    expect(persisted.rawResponse.planning.ordinanceCandidates.map((candidate: { identity: string }) => candidate.identity)).toEqual(['R-2'])
+    expect(persisted.rawResponse.planning.contextualCandidates.map((candidate: { identity: string }) => candidate.identity)).toEqual(['SU-C'])
+    expect(persisted.rawResponse.planning.status).toBe('partial')
+  })
+
   it('no reutiliza el contexto oficial si el usuario consulta otra parcela', async () => {
     await new ContextDetectionEngine(vi.fn(async () => ({ ...failed }))).detectContextFromInput(
       'exp-a',
@@ -158,6 +212,86 @@ describe('ContextDetectionEngine source resilience', () => {
     })
     expect(persisted.summary.locationSource).toBeUndefined()
     expect(persisted.sourceApis).toEqual([])
+  })
+
+  it('confirma localmente una candidata oficial y conserva su procedencia', async () => {
+    const previous = JSON.parse(JSON.stringify(official)) as TerritorialResolution
+    previous.planning = {
+      ...previous.planning,
+      applicableInstruments: [{
+        id: 'instrument-teo',
+        name: 'Plan oficial',
+        kind: 'general',
+        status: 'current',
+        sourceUrl: 'official:plan',
+      }],
+      ordinanceCandidates: [{
+        identity: 'R-2',
+        instrumentId: 'instrument-teo',
+        semanticDimension: 'ordinance',
+        provenance: ['official:wms', 'official:legend'],
+        status: 'active',
+      }, {
+        identity: 'R-3',
+        instrumentId: 'instrument-teo',
+        semanticDimension: 'ordinance',
+        provenance: ['official:wms', 'official:legend'],
+        status: 'active',
+      }],
+      ordinanceResolution: {
+        status: 'REVIEW_REQUIRED',
+        identity: { code: 'R-2', label: 'R-2' },
+        confidence: 'high',
+        provenance: ['official:wms', 'official:legend'],
+      },
+    }
+    mocks.loadAuthorizedParcelInputs.mockResolvedValueOnce({
+      expediente: { id: 'exp-a', orgId: 'org-a', ownerId: 'user-a', municipio: 'betanzos' },
+      detected: null,
+      latestDetectionRaw: previous,
+      userMessages: [],
+      constraints: [],
+    })
+
+    const resolver = vi.fn()
+    const result = await new ContextDetectionEngine(resolver).confirmOrdinanceCandidate(
+      'exp-a',
+      'user-a',
+      { cadastralReference: '1234567NH4913S' },
+      'R-3',
+      '2026-07-14T12:00:00.000Z',
+    )
+
+    expect(result?.continuity?.manualContext?.ordinance).toBe('R-3')
+    expect(result?.continuity?.manualContext?.ordinanceDetermination?.technician).toMatchObject({
+      value: 'R-3',
+      origin: 'technician_selection',
+      verification: 'unverified',
+      recordedBy: 'user-a',
+    })
+    const persisted = mocks.values.mock.calls[0][0]
+    expect(persisted.rawResponse.continuity.effectiveOfficialContext.planning.ordinanceCandidates[0].provenance)
+      .toEqual(['official:wms', 'official:legend'])
+    expect(persisted.rawResponse.planning.ordinanceCandidates[1]).toMatchObject({
+      identity: 'R-3',
+      status: 'user_confirmed',
+      confirmationSource: 'user',
+    })
+    expect(persisted.rawResponse.planning.ordinanceResolution).toMatchObject({
+      status: 'USER_CONFIRMED',
+      identity: { code: 'R-3' },
+      confirmedByUser: true,
+    })
+    expect(persisted.summary.ordinanceCandidates?.[1]).toMatchObject({
+      identity: 'R-3',
+      status: 'user_confirmed',
+    })
+    expect(persisted.summary.ordinanceResolution).toMatchObject({
+      status: 'USER_CONFIRMED',
+      identity: { code: 'R-3' },
+    })
+    expect(mocks.values).toHaveBeenCalledTimes(1)
+    expect(resolver).not.toHaveBeenCalled()
   })
 
   it('conserva los hechos urbanisticos V2 en el resumen y la respuesta cruda', async () => {

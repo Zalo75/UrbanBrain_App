@@ -20,6 +20,7 @@ import type {
 import { evaluateClassificationResolution } from '@/domain/territorial-resolver/classificationDecision';
 import {
   fetchOfficial,
+  isExternalServiceFailure,
   officialFailureKind,
   type FetchLike,
 } from '@/infrastructure/territorial-resolver/officialHttp';
@@ -28,6 +29,11 @@ import {
   getSiotugaClassificationLayers,
   type SiotugaClassificationLayerRegistration,
 } from '@/infrastructure/territorial-resolver/SiotugaClassificationRegistry';
+import {
+  discoverSiotugaResources,
+  type SiotugaResourceCatalog,
+} from './SiotugaResourceDiscovery'
+import { geometrySurface } from '@/domain/territorial-resolver/parcelAccounting'
 
 type Point = [lng: number, lat: number];
 
@@ -777,228 +783,8 @@ export class SiotugaClassificationAdapter implements PlanningPort {
   }
 }
 
-type MetricPoint = [x: number, y: number];
-
-interface MetricPolygon {
-  exterior: MetricPoint[];
-  interiors: MetricPoint[][];
-}
-
-interface Triangle {
-  points: [MetricPoint, MetricPoint, MetricPoint];
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-const EARTH_RADIUS_METRES = 6_371_008.8;
 const COMPLETE_PARCEL_PERCENTAGE = 99.5;
 const GEOMETRY_EPSILON = 1e-7;
-
-function cross(a: MetricPoint, b: MetricPoint, c: MetricPoint) {
-  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-}
-
-function signedRingArea(ring: MetricPoint[]) {
-  return ring.reduce((area, point, index) => {
-    const next = ring[(index + 1) % ring.length];
-    return area + point[0] * next[1] - next[0] * point[1];
-  }, 0) / 2;
-}
-
-function sameMetricPoint(left: MetricPoint, right: MetricPoint) {
-  return (
-    Math.abs(left[0] - right[0]) <= GEOMETRY_EPSILON &&
-    Math.abs(left[1] - right[1]) <= GEOMETRY_EPSILON
-  );
-}
-
-function cleanMetricRing(ring: MetricPoint[]) {
-  const withoutDuplicates = ring.filter(
-    (point, index) => index === 0 || !sameMetricPoint(point, ring[index - 1])
-  );
-  if (
-    withoutDuplicates.length > 1 &&
-    sameMetricPoint(withoutDuplicates[0], withoutDuplicates.at(-1)!)
-  ) {
-    withoutDuplicates.pop();
-  }
-
-  let cleaned = withoutDuplicates;
-  let changed = true;
-  while (changed && cleaned.length > 3) {
-    changed = false;
-    cleaned = cleaned.filter((point, index, points) => {
-      const previous = points[(index - 1 + points.length) % points.length];
-      const next = points[(index + 1) % points.length];
-      if (Math.abs(cross(previous, point, next)) > GEOMETRY_EPSILON) return true;
-      changed = true;
-      return false;
-    });
-  }
-  return signedRingArea(cleaned) < 0 ? [...cleaned].reverse() : cleaned;
-}
-
-function pointInMetricTriangle(point: MetricPoint, triangle: [MetricPoint, MetricPoint, MetricPoint]) {
-  return (
-    cross(triangle[0], triangle[1], point) >= -GEOMETRY_EPSILON &&
-    cross(triangle[1], triangle[2], point) >= -GEOMETRY_EPSILON &&
-    cross(triangle[2], triangle[0], point) >= -GEOMETRY_EPSILON
-  );
-}
-
-function triangle(points: [MetricPoint, MetricPoint, MetricPoint]): Triangle {
-  const xs = points.map(([x]) => x);
-  const ys = points.map(([, y]) => y);
-  return {
-    points,
-    minX: Math.min(...xs),
-    minY: Math.min(...ys),
-    maxX: Math.max(...xs),
-    maxY: Math.max(...ys),
-  };
-}
-
-function triangulate(ring: MetricPoint[]): Triangle[] | undefined {
-  const points = cleanMetricRing(ring);
-  if (points.length < 3 || Math.abs(signedRingArea(points)) <= GEOMETRY_EPSILON) return undefined;
-  if (points.length === 3) return [triangle([points[0], points[1], points[2]])];
-
-  const remaining = points.map((_, index) => index);
-  const triangles: Triangle[] = [];
-  while (remaining.length > 3) {
-    let earFound = false;
-    for (let position = 0; position < remaining.length; position += 1) {
-      const previous = remaining[(position - 1 + remaining.length) % remaining.length];
-      const current = remaining[position];
-      const next = remaining[(position + 1) % remaining.length];
-      const ear: [MetricPoint, MetricPoint, MetricPoint] = [
-        points[previous],
-        points[current],
-        points[next],
-      ];
-      if (cross(ear[0], ear[1], ear[2]) <= GEOMETRY_EPSILON) continue;
-      const containsOtherVertex = remaining.some(
-        (index) =>
-          index !== previous &&
-          index !== current &&
-          index !== next &&
-          pointInMetricTriangle(points[index], ear)
-      );
-      if (containsOtherVertex) continue;
-      triangles.push(triangle(ear));
-      remaining.splice(position, 1);
-      earFound = true;
-      break;
-    }
-    if (!earFound) return undefined;
-  }
-  triangles.push(
-    triangle([points[remaining[0]], points[remaining[1]], points[remaining[2]]])
-  );
-  return triangles;
-}
-
-function lineIntersection(
-  firstStart: MetricPoint,
-  firstEnd: MetricPoint,
-  secondStart: MetricPoint,
-  secondEnd: MetricPoint
-): MetricPoint {
-  const firstDirection: MetricPoint = [
-    firstEnd[0] - firstStart[0],
-    firstEnd[1] - firstStart[1],
-  ];
-  const secondDirection: MetricPoint = [
-    secondEnd[0] - secondStart[0],
-    secondEnd[1] - secondStart[1],
-  ];
-  const denominator =
-    firstDirection[0] * secondDirection[1] - firstDirection[1] * secondDirection[0];
-  if (Math.abs(denominator) <= GEOMETRY_EPSILON) return firstEnd;
-  const offset: MetricPoint = [
-    secondStart[0] - firstStart[0],
-    secondStart[1] - firstStart[1],
-  ];
-  const distance =
-    (offset[0] * secondDirection[1] - offset[1] * secondDirection[0]) / denominator;
-  return [
-    firstStart[0] + distance * firstDirection[0],
-    firstStart[1] + distance * firstDirection[1],
-  ];
-}
-
-function clippedTriangleArea(subject: Triangle, clip: Triangle) {
-  let output: MetricPoint[] = [...subject.points];
-  for (let edge = 0; edge < clip.points.length; edge += 1) {
-    const clipStart = clip.points[edge];
-    const clipEnd = clip.points[(edge + 1) % clip.points.length];
-    const input = output;
-    output = [];
-    if (!input.length) break;
-    let previous = input.at(-1)!;
-    for (const current of input) {
-      const currentInside = cross(clipStart, clipEnd, current) >= -GEOMETRY_EPSILON;
-      const previousInside = cross(clipStart, clipEnd, previous) >= -GEOMETRY_EPSILON;
-      if (currentInside) {
-        if (!previousInside) {
-          output.push(lineIntersection(previous, current, clipStart, clipEnd));
-        }
-        output.push(current);
-      } else if (previousInside) {
-        output.push(lineIntersection(previous, current, clipStart, clipEnd));
-      }
-      previous = current;
-    }
-  }
-  return output.length >= 3 ? Math.abs(signedRingArea(output)) : 0;
-}
-
-function ringsIntersectionArea(first: MetricPoint[], second: MetricPoint[]) {
-  const firstTriangles = triangulate(first);
-  const secondTriangles = triangulate(second);
-  if (!firstTriangles || !secondTriangles) return undefined;
-  let area = 0;
-  for (const firstTriangle of firstTriangles) {
-    for (const secondTriangle of secondTriangles) {
-      if (
-        firstTriangle.maxX < secondTriangle.minX ||
-        secondTriangle.maxX < firstTriangle.minX ||
-        firstTriangle.maxY < secondTriangle.minY ||
-        secondTriangle.maxY < firstTriangle.minY
-      ) {
-        continue;
-      }
-      area += clippedTriangleArea(firstTriangle, secondTriangle);
-    }
-  }
-  return area;
-}
-
-function polygonsIntersectionArea(first: MetricPolygon, second: MetricPolygon) {
-  const exterior = ringsIntersectionArea(first.exterior, second.exterior);
-  if (exterior === undefined) return undefined;
-  let area = exterior;
-  for (const hole of first.interiors) {
-    const removed = ringsIntersectionArea(hole, second.exterior);
-    if (removed === undefined) return undefined;
-    area -= removed;
-  }
-  for (const hole of second.interiors) {
-    const removed = ringsIntersectionArea(first.exterior, hole);
-    if (removed === undefined) return undefined;
-    area -= removed;
-  }
-  for (const firstHole of first.interiors) {
-    for (const secondHole of second.interiors) {
-      const restored = ringsIntersectionArea(firstHole, secondHole);
-      if (restored === undefined) return undefined;
-      area += restored;
-    }
-  }
-  return Math.max(0, area);
-}
 
 function round(value: number, decimals: number) {
   const factor = 10 ** decimals;
@@ -1010,57 +796,23 @@ function parcelCoverage(
   features: Feature[],
   context?: { municipalityCode?: string; categoryCode?: string }
 ): ClassificationParcelCoverage | undefined {
-  const points = geometry.coordinates.flatMap((polygon) =>
-    polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
-  );
-  if (!points.length) return undefined;
-  const referenceLng = points.reduce((sum, [lng]) => sum + lng, 0) / points.length;
-  const referenceLat = points.reduce((sum, [, lat]) => sum + lat, 0) / points.length;
-  const radians = Math.PI / 180;
-  const project = ([lng, lat]: Point): MetricPoint => [
-    EARTH_RADIUS_METRES * (lng - referenceLng) * radians * Math.cos(referenceLat * radians),
-    EARTH_RADIUS_METRES * (lat - referenceLat) * radians,
-  ];
-  const parcelPolygons: MetricPolygon[] = geometry.coordinates.map((polygon) => ({
-    exterior: polygon[0].map(([lng, lat]) => project([lng, lat])),
-    interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => project([lng, lat]))),
-  }));
-  const classificationPolygons: MetricPolygon[] = features.flatMap((feature) =>
-    feature.polygons.map((polygon) => ({
-      exterior: polygon.exterior.map(project),
-      interiors: polygon.interiors.map((ring) => ring.map(project)),
-    }))
-  );
-  const parcelArea = parcelPolygons.reduce(
-    (total, polygon) =>
-      total +
-      Math.abs(signedRingArea(polygon.exterior)) -
-      polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
-    0
-  );
-  if (parcelArea <= GEOMETRY_EPSILON) return undefined;
-
-  let intersectionArea = 0;
-  for (const parcelPolygon of parcelPolygons) {
-    for (const classificationPolygon of classificationPolygons) {
-      const area = polygonsIntersectionArea(parcelPolygon, classificationPolygon);
-      if (area === undefined) return undefined;
-      intersectionArea += area;
-    }
-  }
-  intersectionArea = Math.min(parcelArea, Math.max(0, intersectionArea));
-  const referenceIntersectionArea = round(intersectionArea, 2);
   const intersectionGeometry = computeValidatedIntersectionGeometry(
     geometry,
     features,
-    referenceIntersectionArea,
     context
   );
+  if (!intersectionGeometry) return undefined;
+
+  const parcelArea = geometrySurface(geometry);
+  const intersectionArea = geometrySurface(intersectionGeometry);
+  if (!parcelArea || !intersectionArea || intersectionArea <= GEOMETRY_EPSILON) return undefined;
+  const boundedIntersectionArea = Math.min(parcelArea, intersectionArea);
+  const referenceIntersectionArea = round(boundedIntersectionArea, 2);
 
   return {
     parcelAreaSquareMetres: round(parcelArea, 2),
     intersectionAreaSquareMetres: referenceIntersectionArea,
-    parcelPercentage: round((intersectionArea / parcelArea) * 100, 2),
+    parcelPercentage: round((boundedIntersectionArea / parcelArea) * 100, 2),
     method: 'polygon_intersection',
     intersectionGeometry,
   };
@@ -1103,7 +855,6 @@ function cleanPolygon(polygon: [number, number][][]): [number, number][][] | und
 function computeValidatedIntersectionGeometry(
   parcelGeometry: ParcelGeometry,
   features: Feature[],
-  referenceIntersectionArea: number,
   context?: { municipalityCode?: string; categoryCode?: string }
 ): ParcelGeometry | undefined {
   try {
@@ -1142,47 +893,8 @@ function computeValidatedIntersectionGeometry(
       coordinates: outputCoords,
       crs: 'EPSG:4326',
     };
-
-    const allPoints = candidateGeometry.coordinates.flatMap((polygon) =>
-      polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
-    );
-    if (!allPoints.length) return undefined;
-
-    const refLng = allPoints.reduce((sum, [lng]) => sum + lng, 0) / allPoints.length;
-    const refLat = allPoints.reduce((sum, [, lat]) => sum + lat, 0) / allPoints.length;
-    const rad = Math.PI / 180;
-    const proj = ([lng, lat]: Point): MetricPoint => [
-      EARTH_RADIUS_METRES * (lng - refLng) * rad * Math.cos(refLat * rad),
-      EARTH_RADIUS_METRES * (lat - refLat) * rad,
-    ];
-
-    const metricPolys: MetricPolygon[] = candidateGeometry.coordinates.map((polygon) => ({
-      exterior: polygon[0].map(([lng, lat]) => proj([lng, lat])),
-      interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => proj([lng, lat]))),
-    }));
-
-    const computedArea = metricPolys.reduce(
-      (total, polygon) =>
-        total +
-        Math.abs(signedRingArea(polygon.exterior)) -
-        polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
-      0
-    );
-
-    const maxTolerance = Math.max(0.005 * referenceIntersectionArea, 0.25);
-    const areaDiff = Math.abs(computedArea - referenceIntersectionArea);
-
-    if (areaDiff > maxTolerance) {
-      console.warn('[SIOTUGA_GEOMETRY_AREA_DISCREPANCY]', {
-        municipalityCode: context?.municipalityCode,
-        categoryCode: context?.categoryCode,
-        referenceIntersectionArea,
-        computedArea: round(computedArea, 2),
-        areaDiff: round(areaDiff, 2),
-        maxTolerance: round(maxTolerance, 2),
-      });
-      return undefined;
-    }
+    const computedArea = geometrySurface(candidateGeometry);
+    if (!computedArea || computedArea <= GEOMETRY_EPSILON) return undefined;
 
     return candidateGeometry;
   } catch (err) {
@@ -1240,32 +952,8 @@ function deriveComplementCandidate(
       crs: 'EPSG:4326',
     };
 
-    const allPoints = complementGeometry.coordinates.flatMap((polygon) =>
-      polygon.flatMap((ring) => ring.map(([lng, lat]) => [lng, lat] as Point))
-    );
-    if (!allPoints.length) return {};
-
-    const refLng = allPoints.reduce((sum, [lng]) => sum + lng, 0) / allPoints.length;
-    const refLat = allPoints.reduce((sum, [, lat]) => sum + lat, 0) / allPoints.length;
-    const rad = Math.PI / 180;
-    const proj = ([lng, lat]: Point): MetricPoint => [
-      EARTH_RADIUS_METRES * (lng - refLng) * rad * Math.cos(refLat * rad),
-      EARTH_RADIUS_METRES * (lat - refLat) * rad,
-    ];
-
-    const metricPolys: MetricPolygon[] = complementGeometry.coordinates.map((polygon) => ({
-      exterior: polygon[0].map(([lng, lat]) => proj([lng, lat])),
-      interiors: polygon.slice(1).map((ring) => ring.map(([lng, lat]) => proj([lng, lat]))),
-    }));
-
-    const computedArea = metricPolys.reduce(
-      (total, polygon) =>
-        total +
-        Math.abs(signedRingArea(polygon.exterior)) -
-        polygon.interiors.reduce((holes, ring) => holes + Math.abs(signedRingArea(ring)), 0),
-      0
-    );
-
+    const computedArea = geometrySurface(complementGeometry);
+    if (!computedArea) return {};
     const roundedArea = round(computedArea, 2);
 
     if (roundedArea >= 1.0) {
@@ -1366,8 +1054,57 @@ export class SiotugaClassificationSourceAdapter implements ClassificationSourceP
       geometry?: ParcelGeometry;
     }
   ): Promise<ClassificationSourceResult> {
-    const layers = getSiotugaClassificationLayers(location.municipalityCode);
+    const startedAt = Date.now()
+    let layers = getSiotugaClassificationLayers(location.municipalityCode);
+    console.log('UB-DIAG siotuga-classification-start', JSON.stringify({ municipalityCode: location.municipalityCode ?? null, registeredLayerCount: layers.length }))
+    let discoveredResources: SiotugaResourceCatalog | undefined
     if (layers.length === 0) {
+      try {
+        const discovered = await discoverSiotugaResources(
+          location.municipalityCode,
+          planning,
+          this.fetcher,
+          this.timeoutMs
+        )
+        discoveredResources = discovered.catalog
+        if (discoveredResources?.classificationLayer) {
+          const instrument = discoveredResources.instrument
+          layers = [{
+            municipalityCode: discoveredResources.municipalityCode,
+            municipalityName: planning.instrument ?? discoveredResources.municipalityCode,
+            layerName: discoveredResources.classificationLayer,
+            status: 'active',
+            instrument: {
+              siotugaDocumentId: instrument.id,
+              name: instrument.name,
+              approvalDate: instrument.approvalDate ?? planning.approvalDate ?? '',
+              inventoryUrl: instrument.sourceUrl,
+            },
+            source: {
+              provider: 'siotuga',
+              wfsCapabilitiesUrl: discoveredResources.capabilities.wfs,
+              verifiedAt: this.now().toISOString().slice(0, 10),
+            },
+          }]
+        }
+      } catch (err) {
+        console.log('UB-DIAG siotuga-classification-discovery-error', JSON.stringify({ municipalityCode: location.municipalityCode ?? null, error: err instanceof Error ? err.name : 'unknown', durationMs: Date.now() - startedAt }))
+        if (!isExternalServiceFailure(err)) throw err
+      }
+    }
+    const resources = discoveredResources ? {
+      municipalityCode: discoveredResources.municipalityCode,
+      instrumentId: discoveredResources.instrument.id,
+      source: 'siotuga' as const,
+      classificationLayer: discoveredResources.classificationLayer,
+      detailedPlanningLayer: discoveredResources.detailedPlanningLayer,
+      planningTileIndex: discoveredResources.planningTileIndex,
+      boundaryLayer: discoveredResources.boundaryLayer,
+      wfsCapabilitiesUrl: discoveredResources.capabilities.wfs,
+      wmsCapabilitiesUrl: discoveredResources.capabilities.wms,
+    } : undefined
+    if (layers.length === 0) {
+      console.log('UB-DIAG siotuga-classification-result', JSON.stringify({ municipalityCode: location.municipalityCode ?? null, status: 'no_layer', resources: Boolean(resources), durationMs: Date.now() - startedAt }))
       return {
         candidates: [],
         discrepancies: [],
@@ -1383,6 +1120,7 @@ export class SiotugaClassificationSourceAdapter implements ClassificationSourceP
           : [],
         evidence: [],
         warnings: [],
+        resources,
       };
     }
 
@@ -1434,6 +1172,7 @@ export class SiotugaClassificationSourceAdapter implements ClassificationSourceP
       ).values(),
     ];
 
+    console.log('UB-DIAG siotuga-classification-result', JSON.stringify({ municipalityCode: location.municipalityCode ?? null, status: candidates.length ? 'candidates' : 'no_candidates', layerCount: layers.length, candidateCount: candidates.length, sourceCheckCount: sourceChecks.length, durationMs: Date.now() - startedAt }))
     return {
       candidates,
       discrepancies,
@@ -1441,6 +1180,9 @@ export class SiotugaClassificationSourceAdapter implements ClassificationSourceP
       officialLinks,
       evidence,
       warnings,
+      resources,
     };
   }
 }
+
+

@@ -104,7 +104,7 @@ function deriveScope(
     .filter((conflict) => ['landClass', 'qualification', 'planningArea', 'planning'].includes(conflict.field))
     .map((conflict) => conflict.reason)
   const fieldStatus = [factStatus(facts.classification), factStatus(facts.category)] as ParcelRegimeIdentityStatus[]
-  const regimeFields = [context.qualification, context.planningArea].filter(Boolean)
+  const regimeFields = [context.qualification, context.planningArea, context.ordinanceCandidates?.length ? { verification: 'confirmed', source: 'catastro' } : undefined].filter(Boolean)
   if (regimeFields.length === 0) {
     fieldStatus.push('unresolved')
   } else if (regimeFields.some((field) => field?.verification !== 'confirmed')) {
@@ -147,6 +147,7 @@ function deriveScope(
           }
         : undefined,
       qualification: context.qualification?.value,
+      ordinances: context.ordinanceCandidates,
       planningArea: context.planningArea?.value,
       instrumentId: facts.classification.instrumentId ?? facts.category.instrumentId,
       status,
@@ -161,7 +162,7 @@ function deriveScope(
 }
 
 function deriveFieldOnlyScope(context: NormalizedParcelContext): ParcelRegimeIdentityScope | undefined {
-  if (!context.landClass && !context.qualification && !context.planningArea) return undefined
+  if (!context.landClass && !context.qualification && !context.planningArea && !context.ordinanceCandidates?.length) return undefined
   const fields = [context.landClass, context.qualification, context.planningArea].filter(Boolean)
   const conflicts = context.conflicts
     .filter((conflict) => ['landClass', 'qualification', 'planningArea', 'planning'].includes(conflict.field))
@@ -169,7 +170,7 @@ function deriveFieldOnlyScope(context: NormalizedParcelContext): ParcelRegimeIde
   const hasUnverified = fields.some((field) => field?.verification !== 'confirmed')
   const allConfirmed = fields.every((field) => field?.verification === 'confirmed')
   const manualConfirmed = fields.some((field) => field?.source === 'manual') && allConfirmed
-  const hasRegimeQualifier = Boolean(context.qualification || context.planningArea)
+  const hasRegimeQualifier = Boolean(context.qualification || context.planningArea || context.ordinanceCandidates?.length)
   const status: ParcelRegimeIdentityStatus = conflicts.length > 0
     ? 'conflict'
     : !hasRegimeQualifier
@@ -183,6 +184,7 @@ function deriveFieldOnlyScope(context: NormalizedParcelContext): ParcelRegimeIde
     scope: context.actionArea ? 'action_area' : 'parcel',
     classification: context.landClass ? { code: context.landClass.value, label: context.landClass.value } : undefined,
     qualification: context.qualification?.value,
+    ordinances: context.ordinanceCandidates,
     planningArea: context.planningArea?.value,
     status,
     confidence: fields.length > 0 ? Math.min(...fields.map((field) => field!.confidence)) : 'unknown',

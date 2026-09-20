@@ -34,9 +34,15 @@
     "node_modules",
     "tests/**/*",
     "**/*.test.ts",
+    "**/*.test.tsx",
     "**/*.spec.ts",
+    "**/*.spec.tsx",
     "vitest.config.ts",
     "vitest.setup.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "scripts/**/*",
+    "scratch/**/*",
+    "test-*.ts",
+    "temp_*.ts"
   ]
 }

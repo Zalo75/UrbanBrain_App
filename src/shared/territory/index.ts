@@ -102,6 +102,26 @@ export function getMunicipalityByIneCode(ineCode: string | null | undefined): Mu
     : undefined;
 }
 
+function discoveredMunicipality(input: {
+  municipality?: string | null;
+  municipalityCode?: string | null;
+}): Municipality | undefined {
+  const code = input.municipalityCode?.replace(/\D/g, '')
+  const name = input.municipality?.trim()
+  const province = getProvinceByMunicipalityIneCode(code)
+  if (!code || !/^\d{5}$/.test(code) || !name || !province) return undefined
+  return {
+    id: code,
+    name,
+    provinceId: province.id,
+    ccaaId: province.ccaaId,
+    enabled: true,
+    coverageStatus: 'pending',
+    ineCode: code,
+    source: 'official-cadastral-response',
+  }
+}
+
 function normalizeTerritoryText(value: string) {
   return value
     .normalize('NFD')
@@ -134,6 +154,7 @@ export function resolveMunicipalityIdentity(input: {
   return (
     getMunicipalityByIneCode(input.municipalityCode) ??
     getMunicipalityByName(input.municipality ?? '') ??
+    discoveredMunicipality(input) ??
     municipalityFromAddress(input.address)
   );
 }

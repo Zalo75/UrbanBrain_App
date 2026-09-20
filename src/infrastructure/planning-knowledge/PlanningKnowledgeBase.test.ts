@@ -8,6 +8,7 @@ import {
 import {
   getActiveP1PlanningKnowledge,
   getActiveP1PlanningMunicipalities,
+  getDetailedPlanningLayer,
 } from './PlanningKnowledgeBase'
 
 const EXPECTED_P1_CODES = [
@@ -53,6 +54,18 @@ describe('Planning Knowledge Base P1', () => {
         normativeDocument: expect.any(Boolean),
         endToEndParameters: false,
       })
+    }
+  })
+
+  it('derives the official PORD layer from each current instrument layer', () => {
+    for (const entry of getActiveP1PlanningMunicipalities()) {
+      const layer = getDetailedPlanningLayer(entry.municipalityCode)
+      expect(layer).toMatchObject({
+        name: entry.classificationLayer.name.replace('_3CLAS_', '_PORD_02CL_'),
+        source: 'siotuga-wms-capabilities',
+      })
+      expect(layer?.capabilitiesUrl).toContain('SERVICE=WMS')
+      expect(layer?.capabilitiesUrl).toContain(`codine=${entry.municipalityCode}`)
     }
   })
 

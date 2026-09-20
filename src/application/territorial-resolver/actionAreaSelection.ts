@@ -1,3 +1,4 @@
+import { geometrySurface } from '@/domain/territorial-resolver/parcelAccounting'
 import type {
   ActionAreaSelection,
   ActionAreaSelectionSnapshot,
@@ -424,5 +425,5 @@ export function actionAreaParcelSurface(
 ) {
   const candidates = resolution?.planning.classificationResolution?.candidates ?? []
   return candidates.find((candidate) => candidate.parcelCoverage)?.parcelCoverage
-    ?.parcelAreaSquareMetres
+    ?.parcelAreaSquareMetres ?? geometrySurface(resolution?.parcelGeometry)
 }

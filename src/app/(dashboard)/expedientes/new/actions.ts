@@ -1,5 +1,7 @@
 'use server'
 
+import { geometrySurface } from '@/domain/territorial-resolver/parcelAccounting'
+import { createTechnicianDetermination } from '@/domain/territorial-resolver/determinations'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { and, eq } from 'drizzle-orm'
@@ -11,8 +13,14 @@ import { normalizeCadastralReference } from '@/application/territorial-resolver/
 import { authProvider } from '@/infrastructure/auth'
 import { db } from '@/infrastructure/db/client'
 import { expedientes, municipalPlanning, organizationMembers } from '@/infrastructure/db/schema'
-import { getMunicipalityById, getProvinceById } from '@/shared/territory'
+import { getMunicipalityById, getProvinceById, getProvinceByMunicipalityIneCode } from '@/shared/territory'
 import type { ActionAreaSelectionState } from '@/domain/territorial-resolver/types'
+import { runtimeCatalogStatus } from '@/domain/planning-knowledge/identityCatalog'
+import {
+  getDetailedPlanningLayer,
+  getInstrumentIdentityCatalog,
+  getInstrumentIdentityOptions,
+} from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
 
 import { getInitialContextAcceptance } from './creationContext'
 import type { CreateExpedienteState } from './creationState'
@@ -94,6 +102,40 @@ function territorialInputSource(formData: FormData): TerritorialInputSource | nu
     : null
 }
 
+function normalizeIdentity(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleUpperCase()
+}
+
+/** Adds the same-instrument catalogue to the preflight payload without
+ * changing the official territorial result or promoting any identity. */
+function attachOrdinanceCatalog(preflight: PreflightDetection): PreflightDetection {
+  const instrumentId = preflight.result.planning.applicableInstruments?.find(
+    (instrument) => instrument.status === 'current'
+  )?.id ?? preflight.result.planning.instrument
+  const detailedPlanningLayer =
+    preflight.detected.detailedPlanningLayer ??
+    getDetailedPlanningLayer(preflight.detected.municipalityCode)?.name
+  const options = getInstrumentIdentityOptions(preflight.detected.municipalityCode, instrumentId)
+    .map((identity) => ({
+      identityId: identity.id,
+      code: identity.officialCode,
+      label: identity.officialName,
+      status: runtimeCatalogStatus(identity.status),
+      semanticDimension: identity.semanticDimension,
+      normativeReferences: identity.normativeReferences,
+    }))
+  return {
+    ...preflight,
+    detected: { ...preflight.detected, detailedPlanningLayer },
+    ordinanceCatalogOptions: options,
+  }
+}
+
 /**
  * A detection must have one canonical location input. In particular, never mix
  * a newly entered cadastral reference with coordinates auto-filled for a
@@ -157,6 +199,7 @@ export async function createExpediente(
   })
   const planeamiento = formText(formData, 'planeamiento')
   const urbanPlanningZone = formText(formData, 'urbanPlanningZone')
+  const ordinanceIdentity = formText(formData, 'ordinanceIdentity')
   const landClassRaw = formText(formData, 'landClass')
   const landClass = LAND_CLASS_OPTIONS.some((option) => option.value === landClassRaw)
     ? landClassRaw as (typeof LAND_CLASS_OPTIONS)[number]['value']
@@ -188,7 +231,10 @@ export async function createExpediente(
     return creationError('Indique una referencia catastral, una dirección o unas coordenadas para localizar el expediente.', 'refCatastral')
   }
   const municipality = getMunicipalityById(municipalityId)
-  if (!municipality?.enabled) {
+  const discoveredMunicipality = !municipality &&
+    /^\d{5}$/.test(municipalityId) &&
+    getProvinceByMunicipalityIneCode(municipalityId)?.id === provinceId
+  if (!municipality?.enabled && !discoveredMunicipality) {
     return creationError('El municipio seleccionado no está disponible. Revise la provincia y el municipio.', 'municipio')
   }
   if (formText(formData, 'territorialDetectionInvalidated') === 'true') {
@@ -210,6 +256,7 @@ export async function createExpediente(
       return creationError('No se ha podido verificar la detección territorial. Actualice el análisis antes de crear el expediente.', 'refCatastral')
     }
   }
+  if (preflight) preflight = attachOrdinanceCatalog(preflight)
 
   const validationError = validateSmartCaseSubmission(
     {
@@ -321,10 +368,36 @@ export async function createExpediente(
       !classificationSelectionReason &&
       !baseManualContext
   )
+  const selectedDetectedCandidate = Boolean(
+    actionAreaMode === 'detected_zone' &&
+      selectedCandidate &&
+      (landClassFromCandidate(selectedCandidate) ?? '') === landClass &&
+      planningZoneNameFromCandidate(selectedCandidate) === urbanPlanningZone
+  )
+
+  if (ordinanceIdentity) {
+    const instrumentId = preflight?.result.planning.applicableInstruments?.find(
+      (instrument) => instrument.status === 'current'
+    )?.id ?? preflight?.result.planning.instrument
+    const runtimeCandidate = preflight?.result.planning.ordinanceCandidates?.find((candidate) =>
+      normalizeIdentity(candidate.identity) === normalizeIdentity(ordinanceIdentity) &&
+      candidate.instrumentId === instrumentId
+    )
+    const catalogIdentity = getInstrumentIdentityCatalog(
+      preflight?.detected.municipalityCode,
+      instrumentId,
+    )?.identities.find((identity) =>
+      normalizeIdentity(identity.officialCode) === normalizeIdentity(ordinanceIdentity) ||
+      normalizeIdentity(identity.officialName) === normalizeIdentity(ordinanceIdentity)
+    )
+    if (!preflight || (!runtimeCandidate && !catalogIdentity) || catalogIdentity?.status === 'REJECTED') {
+      return creationError('La identidad normativa seleccionada no pertenece al instrumento oficial detectado.', 'territorialContext')
+    }
+  }
   const manualClassificationSelection = Boolean(
     classificationResolution &&
       (selectedCandidate
-        ? !exactAutomaticDetectedZone
+        ? !selectedDetectedCandidate
         : (landClass && landClass !== automaticLandClass) ||
           (urbanPlanningZone && urbanPlanningZone !== automaticZone) ||
           classificationResolution.status !== 'clear')
@@ -390,8 +463,9 @@ export async function createExpediente(
           const parcelCoverage = selectedCandidate.parcelCoverage
           const areaSqM = parcelCoverage?.intersectionAreaSquareMetres
           const geom = parcelCoverage?.intersectionGeometry
-          const candidateParcelSurface = parcelCoverage?.parcelAreaSquareMetres ?? classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? 0
+          const candidateParcelSurface = parcelCoverage?.parcelAreaSquareMetres ?? classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? geometrySurface(preflight.result.parcelGeometry)
 
+          if (!candidateParcelSurface || !(geom ?? preflight.result.parcelGeometry)) throw new Error('action_area_geometry_unavailable')
           actionAreaSelection = {
             history: [],
             current: {
@@ -417,7 +491,8 @@ export async function createExpediente(
             }
           }
         } else if (actionAreaMode === 'whole_parcel') {
-          const candidateParcelSurface = classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? 0
+          const candidateParcelSurface = classificationResolution?.candidates[0]?.parcelCoverage?.parcelAreaSquareMetres ?? geometrySurface(preflight.result.parcelGeometry)
+          if (!candidateParcelSurface || !preflight.result.parcelGeometry) throw new Error('action_area_geometry_unavailable')
           actionAreaSelection = {
             history: [],
             current: {
@@ -435,14 +510,22 @@ export async function createExpediente(
           }
         }
 
-        const manualContext = actionAreaSelection || baseManualContext
+        const submittedClassification = landClass && landClass !== automaticLandClass ? {
+          classification: landClass,
+          classificationDetermination: {
+            ...baseManualContext?.classificationDetermination,
+            technician: createTechnicianDetermination(landClass, userId, automaticLandClass ?? undefined, { verification: 'unverified', now: () => new Date(now) }),
+          },
+        } : undefined
+        const manualContext = actionAreaSelection || baseManualContext || submittedClassification
           ? {
               ...(baseManualContext ?? {
                 provenance: 'manual' as const,
                 verification: actionAreaSelection?.current?.verification === 'technician_validated' ? 'technician_validated' as const : 'unverified' as const,
                 recordedAt: now
               }),
-              ...(actionAreaSelection ? { actionAreaSelection } : {})
+              ...(actionAreaSelection ? { actionAreaSelection } : {}),
+              ...submittedClassification
             }
           : undefined
 
@@ -487,6 +570,15 @@ export async function createExpediente(
             }
         if (!await engine.persistAuthorizedDetection(newExpedienteId, userId, resultForPersistence)) {
           throw new Error('territorial_context_not_persisted')
+        }
+        if (ordinanceIdentity && resolutionInput) {
+          const confirmed = await engine.confirmOrdinanceCandidate(
+            newExpedienteId,
+            userId,
+            resolutionInput,
+            ordinanceIdentity,
+          )
+          if (!confirmed) throw new Error('ordinance_confirmation_not_persisted')
         }
       } else {
         if (!await engine.detectContext(newExpedienteId, userId)) {
@@ -562,15 +654,23 @@ export async function detectContextAction(formData: FormData) {
     const detection = summarizeSmartCaseDetection(
       await engine.detectStateless(resolutionInput)
     )
-    const detectionId = storePreflightDetection(userId, detection)
+    const enrichedDetection = attachOrdinanceCatalog(detection)
+    const detectionId = storePreflightDetection(userId, enrichedDetection)
     const clientDetection = {
-      detected: detection.detected,
-      progress: detection.progress,
-      sourceChecks: detection.sourceChecks,
-      affects: detection.affects,
-      ...(detection.classificationResolution
-        ? { classificationResolution: detection.classificationResolution }
+      detected: enrichedDetection.detected,
+      progress: enrichedDetection.progress,
+      sourceChecks: enrichedDetection.sourceChecks,
+      affects: enrichedDetection.affects,
+      ...(enrichedDetection.classificationResolution
+        ? { classificationResolution: enrichedDetection.classificationResolution }
         : {}),
+      ordinanceCandidates: enrichedDetection.ordinanceCandidates ?? [],
+      ordinanceResolution: enrichedDetection.ordinanceResolution,
+      visualResolutionState: enrichedDetection.visualResolutionState,
+      visualObservations: enrichedDetection.visualObservations,
+      visualExplanation: enrichedDetection.visualExplanation,
+      visualCandidates: enrichedDetection.visualCandidates,
+      ordinanceCatalogOptions: enrichedDetection.ordinanceCatalogOptions ?? [],
     }
     return { detectionId, detection: clientDetection }
   } catch {

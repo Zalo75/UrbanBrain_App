@@ -249,6 +249,61 @@ describe('createExpediente smart preflight', () => {
     expect(mocks.detectStateless).toHaveBeenCalledWith({ address: 'Lugar nuevo, Culleredo' })
   })
 
+  it('preserves a raster HAS eligibility signal in the client detection returned by the server action', async () => {
+    const hasEligibility = {
+      eligible: true as const,
+      reason: 'OFFICIAL_RASTER_WITHOUT_USABLE_SPATIAL_REFERENCE' as const,
+      municipalityCode: '36059',
+      instrumentId: '23045',
+      parcelGeometry: intersectionGeometry,
+      sheet: {
+        id: '23045:1002su001.jpg',
+        sourceUrl: 'https://official.example/23045/1002su001.jpg',
+        format: 'jpg' as const,
+        provenance: ['siotuga:inventory:1002su001.jpg'],
+      },
+    }
+    mocks.detectStateless.mockResolvedValue({
+      ...result,
+      cadastralReference: '8084401NH6388S',
+      parcelReference: '8084401NH6388S',
+      municipality: 'Vila de Cruces',
+      municipalityCode: '36059',
+      province: 'Pontevedra',
+      parcelGeometry: intersectionGeometry,
+      planning: {
+        ...result.planning,
+        instrument: 'Normas Subsidiarias de Planeamiento',
+        applicableInstruments: [{
+          id: '23045',
+          name: 'Normas Subsidiarias de Planeamiento',
+          kind: 'general',
+          status: 'current',
+        }],
+        ordinanceResolution: {
+          status: 'REVIEW_REQUIRED',
+          provenance: [],
+          hasEligibility,
+        },
+      },
+    })
+    const input = new FormData()
+    input.set('territorialInputSource', 'cadastral_reference')
+    input.set('refCatastral', '8084401NH6388S')
+
+    const response = await detectContextAction(input)
+
+    expect(response).toMatchObject({
+      detection: {
+        detected: {
+          cadastralReference: '8084401NH6388S',
+          parcelGeometry: intersectionGeometry,
+        },
+        ordinanceResolution: { hasEligibility },
+      },
+    })
+  })
+
   it('creates a coordinate-only case with the canonical values resolved by the server', async () => {
     const coordinateResult = {
       ...result,

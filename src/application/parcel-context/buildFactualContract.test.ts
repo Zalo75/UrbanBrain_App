@@ -419,4 +419,29 @@ describe('Territorial Factual Contract', () => {
       provenance: { sourceType: 'manual' },
     })
   })
+
+  it('expone la ordenanza USER_CONFIRMED como hecho factual con su provenance oficial', () => {
+    const contract = buildTerritorialFactualContract({
+      municipality: { value: { name: 'Teo', ineCode: '15082' }, source: 'catastro', confidence: 1, verification: 'confirmed' },
+      planningInstrument: { value: 'Plan oficial', source: 'siotuga', confidence: 1, verification: 'confirmed' },
+      ordinanceCandidates: [{
+        identity: 'R-2',
+        instrumentId: 'instrument-teo',
+        semanticDimension: 'ordinance',
+        provenance: ['official:wms', 'official:legend'],
+        confidence: 'high',
+        status: 'user_confirmed',
+        confirmationSource: 'user',
+      }],
+      knownConstraints: [], conflicts: [], pendingValidation: [],
+    })
+
+    expect(contract.factsByScope?.parcel?.ordinances).toMatchObject([{
+      identity: 'R-2',
+      status: 'user_confirmed',
+      confirmationSource: 'user',
+      provenance: ['official:wms', 'official:legend'],
+    }])
+    expect(contract.ordinances?.[0]?.identity).toBe('R-2')
+  })
 })

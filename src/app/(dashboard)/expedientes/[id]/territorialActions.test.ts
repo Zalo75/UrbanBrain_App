@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   where: vi.fn(),
   detectContextFromInput: vi.fn(),
   recordManualContext: vi.fn(),
+  confirmOrdinanceCandidate: vi.fn(),
   revalidatePath: vi.fn(),
   loadAuthorizedParcelInputs: vi.fn(),
 }))
@@ -21,6 +22,7 @@ vi.mock('@/application/context-engine/ContextDetectionEngine', () => ({
   ContextDetectionEngine: class {
     detectContextFromInput = mocks.detectContextFromInput
     recordManualContext = mocks.recordManualContext
+    confirmOrdinanceCandidate = mocks.confirmOrdinanceCandidate
   },
 }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
@@ -83,6 +85,7 @@ describe('resolveTerritorialContextAction', () => {
     })
     mocks.detectContextFromInput.mockResolvedValue(resolution)
     mocks.recordManualContext.mockResolvedValue(resolution)
+    mocks.confirmOrdinanceCandidate.mockResolvedValue(resolution)
   })
 
   it('no resuelve ni escribe un expediente no autorizado', async () => {
@@ -256,6 +259,52 @@ describe('resolveTerritorialContextAction', () => {
         validatedBy: 'user-a',
       })
     )
+  })
+
+  it('confirma una candidata existente sin volver a ejecutar el resolver externo', async () => {
+    const candidateResolution = {
+      ...resolution,
+      planning: {
+        ...resolution.planning,
+        ordinanceCandidates: [{ identity: 'R-2', semanticDimension: 'ordinance', provenance: ['official:wms'] }],
+      },
+      continuity: {
+        usingPreviousOfficialContext: true,
+        sameParcelAsPrevious: true,
+        manualContext: {
+          provenance: 'manual' as const,
+          verification: 'unverified' as const,
+          ordinance: 'R-2',
+          recordedAt: '2026-07-14T12:00:00.000Z',
+        },
+      },
+    }
+    mocks.confirmOrdinanceCandidate.mockResolvedValue(candidateResolution)
+    const form = new FormData()
+    form.set('intent', 'manual')
+    form.set('candidateConfirmation', 'on')
+    form.set('manualOrdinance', 'R-2')
+    form.set('refCatastral', '1234567NH4913S')
+
+    const result = await resolveTerritorialContextAction(
+      'exp-a',
+      { status: 'idle', message: '' },
+      form,
+    )
+
+    expect(result).toEqual({
+      status: 'success',
+      message: 'Ordenanza confirmada por el usuario a partir de la evidencia oficial existente.',
+    })
+    expect(mocks.confirmOrdinanceCandidate).toHaveBeenCalledWith(
+      'exp-a',
+      'user-a',
+      { cadastralReference: '1234567NH4913S', coordinates: undefined, address: undefined },
+      'R-2',
+      expect.any(String),
+    )
+    expect(mocks.detectContextFromInput).not.toHaveBeenCalled()
+    expect(mocks.recordManualContext).not.toHaveBeenCalled()
   })
 
   it('acepta observaciones manuales sin obligar a inventar municipio o zonificacion', async () => {

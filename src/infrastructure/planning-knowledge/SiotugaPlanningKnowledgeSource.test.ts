@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { SiotugaPlanningKnowledgeSource } from './SiotugaPlanningKnowledgeSource'
+import {
+  parseSiotugaDocumentInventory,
+  parseSiotugaDocumentInventoryWithDiagnostics,
+  SiotugaPlanningKnowledgeSource,
+} from './SiotugaPlanningKnowledgeSource'
 
 const layerName = '_15031_PXOU_198707_AD_3CLAS_22310'
 
@@ -48,6 +52,12 @@ function fetcherWithInventory(inventoryJson = '[]') {
 }
 
 describe('SIOTUGA Planning Knowledge source', () => {
+  it('preserves the external fetch URL, operation and internal cause', async () => {
+    const cause = Object.assign(new Error('connect EACCES 203.0.113.10:443'), { code: 'EACCES', errno: -4092, syscall: 'connect', hostname: 'siotuga.xunta.gal' })
+    const fetcher = vi.fn(async () => { throw Object.assign(new TypeError('fetch failed'), { cause }) }) as unknown as typeof fetch
+    await expect(new SiotugaPlanningKnowledgeSource(fetcher).collectInstrumentDocuments('36059', '23045', '2026-09-04T00:00:00.000Z')).rejects.toMatchObject({ name: 'SiotugaFetchFailure', url: 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=36059', operation: 'inventory page 36059', cause: { cause } })
+  })
+
   it('collects capabilities, schemas and the four official inventory classes', async () => {
     const fetcher = fetcherWithInventory(
       JSON.stringify([
@@ -85,6 +95,7 @@ describe('SIOTUGA Planning Knowledge source', () => {
     )
     expect(result.layerSchemas[layerName]?.xml).toContain('cla_homo')
     expect(result.rawSources).toHaveLength(8)
+    expect(result.contractVariantRecoveries).toEqual([])
     expect(result.rawSources.some((item) => item.content.includes('ephemeral-token'))).toBe(false)
     expect(fetcher).toHaveBeenCalledTimes(9)
 
@@ -92,6 +103,9 @@ describe('SIOTUGA Planning Knowledge source', () => {
       String(input).includes('query_document.php')
     )
     expect(inventoryCalls).toHaveLength(4)
+    expect(new Set(inventoryCalls.map(([, init]) => (init?.body as URLSearchParams).get('idclase')))).toEqual(
+      new Set(['13', '14', '16', '18'])
+    )
     for (const [, init] of inventoryCalls) {
       expect(init?.headers).toMatchObject({
         cookie: 'PHPSESSID=session-value',
@@ -111,8 +125,6 @@ describe('SIOTUGA Planning Knowledge source', () => {
     ).rejects.toThrow('array expected')
   })
 })
-
-import { parseSiotugaDocumentInventory } from './SiotugaPlanningKnowledgeSource'
 
 describe('parseSiotugaDocumentInventory', () => {
   const baseJson = {
@@ -135,6 +147,19 @@ describe('parseSiotugaDocumentInventory', () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.officialDocumentId).toBe('456')
     expect(result[0]?.documentType).toBe('other')
+  })
+
+  it('recovers only the demonstrated empty componentes contract variant', () => {
+    const malformed = `{"datos_xerais":{"id":"123","filesroot":"root","folder":"folder"},"elementos":[{"description":"PLANOS","componentes" : ]},{"description":"NORMATIVA","componentes":[{"pathesperado":"123.pdf","id":"456"}]}]}`
+    const result = parseSiotugaDocumentInventoryWithDiagnostics(malformed, '123', 'source-1')
+    expect(result.contractVariantRecovered).toBe(true)
+    expect(result.documents).toHaveLength(1)
+    expect(result.documents[0]?.officialDocumentId).toBe('456')
+  })
+
+  it('fails closed for malformed JSON unrelated to the known variant', () => {
+    const malformed = `{"datos_xerais":{"id":"123","filesroot":"root","folder":"folder"},"elementos":[{"description":"PLANOS","componentes":[{"pathesperado":"123.pdf","id":]}]}`
+    expect(() => parseSiotugaDocumentInventory(malformed, '123', 'source-1')).toThrow('invalid JSON')
   })
 
   it('preserves the canonical official document type for every inventory group', () => {

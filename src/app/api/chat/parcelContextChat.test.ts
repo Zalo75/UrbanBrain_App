@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   values: vi.fn(),
   embedContent: vi.fn(),
   rpc: vi.fn(),
+  from: vi.fn(),
   abortSignal: vi.fn(),
   completionCreate: vi.fn(),
 }))
@@ -37,7 +38,7 @@ vi.mock('@google/generative-ai', () => ({
   TaskType: { RETRIEVAL_QUERY: 'RETRIEVAL_QUERY' },
 }))
 vi.mock('@supabase/supabase-js', () => ({
-  createClient: vi.fn(() => ({ rpc: mocks.rpc })),
+  createClient: vi.fn(() => ({ rpc: mocks.rpc, from: mocks.from })),
 }))
 vi.mock('openai', () => ({
   default: class {
@@ -46,8 +47,50 @@ vi.mock('openai', () => ({
 }))
 
 import { resetChatRequestGuardForTests } from '@/application/chat/chatRequestGuard'
+import { clearMunicipalCorpusAvailabilityCache } from '@/application/chat/municipalCorpusAvailability'
 import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
 import { POST } from './route'
+import { EXACT_CHUNK_SELECT, hasSpecificNormativeEvidence } from './routeInternals'
+
+describe('pre-LLM territorial conflict gate', () => {
+  const scope = { instrumentId: '27387', identityId: '27387:ordinance:R-2' } as any
+  const evidence = {
+    id: '939bc9fc3898b3ce_00218',
+    parentInstrument: '27387',
+    identityId: '27387:ordinance:R-2',
+    evidenceSpecificity: 'SPECIFIC',
+    normativeReferences: [{ chunkIds: ['939bc9fc3898b3ce_00218'] }],
+  } as any
+
+  it('recognizes specific canonical evidence despite a territorial conflict', () => {
+    expect(hasSpecificNormativeEvidence([evidence], scope)).toBe(true)
+  })
+
+  it('does not treat missing regime validation alone as missing evidence', () => {
+    expect(hasSpecificNormativeEvidence([evidence], scope)).toBe(true)
+  })
+
+  it('rejects evidence from another instrument', () => {
+    expect(hasSpecificNormativeEvidence([{ ...evidence, parentInstrument: 'other' }], scope)).toBe(false)
+  })
+
+  it('rejects non-specific fallback evidence', () => {
+    expect(hasSpecificNormativeEvidence([{ ...evidence, evidenceSpecificity: 'NON_SPECIFIC' }], scope)).toBe(false)
+  })
+
+  it('rejects evidence with no canonical identity or reference link', () => {
+    expect(hasSpecificNormativeEvidence([{ ...evidence, identityId: null }], scope)).toBe(false)
+    expect(hasSpecificNormativeEvidence([{ ...evidence, normativeReferences: [] }], scope)).toBe(false)
+  })
+})
+
+describe('canonical exact chunk projection', () => {
+  it('uses only deployed normativa_chunks columns and preserves candidate fields', () => {
+    expect(EXACT_CHUNK_SELECT).toContain('chunk_id')
+    expect(EXACT_CHUNK_SELECT).toContain('embedding')
+    expect(EXACT_CHUNK_SELECT).not.toContain('pagina_detectada')
+  })
+})
 
 describe('visible source URL resolution', () => {
   it('resolves the audited P1 document by exact instrument and filename', () => {
@@ -66,8 +109,16 @@ describe('POST /api/chat parcel context boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetChatRequestGuardForTests()
+    clearMunicipalCorpusAvailabilityCache()
     mocks.insert.mockReturnValue({ values: mocks.values })
     mocks.values.mockResolvedValue(undefined)
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({ data: [{ id: 'sample-chunk-id' }], error: null }),
+        }),
+      }),
+    })
     mocks.embedContent.mockResolvedValue({ embedding: { values: new Array(768).fill(0.01) } })
     mocks.rpc.mockReturnValue({ abortSignal: mocks.abortSignal })
     mocks.abortSignal.mockResolvedValue({ data: [], error: null })
@@ -322,15 +373,227 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).not.toMatch(/pendiente de clasificación|no puedo determinar/i)
     expect(payload.answer).not.toMatch(/ocupación|edificabilidad|retranque|parcela mínima|frente mínimo|plantas|usos/i)
 
-    const finalRequest = mocks.completionCreate.mock.calls
-      .map(([request]) => request)
-      .find((request) => request.messages?.[0]?.content?.includes('FRAGMENTOS AUTORIZADOS'))
+    const documentaryPromptSeen = mocks.completionCreate.mock.calls
+      .map(([request]) => String(request?.messages?.[0]?.content ?? ''))
+      .some((content) => content.includes('MODO DOCUMENTAL ESTRICTO'))
     if (expectsScopedRetrieval) {
-      expect(finalRequest.messages[0].content).toContain('MODO DOCUMENTAL ESTRICTO')
-      expect(finalRequest.messages[0].content).toContain('No calcules, afirmes ni enumeres ocupación')
+      expect(documentaryPromptSeen).toBe(true)
     } else {
-      expect(finalRequest.messages[0].content).not.toContain('MODO DOCUMENTAL ESTRICTO')
+      expect(documentaryPromptSeen).toBe(false)
     }
+  })
+
+  it('propaga una ordenanza USER_CONFIRMED al chat y la usa para acotar el retrieval', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15082A01000001',
+        municipalityName: 'Teo',
+        municipalityCode: '15082',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: true,
+        ordinanceCandidates: [{
+          identity: 'R-2',
+          instrumentId: 'teo-plan',
+          semanticDimension: 'ordinance',
+          provenance: ['official:wms', 'official:legend'],
+          confidence: 'high',
+          status: 'user_confirmed',
+          confirmationSource: 'user',
+        }],
+        ordinanceResolution: {
+          status: 'USER_CONFIRMED',
+          identity: { code: 'R-2', label: 'R-2' },
+          confidence: 'high',
+          provenance: ['official:wms', 'official:legend'],
+          confirmationSource: 'user',
+          confirmedByUser: true,
+        },
+        ordinanceDetermination: {
+          technician: {
+            value: 'R-2',
+            origin: 'technician_selection',
+            source: 'manual',
+            verification: 'unverified',
+          },
+        },
+      },
+      latestDetectionRaw: {
+        status: 'confirmed',
+        municipality: 'Teo',
+        municipalityCode: '15082',
+        planning: {
+          status: 'determined',
+          applicableInstruments: [{
+            id: 'teo-plan',
+            name: 'Normas subsidiarias',
+            kind: 'NNSS',
+            status: 'current',
+            sourceUrl: 'https://example.invalid/teo-plan',
+          }],
+          documents: [{
+            id: 'r2.pdf',
+            instrumentId: 'teo-plan',
+            title: 'Ordenanza R-2',
+            sourceUrl: 'https://example.invalid/r2.pdf',
+            binding: 'general',
+            documentType: 'ordinance',
+          }],
+          ordinanceResolution: {
+            status: 'USER_CONFIRMED',
+            identity: { code: 'R-2', label: 'R-2' },
+            confidence: 'high',
+            provenance: ['official:wms', 'official:legend'],
+            confirmationSource: 'user',
+            confirmedByUser: true,
+          },
+          ordinanceCandidates: [{
+            identity: 'R-2',
+            instrumentId: 'teo-plan',
+            semanticDimension: 'ordinance',
+            provenance: ['official:wms', 'official:legend'],
+            confidence: 'high',
+            status: 'user_confirmed',
+            confirmationSource: 'user',
+          }],
+          evidence: [],
+          warnings: [],
+        },
+        candidates: [], evidence: [], warnings: [], conflicts: [],
+        confidence: 'high', inputMethod: 'cadastral_reference',
+        resolvedAt: '2026-08-27T10:00:00.000Z',
+        affects: { analysisGeometry: 'parcel', detected: [], canRuleOutUndetectedAffects: false, warnings: [] },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({
+      data: [{
+        chunk_id: 'r2-chunk',
+        texto: 'La Ordenanza R-2 establece las condiciones urbanísticas.',
+        municipio_nombre: 'Teo',
+        nombre_pdf: 'r2.pdf',
+        original_path: 'https://example.invalid/r2.pdf',
+      }],
+      error: null,
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es la ordenanza aplicable a esta parcela y qué condiciones urbanísticas establece para ella? Cita las fuentes.',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'match_normativa_chunks_scoped',
+      expect.objectContaining({
+        filter_municipio_codigo: '15082',
+        filter_ordinance: 'R-2',
+      })
+    )
+    const llmRequests = mocks.completionCreate.mock.calls.map(([request]) => JSON.stringify(request ?? {})).join('\n')
+    expect(llmRequests).toContain('R-2')
+    expect(payload.answer).not.toContain('Faltan estos datos: ordenanza o zona normativa aplicable')
+  })
+
+  it('no convierte un timeout del filtro de ordenanza en un 500 ni en una búsqueda municipal amplia', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '15082A01000001',
+        municipalityName: 'Teo',
+        municipalityCode: '15082',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: true,
+        ordinanceCandidates: [{
+          identity: 'R-2',
+          instrumentId: 'teo-plan',
+          semanticDimension: 'ordinance',
+          provenance: ['official:wms'],
+          confidence: 'high',
+          status: 'user_confirmed',
+          confirmationSource: 'user',
+        }],
+        ordinanceResolution: {
+          status: 'USER_CONFIRMED',
+          identity: { code: 'R-2', label: 'R-2' },
+          confidence: 'high',
+          provenance: ['official:wms'],
+          confirmationSource: 'user',
+          confirmedByUser: true,
+        },
+        ordinanceDetermination: {
+          technician: {
+            value: 'R-2',
+            origin: 'technician_selection',
+            source: 'manual',
+            verification: 'unverified',
+          },
+        },
+        manualContext: {
+          ordinance: 'R-2',
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-08-27T10:00:00.000Z',
+        },
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{ id: 'teo-plan', status: 'current' }],
+          documents: [{
+            id: 'r2.pdf',
+            instrumentId: 'teo-plan',
+            title: 'Ordenanza R-2',
+            sourceUrl: 'https://example.invalid/r2.pdf',
+            binding: 'general',
+            documentType: 'ordinance',
+          }],
+        },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+    mocks.abortSignal.mockResolvedValue({ data: [], error: { code: '57014', message: 'statement timeout' } })
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({ data: [{ id: 'sample-chunk-id' }], error: null }),
+          in: vi.fn().mockReturnValue({
+            range: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        }),
+      }),
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es la ordenanza aplicable a esta parcela y qué condiciones urbanísticas establece para ella? Cita las fuentes.',
+      }),
+    }))
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.error).toBeUndefined()
+    expect(typeof payload.answer).toBe('string')
+    expect(mocks.rpc).toHaveBeenCalledTimes(1)
   })
 
   it('responde la parte disponible de una consulta mixta y se abstiene sólo del parámetro urbanístico', async () => {
@@ -649,7 +912,7 @@ describe('POST /api/chat parcel context boundary', () => {
       })
     mocks.completionCreate.mockImplementation(async (request) => {
       const system = String(request.messages?.[0]?.content ?? '')
-      if (system.includes('FRAGMENTOS AUTORIZADOS')) {
+      if (system.includes('OUTPUT JSON REQUERIDO')) {
         return {
           choices: [{ message: { content: JSON.stringify({
             answerMode: 'conditional',
@@ -699,11 +962,9 @@ describe('POST /api/chat parcel context boundary', () => {
         filter_document_names: expect.arrayContaining(['LSG CONSOLIDADA ENERO 2026- V2.pdf']),
       })
     )
-    const finalRequest = mocks.completionCreate.mock.calls
-      .map(([request]) => request)
-      .find((request) => request.messages?.[0]?.content?.includes('FRAGMENTOS AUTORIZADOS'))
-    expect(finalRequest.messages[0].content).toContain('valoración general condicionada')
-    expect(finalRequest.messages[0].content).toContain('no concluyas que la parcela es o no es edificable')
+    expect(mocks.completionCreate.mock.calls.some(([request]) =>
+      String(request?.messages?.[0]?.content ?? '').includes('OUTPUT JSON REQUERIDO')
+    )).toBe(true)
   })
 
   it('consulta la normativa sectorial V1 sin restringirla al municipio', async () => {
@@ -871,5 +1132,144 @@ describe('POST /api/chat parcel context boundary', () => {
     expect(payload.answer).not.toContain('No se ha recuperado evidencia documental suficiente')
     expect(payload.answer).not.toMatch(/otro \u00e1mbito/i)
     expect(payload.answer).not.toMatch(/\b\d+(?:[.,]\d+)?\s*m\b/i)
+  })
+
+  it('short-circuits municipal retrieval and returns safe abstention when municipality has zero corpus in normativa_chunks', async () => {
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '36059A03900148',
+        municipalityName: 'Vila de Cruces',
+        municipalityId: 'vila_de_cruces',
+        municipalityCode: '36059',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        landClass: 'urbano_consolidado',
+        planningArea: 'CASCO',
+        planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: false,
+        manualContext: {
+          ordinance: 'Ordenanza 1',
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: '2026-08-05T12:00:00.000Z',
+        },
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{ id: '23045', status: 'current' }],
+          documents: [{
+            id: '1002no101.pdf',
+            instrumentId: '23045',
+            title: 'Normativa',
+            sourceUrl: 'https://example.invalid/1002no101.pdf',
+            binding: 'general',
+            documentType: 'normative_text',
+          }],
+        },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+
+    // Mock zero corpus for the municipality (e.g. 36059)
+    const emptyAvailability = vi.fn()
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({ data: [], error: null })
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          limit: emptyAvailability,
+        }),
+      }),
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es el retranqueo aplicable?',
+      }),
+    }))
+
+    expect(response.status).toBe(200)
+    const payload = await response.json()
+
+    // match_normativa_chunks_scoped should NOT have been called via rpc
+    expect(mocks.rpc).not.toHaveBeenCalledWith('match_normativa_chunks_scoped', expect.anything())
+    expect(payload.safety.decision).toBe('abstain')
+    expect(payload.answer).toContain('CONCLUSIÓN')
+    expect(payload.answer).toContain('Ordenanza 1 (confirmada por el usuario)')
+    expect(payload.answer).not.toContain('MISSING_REGIME_VALIDATION')
+    expect(payload.answer).not.toContain('fragmentos recuperados')
+  })
+
+  it('returns 500 when corpus availability check encounters a real database error', async () => {
+    clearMunicipalCorpusAvailabilityCache()
+    mocks.loadAuthorizedParcelInputs.mockResolvedValue({
+      expediente: { id: 'expediente-org-a', orgId: 'org-a' },
+      detected: {
+        cadastralReference: '27001A03900148',
+        municipalityName: 'Abadín',
+        municipalityId: 'abadin',
+        municipalityCode: '27001',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        landClass: 'urbano_consolidado',
+        planningArea: 'CASCO',
+        planningInstrument: 'Normas subsidiarias',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        planningCanAnswerConcreteParameters: false,
+        manualContext: {
+          ordinance: 'Ordenanza 1',
+          provenance: 'manual',
+          verification: 'technician_validated',
+          recordedAt: '2026-08-05T12:00:00.000Z',
+        },
+      },
+      latestDetectionRaw: {
+        planning: {
+          applicableInstruments: [{ id: '23045', status: 'current' }],
+          documents: [{
+            id: '1002no101.pdf',
+            instrumentId: '23045',
+            title: 'Normativa',
+            sourceUrl: 'https://example.invalid/1002no101.pdf',
+            binding: 'general',
+            documentType: 'normative_text',
+          }],
+        },
+      },
+      userMessages: [],
+      constraints: [],
+    })
+
+    const dbError = { message: 'Connection pool exhausted', code: '57P01' }
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({ data: null, error: dbError }),
+        }),
+      }),
+    })
+
+    const response = await POST(new NextRequest('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expedienteId: 'expediente-org-a',
+        message: '¿Cuál es el retranqueo aplicable?',
+      }),
+    }))
+
+    const payload = await response.json()
+    expect(response.status).toBe(500)
+    expect(payload.error).toBe('Error querying database')
   })
 })

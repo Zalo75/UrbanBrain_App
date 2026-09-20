@@ -30,7 +30,22 @@ export async function GET(req: NextRequest) {
       .where(eq(chatMessages.expedienteId, expedienteId))
       .orderBy(asc(chatMessages.createdAt));
 
-    return NextResponse.json({ history });
+    const sanitizedHistory = history.map((entry) => {
+      let parsedSources = entry.sources;
+      if (typeof parsedSources === 'string') {
+        try {
+          parsedSources = JSON.parse(parsedSources);
+        } catch {
+          parsedSources = null;
+        }
+      }
+      return {
+        ...entry,
+        sources: parsedSources,
+      };
+    });
+
+    return NextResponse.json({ history: sanitizedHistory });
   } catch (error) {
     console.error("Error fetching chat history:", error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

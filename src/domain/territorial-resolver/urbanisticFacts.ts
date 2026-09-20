@@ -142,6 +142,7 @@ export function urbanisticFactsFromClassificationResolution(
       label: c.classification!.label,
       parcelPercentage: c.parcelCoverage?.parcelPercentage,
       intersectionAreaSquareMetres: c.parcelCoverage?.intersectionAreaSquareMetres,
+      planningAreas: c.areas?.map((area) => area.name) ?? [],
     }))
 
   const classification = fact({
@@ -182,6 +183,7 @@ export function urbanisticFactsFromClassificationResolution(
       label: c.classification!.categoryLabel,
       parcelPercentage: c.parcelCoverage?.parcelPercentage,
       intersectionAreaSquareMetres: c.parcelCoverage?.intersectionAreaSquareMetres,
+      planningAreas: c.areas?.map((area) => area.name) ?? [],
     }))
 
   const category = fact({

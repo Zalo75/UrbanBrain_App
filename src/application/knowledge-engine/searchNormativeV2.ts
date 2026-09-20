@@ -1,19 +1,28 @@
 import { db } from '../../infrastructure/db/client';
 import { normativeDocumentsV2, normativeChunksV2 } from '../../infrastructure/db/schema';
-import { eq, and, sql, inArray } from 'drizzle-orm';
+import { eq, and, sql, inArray, or, isNotNull } from 'drizzle-orm';
+import { assertV2EmbeddingDimension } from './municipalRetrievalMode';
 
 export interface SearchV2Params {
   query_embedding: number[];
-  scopes: string[];
-  categories: string[];
+  scopes?: string[];
+  categories?: string[];
   municipalityId?: string;
   documentCodes?: string[];
+  instrumentId?: string;
+  parentInstrumentId?: string | null;
+  documentIds?: string[];
+  /** Exact chunk references supplied by an instrument identity catalog. */
+  identityChunkIds?: string[];
+  /** Explicit opt-in for official current documents pending legal review. */
+  allowProvisional?: boolean;
   limit?: number;
 }
 
 export async function searchNormativeV2(params: SearchV2Params) {
   try {
     const { query_embedding, scopes = [], categories = [], municipalityId, limit = 8 } = params;
+    assertV2EmbeddingDimension(query_embedding);
 
     let docFilters;
 
@@ -26,10 +35,18 @@ export async function searchNormativeV2(params: SearchV2Params) {
     } else {
       // current mode
       docFilters = [
-        eq(normativeDocumentsV2.legalReviewStatus, 'reviewed'),
-        eq(normativeDocumentsV2.isConsolidated, true),
         eq(normativeDocumentsV2.status, 'vigente'),
-        eq(normativeDocumentsV2.currentVersion, true)
+        eq(normativeDocumentsV2.currentVersion, true),
+        isNotNull(normativeDocumentsV2.officialIdentifier),
+        sql`${normativeDocumentsV2.officialIdentifier} <> ''`,
+        isNotNull(normativeDocumentsV2.sourceUrl),
+        sql`${normativeDocumentsV2.sourceUrl} <> ''`,
+        params.allowProvisional === true
+          ? or(
+              eq(normativeDocumentsV2.legalReviewStatus, 'reviewed'),
+              eq(normativeDocumentsV2.legalReviewStatus, 'pending'),
+            )!
+          : eq(normativeDocumentsV2.legalReviewStatus, 'reviewed'),
       ];
     }
 
@@ -55,6 +72,26 @@ export async function searchNormativeV2(params: SearchV2Params) {
       docFilters.push(sql`(${sql.join(conditions, sql` OR `)})`);
     }
 
+    if (params.documentIds && params.documentIds.length > 0) {
+      docFilters.push(inArray(normativeDocumentsV2.officialIdentifier, params.documentIds));
+    }
+
+    if (params.instrumentId) {
+      docFilters.push(sql`${normativeChunksV2.metadata}->>'instrumentId' = ${params.instrumentId}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(params, 'parentInstrumentId')) {
+      docFilters.push(
+        params.parentInstrumentId
+          ? sql`${normativeChunksV2.metadata}->>'parentInstrumentId' = ${params.parentInstrumentId}`
+          : sql`(${normativeChunksV2.metadata}->>'parentInstrumentId') is null`,
+      );
+    }
+
+    if (params.identityChunkIds && params.identityChunkIds.length > 0) {
+      docFilters.push(inArray(normativeChunksV2.id, params.identityChunkIds));
+    }
+
     const embeddingString = `[${query_embedding.join(',')}]`;
 
     const results = await db.select({
@@ -70,7 +107,18 @@ export async function searchNormativeV2(params: SearchV2Params) {
       article: normativeChunksV2.article,
       chapter: normativeChunksV2.chapter,
       sourceUrl: normativeDocumentsV2.sourceUrl,
-      officialIdentifier: normativeDocumentsV2.officialIdentifier
+      officialIdentifier: normativeDocumentsV2.officialIdentifier,
+      municipalityCode: normativeDocumentsV2.municipalityId,
+      instrumentId: sql<string | null>`${normativeChunksV2.metadata}->>'instrumentId'`,
+      parentInstrumentId: sql<string | null>`${normativeChunksV2.metadata}->>'parentInstrumentId'`,
+      officialDocumentId: normativeDocumentsV2.officialIdentifier,
+      checksum: normativeDocumentsV2.fileHash,
+      section: normativeChunksV2.chapter,
+      documentType: sql<string | null>`${normativeChunksV2.metadata}->>'documentType'`,
+      batchId: sql<string | null>`${normativeChunksV2.metadata}->>'batchId'`,
+      metadata: normativeChunksV2.metadata,
+      legalReviewStatus: normativeDocumentsV2.legalReviewStatus,
+      isConsolidated: normativeDocumentsV2.isConsolidated,
     })
     .from(normativeChunksV2)
     .innerJoin(normativeDocumentsV2, eq(normativeChunksV2.documentId, normativeDocumentsV2.id))

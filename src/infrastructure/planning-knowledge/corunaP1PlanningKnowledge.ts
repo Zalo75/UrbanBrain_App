@@ -81,6 +81,12 @@ export interface ActiveP1MunicipalityPlanning {
     attributes: readonly string[]
     capabilitiesUrl: string
   }
+  /** Official PORD raster layer derived from the same current instrument manifest. */
+  detailedPlanningLayer?: {
+    name: string
+    capabilitiesUrl: string
+    source: 'siotuga-wms-capabilities'
+  }
   implicitBackgroundClassification?: {
     classificationCode: string
     evidenceBasis: 'implicit_planning_background'
@@ -108,6 +114,7 @@ export interface ActiveP1MunicipalityPlanning {
 export const CORUNA_P1_PLANNING_KNOWLEDGE: readonly ActiveP1MunicipalityPlanning[] =
   P1_RECORDS.map(([code, municipalityName, figure, instrumentName, approvalDate, officialId]) => {
     const documents = CORUNA_P1_DOCUMENTS_BY_INSTRUMENT[officialId] ?? []
+    const classificationLayerName = `_${code}_${figure}_${approvalDate.slice(0, 7).replace('-', '')}_AD_3CLAS_${officialId}`
     return {
       municipalityCode: code,
       municipalityName,
@@ -120,9 +127,14 @@ export const CORUNA_P1_PLANNING_KNOWLEDGE: readonly ActiveP1MunicipalityPlanning
         inventoryUrl: `https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=${code}`,
       },
       classificationLayer: {
-        name: `_${code}_${figure}_${approvalDate.slice(0, 7).replace('-', '')}_AD_3CLAS_${officialId}`,
+        name: classificationLayerName,
         attributes: CLASSIFICATION_ATTRIBUTES,
         capabilitiesUrl: `https://siotuga.xunta.gal/siotuga/ws?codine=${code}&SERVICE=WFS&VERSION=1.1.0&REQUEST=GetCapabilities`,
+      },
+      detailedPlanningLayer: {
+        name: classificationLayerName.replace('_3CLAS_', '_PORD_02CL_'),
+        capabilitiesUrl: `https://siotuga.xunta.gal/siotuga/ws?codine=${code}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetCapabilities`,
+        source: 'siotuga-wms-capabilities',
       },
       implicitBackgroundClassification:
         code === '15002' // Ames

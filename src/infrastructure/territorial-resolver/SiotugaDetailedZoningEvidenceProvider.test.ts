@@ -71,15 +71,20 @@ describe('SiotugaDetailedZoningEvidenceProvider', () => {
       if (url.includes('GetFeatureInfo')) return new Response('')
       throw new Error(`unexpected URL ${url}`)
     }) as unknown as typeof fetch
-    const result = await new SiotugaDetailedZoningEvidenceProvider({
+    const provider = new SiotugaDetailedZoningEvidenceProvider({
       fetcher,
       interpreter: { inspect: async () => [{ observedLabel: null, parcelRelation: 'unknown' as const, competingLabels: ['A', 'B'] }] },
       documentValidator: { validate: async () => null },
-    }).resolve({
+    })
+    const result = await provider.resolve({
       planning: planning(), municipalityCode: '15000', coordinates: { lat: 43, lng: -8 },
       geometry: { type: 'MultiPolygon', coordinates: [[[[ -8.00001, 43.00001 ], [ -7.99999, 43.00001 ], [ -7.99999, 42.99999 ], [ -8.00001, 42.99999 ], [ -8.00001, 43.00001 ]]]], crs: 'EPSG:4326' },
     })
     expect(maps).toBe(2)
     expect(result).toEqual([])
+    expect(provider.getVisualResult()).toMatchObject({
+      resolutionState: 'resolved',
+      observations: [{ observedLabel: null, competingLabels: ['A', 'B'], provenance: expect.any(Array) }],
+    })
   })
 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { GoogleGenerativeAI, TaskType } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
@@ -25,6 +26,9 @@ import {
 } from '@/application/parcel-context/normativeSearchScope';
 import { resolveSupplementaryNormativeScope } from '@/application/parcel-context/supplementaryNormativeScope';
 import { retrieveMunicipalProgressively } from '@/application/chat/municipalProgressiveRetrieval';
+import { rankScopedChunkRows, type ScopedChunkRow } from '@/application/chat/scopedChunkFallback';
+import { checkMunicipalCorpusAvailability } from '@/application/chat/municipalCorpusAvailability';
+import { requestsNormativeDocumentScope, shouldUseDocumentScope } from '@/application/chat/documentScopeRouting';
 import {
   buildAnswerContract,
   buildMunicipalSafetyPrompt,
@@ -34,14 +38,16 @@ import {
   buildDeterministicMissingFacts,
   parseReasonerOutput,
   validateReasonerOutput,
+  sanitizePresentationText,
+  renderValidatedClaimsNeutral,
   type ClaimValidationResult,
 } from '@/application/parcel-context/responseSafety';
+import { buildV2EffectivePrompt } from '@/application/parcel-context/v2PromptContext';
 import {
   classifyQuestionIntent,
-  composeSemanticAnswer,
   type SemanticCompositionResult,
 } from '@/application/parcel-context/semanticAnswerComposition';
-import { getOfficialPlanningDocumentUrl } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
+import { getOfficialPlanningDocumentUrl, getInstrumentIdentityCatalog } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
 import type { ApplicabilityResult, NormativeCandidate, ReasonerOutput } from '@/domain/parcel-context/types';
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess';
 import { acquireChatSlot, CHAT_REQUEST_TIMEOUT_MS, MAX_CHAT_MESSAGE_LENGTH } from '@/application/chat/chatRequestGuard';
@@ -55,6 +61,10 @@ import {
   type TerritorialCoverageDerivationDiagnostics,
 } from '@/application/parcel-context/buildFactualContract';
 import { runTerritorialFactualShadowPipeline } from '@/application/parcel-context/shadow/shadowPipeline';
+import { CartographicViewEvidence } from '@/infrastructure/territorial-resolver/cartographicViewEvidence';
+import { cartographicToolLimit, type CartographicToolResult } from '@/application/parcel-context/cartographicViewTool';
+import { assertRuntimeBudgetAvailable, recordLLMUsage, recordRuntimeCall } from '@/application/runtime/runtimeAccounting';
+import { EXACT_CHUNK_SELECT, hasSpecificNormativeEvidence, resolveMentionedAcceptedIdentities, resolveNormativeCandidateProvenance, shouldWidenDirectedNormativeScope } from './routeInternals';
 import {
   assessVisibleFactualResult,
   isSynchronousFactualEnabled,
@@ -65,7 +75,68 @@ import {
   factualComposerModel,
   isFactualComposerEnabled,
 } from '@/application/parcel-context/shadow/factualComposer';
+import {
+  accreditedRealitySourcesAsCandidates,
+  buildAccreditedRealityPackage,
+  buildAccreditedRealityPrompt,
+} from '@/application/parcel-context/accreditedRealityPackage';
+import { SiotugaPlanningKnowledgeSource } from '@/infrastructure/planning-knowledge/SiotugaPlanningKnowledgeSource';
+import { enrichPlanningDocumentPreviews } from '@/infrastructure/planning-knowledge/documentPreviewLoader';
+import {
+  accreditedRealityReasonerResponseSchema,
+  ACCREDITED_REALITY_MAX_TOOL_CALLS,
+  buildAccreditedRealityContinuationPrompt,
+  executeGetInstrumentDocumentsTool,
+  executeGetInstrumentDocumentContentTool,
+  accreditedPlanningDocumentsAsInventory,
+  instrumentDocumentContentAsCandidates,
+  instrumentDocumentsAsCandidates,
+  findReusableAccreditedRealityToolResult,
+  normalizeAccreditedRealityToolRequest,
+  type AccreditedRealityToolCall,
+  parseAccreditedRealityModelResponseSequence,
+  rankLegacyNormativeChunkRows,
+} from '@/application/parcel-context/accreditedRealityTool';
+import {
+  renderAccreditedRealityClaimsNeutral,
+  validateAccreditedRealityOutput,
+} from '@/application/parcel-context/accreditedRealityValidation';
 
+function traceCatalogRuntimeInternal(requestId: string, expedienteId: string, event: string, payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV === 'production') return
+  const record = { at: new Date().toISOString(), requestId, expedienteId, processStartedAt: TRACE_PROCESS_STARTED_AT, event, ...payload }
+  try {
+    const tracePath = path.join(process.cwd(), 'diagnose_out', 'ub-e2e-trace.jsonl')
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true })
+    fs.appendFileSync(tracePath, `${JSON.stringify(record)}\n`, 'utf8')
+  } catch {
+    // Diagnostics must never affect the chat request.
+  }
+  console.info('UB-E2E-TRACE', JSON.stringify(record))
+}
+
+const TRACE_PROCESS_STARTED_AT = new Date().toISOString()
+
+function traceAnswerStage(
+  requestId: string,
+  expedienteId: string,
+  event: 'post-validation' | 'v2-neutral-composer' | 'semantic-composer' | 'before-http-response',
+  branch: string,
+  text: string,
+  validClaims: number
+) {
+  const safeText = typeof text === 'string' ? text : String(text ?? '');
+  traceCatalogRuntimeInternal(requestId, expedienteId, event, {
+    branch,
+    correlationId: expedienteId,
+    processStartedAt: TRACE_PROCESS_STARTED_AT,
+    textLength: safeText.length,
+    textPreview: safeText.slice(0, 180),
+    validClaims,
+  })
+}
+
+/** Columns available in the deployed V1 corpus for canonical exact lookup. */
 // Init Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -114,6 +185,10 @@ type ChatNormativeCandidate = NormativeCandidate & {
   visibleSourceKind?: 'normative_v1' | 'normative_v2';
 };
 
+function buildV2TechnicalFallback(): string {
+  return 'No hay evidencia normativa suficiente para responder con seguridad.';
+}
+
 function safeHttpUrl(value?: string | null) {
   if (!value) return null;
   try {
@@ -151,9 +226,14 @@ function hierarchyForSupplementaryCandidate(result: V2SearchResult): NormativeCa
 function mapV1Candidates(
   chunks: V1Chunk[],
   scope?: NormativeSearchScope,
-  hierarchy: NormativeCandidate['hierarchy'] = 'municipal'
+  hierarchy: NormativeCandidate['hierarchy'] = 'municipal',
+  evidenceSpecificity: NormativeCandidate['evidenceSpecificity'] = 'SPECIFIC',
+  inheritCanonicalIdentity = true
 ): ChatNormativeCandidate[] {
-  return chunks.map((chunk) => ({
+  return chunks.map((chunk) => {
+    const ownRegime = chunk.metadata?.regime ?? null;
+    const provenance = resolveNormativeCandidateProvenance(ownRegime, scope, inheritCanonicalIdentity);
+    return {
     id: String(chunk.chunk_id),
     content: chunk.texto ?? '',
     municipalityName: chunk.municipio_nombre ?? null,
@@ -165,11 +245,15 @@ function mapV1Candidates(
     hierarchy,
     regimeMetadata: chunk.metadata?.regime ?? null,
     // Keep legacy attributes as null unless proven elsewhere
-    ordinance: null,
-    planningArea: null,
+    ordinance: provenance.ordinance,
+    planningArea: provenance.planningArea,
     parentInstrument: scope?.instrumentId ?? null,
+    evidenceSpecificity,
+    identityId: provenance.identityId,
+    normativeReferences: provenance.normativeReferences,
     visibleSourceKind: 'normative_v1',
-  }));
+    };
+  });
 }
 
 function mapVisibleSources(candidates: ChatNormativeCandidate[]) {
@@ -192,7 +276,8 @@ function mapVisibleSources(candidates: ChatNormativeCandidate[]) {
       titulo_detectado: candidate.title ?? '',
       similarity: candidate.similarity ?? 0,
       source_index: index + 1,
-      source_kind: candidate.visibleSourceKind ?? 'normative_document',
+      source_kind: candidate.id.startsWith('cartographic-view:') ? 'cartographic_view' : candidate.visibleSourceKind ?? 'normative_document',
+      evidence_specificity: candidate.evidenceSpecificity ?? 'SPECIFIC',
       official_url: resolveVisibleOfficialUrl(candidate),
       pagina_detectada: candidate.page ?? null,
       fragmento_corto: `${normalizedPreview.slice(0, 180)}${normalizedPreview.length > 180 ? '…' : ''}`,
@@ -206,11 +291,26 @@ function requestsParcelNormativeDocuments(question: string) {
   return /\b(?:normativa|documentos?|fuentes?|regulaci[oó]n)\b/i.test(question)
 }
 
-async function handlePost(req: NextRequest, signal: AbortSignal) {
+function jsonWithRequestId(requestId: string, body: Record<string, unknown>, init?: ResponseInit) {
+  const headers = new Headers(init?.headers)
+  headers.set('X-UrbanBrain-Request-Id', requestId)
+  return NextResponse.json({ ...body, requestId }, { ...init, headers })
+}
+
+function isAccreditedRealityExperimentEnabled() {
+  return process.env.NODE_ENV !== 'production' && process.env.URBANBRAIN_EXPEDIENTE_ACCREDITED_REALITY_ENABLED === '1'
+}
+
+async function handlePost(req: NextRequest, signal: AbortSignal, requestId: string) {
+  const traceCatalogRuntime = (expedienteId: string, event: string, payload: Record<string, unknown>) =>
+    traceCatalogRuntimeInternal(requestId, expedienteId, event, payload);
+  let tracedExpedienteId = 'unknown';
+  let traceStage = 'handlePost:start';
   let releaseChatSlot: (() => void) | undefined;
   try {
     const body = await req.json();
     const { message, expedienteId } = body;
+    if (typeof expedienteId === 'string' && expedienteId) tracedExpedienteId = expedienteId;
 
     if (typeof expedienteId !== 'string' || !expedienteId) {
       return NextResponse.json({ error: 'expedienteId is required' }, { status: 400 });
@@ -252,6 +352,331 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       userMessages: [...parcelInputs.userMessages, message],
     });
     const contextBuildMs = performance.now() - contextBuildStartedAt;
+
+    if (isAccreditedRealityExperimentEnabled()) {
+      if (process.env.URBANBRAIN_REASONER_PROVIDER && process.env.URBANBRAIN_REASONER_PROVIDER !== 'openai') {
+        return jsonWithRequestId(requestId, { error: 'El experimento requiere URBANBRAIN_REASONER_PROVIDER=openai.' }, { status: 503 });
+      }
+      if (process.env.URBANBRAIN_OPENAI_REASONER_MODEL && process.env.URBANBRAIN_OPENAI_REASONER_MODEL !== 'gpt-5.6-luna') {
+        return jsonWithRequestId(requestId, { error: 'El experimento requiere URBANBRAIN_OPENAI_REASONER_MODEL=gpt-5.6-luna.' }, { status: 503 });
+      }
+
+      const accreditedRealityPackage = buildAccreditedRealityPackage(parcelInputs.detected, parcelContext);
+      const packageSources = accreditedRealitySourcesAsCandidates(accreditedRealityPackage);
+      const packagePrompt = buildAccreditedRealityPrompt(accreditedRealityPackage, message);
+      traceCatalogRuntime(expedienteId, 'accredited-reality-package', {
+        packageVersion: accreditedRealityPackage.packageVersion,
+        package: accreditedRealityPackage,
+        derivedContext: accreditedRealityPackage.derivedContext,
+      });
+      traceCatalogRuntime(expedienteId, 'accredited-reality-prompt', {
+        systemPrompt: packagePrompt.systemPrompt,
+        userPrompt: packagePrompt.userPrompt,
+      });
+
+      await db.insert(chatMessages).values({
+        expedienteId,
+        userId,
+        role: 'user',
+        content: message.trim(),
+      });
+
+      const provider = getReasonerProvider();
+      if (provider.name !== 'openai') return jsonWithRequestId(requestId, { error: 'Accredited Reality cartográfico requiere proveedor OpenAI multimodal.' }, { status: 503 });
+      assertRuntimeBudgetAvailable(provider.name);
+      const startedAt = performance.now();
+      const firstRequest = {
+        systemPrompt: packagePrompt.systemPrompt,
+        userPrompt: packagePrompt.userPrompt,
+        signal,
+        timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+        responseSchemaName: 'AccreditedRealityReasonerResponse',
+        responseSchema: accreditedRealityReasonerResponseSchema,
+      };
+      const result = await provider.generate(firstRequest);
+      const runtimeCall = recordRuntimeCall({ requestId, provider: result.provider, model: result.model, callType: 'reasoning', inputTokens: result.inputTokens, outputTokens: result.outputTokens, totalTokens: result.totalTokens, cachedTokens: result.cachedInputTokens, reasoningTokens: result.reasoningTokens });
+      recordLLMUsage({ operationType: 'chat_query', operationId: requestId, requestId, expedienteId, stage: 'accredited-reality', inferenceIndex: 1, provider: result.provider, model: result.model, inputTokens: result.inputTokens ?? null, cachedInputTokens: result.cachedInputTokens ?? null, outputTokens: result.outputTokens ?? null, reasoningTokens: result.reasoningTokens ?? null, totalTokens: result.totalTokens ?? null, durationMs: result.latencyMs ?? null, toolCallsRequested: 0, finishReason: null });
+      traceCatalogRuntime(expedienteId, 'accredited-reality-runtime-call', { pass: 1, ...runtimeCall });
+      traceCatalogRuntime(expedienteId, 'accredited-reality-model-raw', { pass: 1, provider: result.provider, model: result.model, latencyMs: result.latencyMs, rawContent: result.rawContent });
+
+      let modelResponses = parseAccreditedRealityModelResponseSequence(result.rawContent);
+      let modelResponse = modelResponses?.[modelResponses.length - 1] ?? null;
+      let activeSources = [...packageSources];
+      let finalResult = result;
+      const activeInstrumentId = parcelInputs.detected?.applicableInstruments?.find((instrument) => instrument.status === 'current')?.id ?? null;
+      let instrumentDocumentsResult: Awaited<ReturnType<typeof executeGetInstrumentDocumentsTool>> | null = accreditedPlanningDocumentsAsInventory({
+        municipalityCode: accreditedRealityPackage.identity.municipalityCode,
+        instrumentId: activeInstrumentId,
+        documents: parcelInputs.detected?.planningDocuments,
+      });
+      const cartography = new CartographicViewEvidence({ expedienteId, municipalityCode: accreditedRealityPackage.identity.municipalityCode, instrumentId: activeInstrumentId, planning: parcelInputs.detected ? { status: 'partial', applicableInstruments: parcelInputs.detected.applicableInstruments ?? [], documents: parcelInputs.detected.planningDocuments ?? [], evidence: [], warnings: [] } : null, signal });
+      let currentImages: ReturnType<typeof cartography.attachments> = [];
+      let cartographyUsed = false;
+      let toolLimitReached = false;
+      let toolResult: Awaited<ReturnType<typeof executeGetInstrumentDocumentsTool>> | Awaited<ReturnType<typeof executeGetInstrumentDocumentContentTool>> | CartographicToolResult | undefined;
+      const toolHistory: Array<{ request: AccreditedRealityToolCall; result: NonNullable<typeof toolResult> }> = [];
+      let toolCalls = 0;
+      let accreditedInferenceIndex = 1;
+
+      const collectInstrumentDocuments = async (municipalityCode: string, currentInstrumentId: string, retrievedAt: string) => {
+        const collected = await new SiotugaPlanningKnowledgeSource().collectInstrumentDocuments(municipalityCode, currentInstrumentId, retrievedAt);
+        const baseDocuments = collected.documents.map((document) => ({
+          id: document.officialDocumentId,
+          instrumentId: document.instrumentId,
+          title: document.name,
+          sourceUrl: document.officialUrl,
+          binding: 'general' as const,
+          documentType: document.documentType,
+        }));
+        const documents = await enrichPlanningDocumentPreviews(baseDocuments, municipalityCode, currentInstrumentId);
+        return {
+          documents,
+        };
+      };
+
+      const retrieveDocumentContent = async (input: {
+        municipalityCode: string
+        instrumentId: string
+        document: NonNullable<typeof instrumentDocumentsResult>['documents'][number]
+        query: string
+        retrievedAt: string
+      }) => {
+        const terms = [...new Set(input.query.toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}\-_]{3,}/gu) ?? [])];
+        const score = (text: string) => terms.reduce((total, term) => total + (text.toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(term) ? 1 : 0), 0);
+        const officialDocumentId = input.document.id;
+
+        const v2Document = await supabase
+          .from('normative_documents_v2')
+          .select('id,title,source_url,official_identifier,file_hash,status,current_version,legal_review_status')
+          .eq('official_identifier', officialDocumentId)
+          .eq('municipality_id', input.municipalityCode)
+          .eq('status', 'vigente')
+          .eq('current_version', true)
+          .eq('legal_review_status', 'reviewed')
+          .limit(1);
+        if (!v2Document.error && Array.isArray(v2Document.data) && v2Document.data.length > 0) {
+          const document = v2Document.data[0] as Record<string, unknown>;
+          const chunks = await supabase
+            .from('normative_chunks_v2')
+            .select('id,content,page,article,chapter,metadata')
+            .eq('document_id', String(document.id))
+            .limit(5000);
+          if (!chunks.error && Array.isArray(chunks.data)) {
+            const scopedChunks = chunks.data.filter((chunk) => {
+              const metadata = chunk && typeof chunk === 'object' && 'metadata' in chunk && chunk.metadata && typeof chunk.metadata === 'object'
+                ? chunk.metadata as Record<string, unknown>
+                : null;
+              const metadataInstrument = typeof metadata?.instrumentId === 'string' ? metadata.instrumentId : null;
+              return !metadataInstrument || metadataInstrument === input.instrumentId;
+            });
+            const ranked = scopedChunks
+              .map((chunk) => ({ chunk: chunk as Record<string, unknown>, score: score(String((chunk as Record<string, unknown>).content ?? '')) }))
+              .filter((item) => terms.length === 0 || item.score > 0)
+              .sort((left, right) => right.score - left.score)
+              .slice(0, 12);
+            return {
+              status: ranked.length > 0 ? 'available' as const : 'not_ingested' as const,
+              fragments: ranked.map(({ chunk }) => ({
+                stableSourceRef: `instrument-document:${officialDocumentId}:chunk:${String(chunk.id)}`,
+                officialDocumentId,
+                chunkId: String(chunk.id),
+                text: String(chunk.content ?? ''),
+                page: typeof chunk.page === 'number' ? chunk.page : null,
+                article: typeof chunk.article === 'string' ? chunk.article : null,
+                chapter: typeof chunk.chapter === 'string' ? chunk.chapter : null,
+                documentName: typeof document.title === 'string' ? document.title : input.document.title,
+                sourceUrl: input.document.sourceUrl,
+                checksum: typeof document.file_hash === 'string' ? document.file_hash : null,
+              })),
+              provenance: { source: 'normative_chunks_v2' as const, retrievedAt: input.retrievedAt, method: 'exact officialDocumentId + instrument + municipality scope' },
+            };
+          }
+        }
+
+        let fileName: string | null = null;
+        try { fileName = decodeURIComponent(new URL(input.document.sourceUrl).pathname.split('/').pop() ?? '') || null; } catch { fileName = null; }
+        if (!fileName) return { status: 'not_ingested' as const, fragments: [], provenance: { source: 'normativa_chunks' as const, retrievedAt: input.retrievedAt, method: 'official URL had no corpus filename' } };
+        const legacyRows = await supabase
+          .from('normativa_chunks')
+          .select('chunk_id,texto,nombre_pdf,titulo_detectado,ruta_pdf,metadata')
+          .eq('municipio_codigo', input.municipalityCode)
+          .eq('nombre_pdf', fileName)
+          .limit(5000);
+        if (legacyRows.error || !Array.isArray(legacyRows.data)) {
+          const error = legacyRows.error as { code?: string; message?: string } | null;
+          console.error('[AccreditedReality] normativa_chunks content query failed', {
+            municipalityCode: input.municipalityCode,
+            fileName,
+            code: error?.code ?? null,
+            message: error?.message ?? 'invalid query result',
+          });
+          return { status: 'error' as const, fragments: [], provenance: { source: 'normativa_chunks' as const, retrievedAt: input.retrievedAt, method: 'exact municipality + corpus filename scope' }, message: error?.message };
+        }
+        const scopedRows = legacyRows.data
+          .filter((row) => {
+            const metadata = row && typeof row === 'object' && 'metadata' in row && row.metadata && typeof row.metadata === 'object'
+              ? row.metadata as Record<string, unknown>
+              : null;
+            const metadataInstrument = typeof metadata?.instrumentId === 'string' ? metadata.instrumentId : null;
+            return !metadataInstrument || metadataInstrument === input.instrumentId;
+          })
+        const fragments = rankLegacyNormativeChunkRows({
+          rows: scopedRows,
+          terms,
+          officialDocumentId,
+          sourceUrl: input.document.sourceUrl,
+        });
+        return {
+          status: fragments.length > 0 ? 'available' as const : 'not_ingested' as const,
+          fragments,
+          provenance: { source: 'normativa_chunks' as const, retrievedAt: input.retrievedAt, method: 'exact municipality + corpus filename scope' },
+        };
+      };
+
+      while (modelResponses) {
+        const pendingTools = modelResponses.filter((response): response is AccreditedRealityToolCall => response.action === 'tool_call');
+        if (pendingTools.length === 0) {
+          modelResponse = modelResponses[modelResponses.length - 1] ?? null;
+          break;
+        }
+        cartographyUsed ||= pendingTools.some(tool => tool.toolName === 'get_cartographic_view');
+        const toolLimit = cartographyUsed ? cartographicToolLimit() : ACCREDITED_REALITY_MAX_TOOL_CALLS;
+        const remaining = toolLimit - toolCalls;
+        if (remaining <= 0) {
+          traceCatalogRuntime(expedienteId, 'accredited-reality-tool-limit', { limit: toolLimit, toolCalls });
+          toolLimitReached = true;
+          modelResponse = null;
+          break;
+        }
+        let exceededRemaining = false;
+        for (const rawRequestedTool of pendingTools) {
+          const requestedTool = normalizeAccreditedRealityToolRequest(rawRequestedTool, instrumentDocumentsResult);
+          const previous = findReusableAccreditedRealityToolResult(toolHistory, requestedTool);
+          if (previous) {
+            if (previous.result.toolName === 'get_instrument_documents') instrumentDocumentsResult = previous.result;
+            toolResult = previous.result;
+            traceCatalogRuntime(expedienteId, 'accredited-reality-tool-reused', { toolName: requestedTool.toolName, arguments: requestedTool.arguments });
+            continue;
+          }
+          if (toolCalls >= toolLimit) {
+            exceededRemaining = true;
+            break;
+          }
+          toolCalls += 1;
+          traceCatalogRuntime(expedienteId, 'accredited-reality-tool-request', { pass: toolCalls, toolName: requestedTool.toolName, arguments: requestedTool.arguments, accepted: true });
+          if (requestedTool.toolName === 'get_instrument_documents') {
+            instrumentDocumentsResult = await executeGetInstrumentDocumentsTool({ municipalityCode: accreditedRealityPackage.identity.municipalityCode, instrumentId: activeInstrumentId, collect: collectInstrumentDocuments });
+            toolResult = instrumentDocumentsResult;
+            activeSources = [...activeSources, ...instrumentDocumentsAsCandidates(instrumentDocumentsResult)];
+          } else if (requestedTool.toolName === 'get_instrument_document_content') {
+            const contentResult = await executeGetInstrumentDocumentContentTool({
+              municipalityCode: accreditedRealityPackage.identity.municipalityCode,
+              instrumentId: activeInstrumentId,
+              inventory: instrumentDocumentsResult,
+              documentId: requestedTool.arguments.documentId,
+              query: requestedTool.arguments.query,
+              retrieve: retrieveDocumentContent,
+            });
+            toolResult = contentResult;
+            activeSources = [...activeSources, ...instrumentDocumentContentAsCandidates(contentResult)];
+          }
+          if (requestedTool.toolName === 'get_cartographic_view') {
+            const viewResult = await cartography.execute(requestedTool.arguments);
+            toolResult = viewResult;
+            currentImages = cartography.attachments(viewResult);
+            activeSources = [...activeSources, ...viewResult.views.filter(view => !activeSources.some(source => source.id === view.id)).map(view => ({ id: view.id, content: JSON.stringify(view), sourceUrl: view.sourceUrl, documentName: 'Vista cartográfica: interpretación pendiente', evidenceSpecificity: 'NON_SPECIFIC' as const }))];
+          }
+          if (!toolResult) throw new Error('Unsupported accredited tool dispatch');
+          toolHistory.push({ request: requestedTool, result: toolResult });
+          traceCatalogRuntime(expedienteId, 'accredited-reality-tool-result', { pass: toolCalls, result: toolResult, sourceCount: activeSources.length });
+        }
+        if (exceededRemaining) {
+          traceCatalogRuntime(expedienteId, 'accredited-reality-tool-limit', { limit: toolLimit, toolCalls });
+          toolLimitReached = true;
+          modelResponse = null;
+          break;
+        }
+        const continuationPrompt = buildAccreditedRealityContinuationPrompt(packagePrompt, toolHistory);
+        traceCatalogRuntime(expedienteId, 'accredited-reality-prompt', { pass: toolCalls + 1, systemPrompt: continuationPrompt.systemPrompt, userPrompt: continuationPrompt.userPrompt });
+        assertRuntimeBudgetAvailable(provider.name);
+        finalResult = await provider.generate({ ...firstRequest, images: currentImages, systemPrompt: continuationPrompt.systemPrompt, userPrompt: continuationPrompt.userPrompt });
+        accreditedInferenceIndex += 1;
+        recordLLMUsage({ operationType: 'chat_query', operationId: requestId, requestId, expedienteId, stage: 'accredited-reality', inferenceIndex: accreditedInferenceIndex, provider: finalResult.provider, model: finalResult.model, inputTokens: finalResult.inputTokens ?? null, cachedInputTokens: finalResult.cachedInputTokens ?? null, outputTokens: finalResult.outputTokens ?? null, reasoningTokens: finalResult.reasoningTokens ?? null, totalTokens: finalResult.totalTokens ?? null, durationMs: finalResult.latencyMs ?? null, toolCallsRequested: pendingTools.length, finishReason: null });
+        const followupRuntimeCall = recordRuntimeCall({ requestId, provider: finalResult.provider, model: finalResult.model, callType: 'reasoning', inputTokens: finalResult.inputTokens, outputTokens: finalResult.outputTokens, totalTokens: finalResult.totalTokens, cachedTokens: finalResult.cachedInputTokens, reasoningTokens: finalResult.reasoningTokens });
+        traceCatalogRuntime(expedienteId, 'accredited-reality-runtime-call', { pass: toolCalls + 1, ...followupRuntimeCall });
+        traceCatalogRuntime(expedienteId, 'accredited-reality-model-raw', { pass: toolCalls + 1, provider: finalResult.provider, model: finalResult.model, latencyMs: finalResult.latencyMs, rawContent: finalResult.rawContent });
+        modelResponses = parseAccreditedRealityModelResponseSequence(finalResult.rawContent);
+      }
+
+      const parsed = modelResponse?.action === 'final' ? modelResponse.output : null;
+      const protocolError = modelResponses === null;
+      const applicability: ApplicabilityResult = {
+        status: accreditedRealityPackage.conflicts.length > 0 ? 'CONFLICTIVO' : 'PARCIAL',
+        applicable: activeSources,
+        review: [],
+        rejected: [],
+        warnings: accreditedRealityPackage.warnings.map((warning) => typeof warning === 'string' ? warning : JSON.stringify(warning)),
+        missingData: accreditedRealityPackage.unknowns,
+        conflicts: accreditedRealityPackage.conflicts.map((conflict) => JSON.stringify(conflict)),
+        canAnswerConcreteParameters: false,
+      };
+      const validation = parsed
+        ? validateAccreditedRealityOutput(parsed, activeSources, applicability, parcelContext)
+        : { validClaims: [], invalidClaimCount: 0, invalidClaimReasonCounts: { INVALID_JSON_SCHEMA: 1 }, citations: [], legacyCitations: [] };
+      traceCatalogRuntime(expedienteId, 'accredited-reality-validation', {
+        parsed: Boolean(parsed),
+        toolUsed: Boolean(toolResult),
+        validClaims: validation.validClaims.length,
+        invalidClaimCount: validation.invalidClaimCount,
+        invalidClaimReasonCounts: validation.invalidClaimReasonCounts,
+        citations: validation.citations,
+      });
+
+      const answer = toolLimitReached
+        ? 'Investigación incompleta: se alcanzó el límite de herramientas antes de completar la respuesta.'
+        : protocolError
+        ? 'No se pudo procesar la respuesta estructurada del razonador. La ejecución se detuvo por un error de protocolo.'
+        : validation.validClaims.length > 0
+        ? renderAccreditedRealityClaimsNeutral(validation.validClaims)
+        : `No puedo cerrar la consulta con la evidencia acreditada disponible.${accreditedRealityPackage.unknowns.length > 0 ? ` Datos pendientes: ${accreditedRealityPackage.unknowns.join('; ')}.` : ''}`;
+      const contract = buildAnswerContract(
+        answer,
+        parcelContext,
+        applicability,
+        validation.legacyCitations,
+        activeSources,
+        validation.validClaims.length > 0 ? 'answer' : 'abstain',
+      );
+      await db.insert(chatMessages).values({
+        expedienteId,
+        userId,
+        role: 'assistant',
+        content: answer,
+        sources: mapVisibleSources(activeSources.filter(source => !source.id.startsWith('cartographic-view:'))),
+      });
+      traceCatalogRuntime(expedienteId, 'accredited-reality-response', {
+        answer,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        model: finalResult.model,
+        provider: finalResult.provider,
+        latencyMs: finalResult.latencyMs,
+        inputTokens: finalResult.inputTokens ?? null,
+        outputTokens: finalResult.outputTokens ?? null,
+        totalTokens: finalResult.totalTokens ?? null,
+      });
+      return jsonWithRequestId(requestId, {
+        answer,
+        sources: mapVisibleSources(activeSources),
+        safety: contract,
+        experimental: {
+          packageVersion: accreditedRealityPackage.packageVersion,
+          provider: finalResult.provider,
+          model: finalResult.model,
+          validation,
+        },
+      });
+    }
+
     // An impossible sentinel prevents municipal retrieval until Catastro confirms the municipality.
     const trustedMunicipioCodigo = trustedMunicipalityCodeFilter(parcelContext);
     const municipioCodigo =
@@ -275,8 +700,43 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       context: parcelContext,
       municipioCodigo: trustedMunicipioCodigo,
       detected: parcelInputs.detected,
-      rawDetection: parcelInputs.latestDetectionRaw,
+      trace: process.env.NODE_ENV === 'production' ? undefined : (event, payload) => traceCatalogRuntime(expedienteId, event, payload),
     });
+    traceCatalogRuntime(expedienteId, 'catalog-scope', {
+      municipalityCode: normativeScope.municipioCodigo,
+      instrumentId: normativeScope.instrumentId ?? null,
+      ordinance: normativeScope.ordinance ?? null,
+      identityId: normativeScope.identityId ?? null,
+      normativeReferences: normativeScope.normativeReferences ?? [],
+      documentNames: normativeScope.documentNames ?? [],
+    })
+    if (
+      normativeScope.authoritativeSelection &&
+      normativeScope.ordinance &&
+      normativeScope.instrumentId
+    ) {
+      const existingConfirmed = parcelContext.ordinanceCandidates?.some(
+        (candidate) =>
+          candidate.status === 'user_confirmed' &&
+          candidate.identity.trim().toLocaleUpperCase() === normativeScope.ordinance!.trim().toLocaleUpperCase()
+      )
+      if (!existingConfirmed) {
+        parcelContext.ordinanceCandidates = [
+          ...(parcelContext.ordinanceCandidates ?? []),
+          {
+            identity: normativeScope.ordinance,
+            semanticDimension: 'ordinance',
+            instrumentId: normativeScope.instrumentId,
+            provenance: ['manual'],
+            status: 'user_confirmed',
+            confirmationSource: 'user',
+            identityId: normativeScope.identityId,
+            catalogStatus: normativeScope.catalogStatus,
+            normativeReferences: normativeScope.normativeReferences,
+          },
+        ]
+      }
+    }
     // Guardar mensaje del usuario
     const userPersistStartedAt = performance.now();
     await db.insert(chatMessages).values({
@@ -563,11 +1023,20 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     // Generar embedding con Gemini
     // El modelo disponible es 'gemini-embedding-001'
     const embeddingModel = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
+    const embeddingQuery = normativeScope.ordinance
+      ? `${message}\nOrdenanza confirmada: ${normativeScope.ordinance}`
+      : message;
 
     const embeddingResult = await embeddingModel.embedContent({
-      content: { role: 'user', parts: [{ text: message }] },
+      content: { role: 'user', parts: [{ text: embeddingQuery }] },
       taskType: TaskType.RETRIEVAL_QUERY,
     }, { timeout: CHAT_REQUEST_TIMEOUT_MS, signal });
+    recordRuntimeCall({
+      requestId,
+      provider: 'gemini',
+      model: 'gemini-embedding-001',
+      callType: 'embedding',
+    });
 
     const rawEmbedding = Array.from(embeddingResult.embedding.values);
 
@@ -586,8 +1055,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const t0_v1 = performance.now();
     const needsDocumentScope =
       questionScope !== 'independent' || requestsParcelNormativeDocuments(message);
+    const identityReferenceChunkIds = [...new Set((normativeScope.normativeReferences ?? []).flatMap((reference) => reference.chunkIds).filter(Boolean))];
+    const hasCatalogScopedIdentity = Boolean(
+      identityReferenceChunkIds.length > 0 && normativeScope.municipioCodigo && normativeScope.instrumentId,
+    );
     const scopedRetrieval =
-      needsDocumentScope && canSearchNormativeInformation(normativeScope);
+      (needsDocumentScope || hasCatalogScopedIdentity) && (canSearchNormativeInformation(normativeScope) || hasCatalogScopedIdentity);
     const rpcName = scopedRetrieval
       ? 'match_normativa_chunks_scoped'
       : 'match_normativa_chunks';
@@ -599,8 +1072,78 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let municipalDocumentScopeCandidateCount = 0;
     let municipalBroadCandidateCount = 0;
     let municipalFallbackUsed = false;
+    let municipalRetrievalStatus: 'NONE' | 'MATCHES' | 'NO_MATCHES' | 'TIMEOUT' | 'ERROR' | 'NON_SPECIFIC_EVIDENCE' = 'NONE';
+    let municipalRetrievalSpecificStatus: 'NONE' | 'MATCHES' | 'NO_MATCHES' | 'TIMEOUT' | 'ERROR' = 'NONE';
+    let municipalEvidenceSpecificity: 'NONE' | 'SPECIFIC' | 'NON_SPECIFIC' = 'NONE';
 
-    if (scopedRetrieval) {
+    let legacyCorpusAvailable = true;
+    const checkCorpus = async (codigo: string) => {
+      if (typeof supabase.from !== 'function') {
+        return { exists: true, error: null };
+      }
+      const { data, error } = await supabase
+        .from('normativa_chunks')
+        .select('id')
+        .eq('municipio_codigo', codigo)
+        .limit(1);
+      if (error) return { exists: false, error };
+      if (Array.isArray(data) && data.length > 0) return { exists: true, error: null };
+      legacyCorpusAvailable = false;
+
+      // V2 is a valid municipal corpus in its own right. Keep the historical
+      // V1 check as the fast path, but do not turn the absence of V1 rows into
+      // a false "no corpus" result for an instrument scoped to V2.
+      const v2Result = await supabase
+        .from('normative_chunks_v2')
+        .select('id')
+        .eq('metadata->>municipalityCode', codigo)
+        .limit(1);
+      if (v2Result.error) return { exists: false, error: v2Result.error };
+      return { exists: Array.isArray(v2Result.data) && v2Result.data.length > 0, error: null };
+    };
+
+    const shouldRetrieveMunicipal =
+      supplementaryScope.retrieveMunicipal && Boolean(municipioCodigo);
+    let corpusAvailable = true;
+
+    if (shouldRetrieveMunicipal) {
+      const corpusCheck = await checkMunicipalCorpusAvailability(municipioCodigo, checkCorpus);
+      if (corpusCheck.error) {
+        municipalRetrievalError = corpusCheck.error;
+        corpusAvailable = false;
+      } else if (!corpusCheck.exists) {
+        corpusAvailable = false;
+      }
+    }
+
+    if (shouldRetrieveMunicipal && corpusAvailable && scopedRetrieval && identityReferenceChunkIds.length > 0 && plan?.corpus !== 'v2') {
+      // A catalog identity is an authoritative, instrument-scoped index. Read
+      // only its exact chunk references before attempting broad vector RPCs.
+      const referenceRows = await supabase
+        .from('normativa_chunks')
+        .select(EXACT_CHUNK_SELECT)
+        .eq('municipio_codigo', municipioCodigo)
+        .in('chunk_id', identityReferenceChunkIds)
+      municipalRetrievalAttemptCount = 1;
+      if (referenceRows.error) {
+        municipalRetrievalError = referenceRows.error;
+        municipalRetrievalStatus = 'ERROR';
+        municipalRetrievalSpecificStatus = 'ERROR';
+      } else {
+        const scopedRows = (Array.isArray(referenceRows.data) ? referenceRows.data as ScopedChunkRow[] : []).filter((row) => {
+          const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : undefined;
+          const metadataInstrument = typeof metadata?.instrumentId === 'string' ? metadata.instrumentId : undefined;
+          const documentAllowed = !normativeScope.documentNames?.length || normativeScope.documentNames.includes(String(row.nombre_pdf ?? ''));
+          return documentAllowed && (!metadataInstrument || metadataInstrument === normativeScope.instrumentId);
+        });
+        municipalRetrievalData = rankScopedChunkRows(scopedRows, query_embedding, 8, null) as V1Chunk[];
+        municipalRetrievalStrategy = 'document_scope';
+        municipalRetrievalStatus = municipalRetrievalData.length > 0 ? 'MATCHES' : 'NO_MATCHES';
+        municipalRetrievalSpecificStatus = municipalRetrievalStatus === 'MATCHES' ? 'MATCHES' : 'NO_MATCHES';
+        municipalEvidenceSpecificity = municipalRetrievalData.length > 0 ? 'SPECIFIC' : 'NONE';
+        municipalDocumentScopeCandidateCount = municipalRetrievalData.length;
+      }
+    } else if (shouldRetrieveMunicipal && corpusAvailable && scopedRetrieval && !(plan?.corpus === 'v2' && identityReferenceChunkIds.length > 0)) {
       const progressiveRetrieval = await retrieveMunicipalProgressively(
         {
           query_embedding,
@@ -608,7 +1151,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
           filter_municipio_codigo: municipioCodigo,
           filter_document_names: normativeScope.documentNames ?? null,
           filter_ordinance: normativeScope.ordinance ?? null,
-          retrieveMunicipal: supplementaryScope.retrieveMunicipal,
+          retrieveMunicipal: true,
         },
         async (rpcArguments) => {
           const result = await supabase
@@ -617,6 +1160,37 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
           return {
             data: (Array.isArray(result.data) ? result.data : []) as V1Chunk[],
             error: result.error,
+          };
+        },
+        async (scopedArguments) => {
+          // If the ordinance predicate in the RPC times out, keep the same
+          // municipality/document scope and rank only that bounded subset
+          // locally. This never broadens the corpus or silently drops scope.
+          if (!scopedArguments.filter_document_names?.length) {
+            return { data: [], error: null };
+          }
+          const scopedRows: ScopedChunkRow[] = [];
+          const pageSize = 1000;
+          const maxRows = 5000;
+          for (let offset = 0; offset < maxRows; offset += pageSize) {
+            const page = await supabase
+              .from('normativa_chunks')
+              .select('chunk_id,municipio_nombre,nombre_pdf,titulo_detectado,texto,ruta_pdf,metadata,embedding')
+              .eq('municipio_codigo', scopedArguments.filter_municipio_codigo)
+              .in('nombre_pdf', scopedArguments.filter_document_names)
+              .range(offset, offset + pageSize - 1);
+            if (page.error) return { data: [], error: page.error };
+            if (Array.isArray(page.data)) scopedRows.push(...(page.data as ScopedChunkRow[]));
+            if (!Array.isArray(page.data) || page.data.length < pageSize) break;
+          }
+          return {
+            data: rankScopedChunkRows(
+              scopedRows,
+              scopedArguments.query_embedding,
+              scopedArguments.match_count,
+              scopedArguments.filter_ordinance
+            ),
+            error: null,
           };
         }
       );
@@ -628,7 +1202,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       municipalDocumentScopeCandidateCount = progressiveRetrieval.documentScopeCandidateCount;
       municipalBroadCandidateCount = progressiveRetrieval.broadCandidateCount;
       municipalFallbackUsed = progressiveRetrieval.fallbackUsed;
-    } else if (supplementaryScope.retrieveMunicipal) {
+      municipalRetrievalStatus = progressiveRetrieval.status;
+      municipalRetrievalSpecificStatus = progressiveRetrieval.specificStatus;
+      municipalEvidenceSpecificity = progressiveRetrieval.evidenceSpecificity;
+    } else if (shouldRetrieveMunicipal && corpusAvailable) {
       const result = await supabase
         .rpc(rpcName, {
           query_embedding,
@@ -649,11 +1226,33 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
       rpcName: supplementaryScope.retrieveMunicipal ? rpcName : 'not_executed',
       rpcMs: v1_time_ms,
       requestAborted: signal.aborted,
-      status: municipalRetrievalError ? 'error' : 'completed',
+      status: municipalRetrievalError
+        ? 'error'
+        : municipalRetrievalStatus === 'TIMEOUT'
+          ? 'timeout'
+          : municipalRetrievalStatus === 'ERROR'
+            ? 'error'
+            : 'completed',
       municipalRetrievalStrategy,
       municipalRetrievalAttemptCount,
       municipalFallbackUsed,
     });
+
+    if (municipalRetrievalError) {
+      const progressiveFailure = municipalRetrievalStatus === 'TIMEOUT' || municipalRetrievalStatus === 'ERROR';
+      if (progressiveFailure) {
+        // A scoped retrieval failure is a safe, non-fatal lack of evidence.
+        // Do not replace it with a broader municipal search or a generic 500.
+        console.warn('[MunicipalRetrievalUnavailable]', {
+          expedienteId,
+          status: municipalRetrievalStatus,
+          strategy: municipalRetrievalStrategy,
+          failedOperation: municipalRetrievalStatus === 'TIMEOUT' ? 'ordinance_scoped_rpc_timeout' : 'ordinance_scoped_rpc_error',
+        });
+        municipalRetrievalData = [];
+        municipalRetrievalError = null;
+      }
+    }
 
     if (municipalRetrievalError) {
       console.error('Supabase RPC error:', {
@@ -670,8 +1269,19 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
 
     const v1Candidates = mapV1Candidates(
       municipalRetrievalData,
-      scopedRetrieval ? normativeScope : undefined
+      scopedRetrieval ? normativeScope : undefined,
+      'municipal',
+      municipalEvidenceSpecificity === 'NON_SPECIFIC' ? 'NON_SPECIFIC' : 'SPECIFIC'
     );
+    traceCatalogRuntime(expedienteId, 'retrieval-summary', {
+      strategy: municipalRetrievalStrategy,
+      status: municipalRetrievalStatus,
+      attempts: municipalRetrievalAttemptCount,
+      exactChunkIdsRequested: identityReferenceChunkIds,
+      chunkIdsReturned: municipalRetrievalData.map((chunk) => String(chunk.chunk_id)),
+      v1CandidateCount: v1Candidates.length,
+      evidenceSpecificity: municipalEvidenceSpecificity,
+    })
 
     const supplementaryV1Candidates: ChatNormativeCandidate[] = [];
     const supplementaryCandidateCountsByLayer: Record<string, number> = {};
@@ -718,27 +1328,41 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let usedV2 = false;
     let fallbackReason = '';
     let v2_time_ms = 0;
-    let v2LLMTime = 0;
     let v2Citas = '';
     let v2Results: V2SearchResult[] = [];
     let v2Candidates: ChatNormativeCandidate[] = [];
 
     const cteLayer = supplementaryScope.layers.find((layer) => layer.source === 'v2');
-    if (cteLayer) {
+    const v2ScopedIdentity = Boolean(
+      normativeScope.municipioCodigo && normativeScope.instrumentId && normativeScope.ordinance,
+    );
+    const v2CorpusRequested = plan?.corpus === 'v2' || (corpusAvailable && !legacyCorpusAvailable && v2ScopedIdentity);
+    const catalogV2Requested = v2CorpusRequested && identityReferenceChunkIds.length > 0;
+    const v2Layer = cteLayer ?? (v2CorpusRequested ? { scopes: [], categories: [] } : undefined);
+    let v2Entry = Boolean(v2Layer);
+    if (v2Entry) {
+      traceCatalogRuntime(expedienteId, 'v2-entry', { branch: 'v2' });
+    }
+    if (v2Layer) {
       try {
         const { searchNormativeV2 } = await import('@/application/knowledge-engine/searchNormativeV2');
 
         const t0_v2 = performance.now();
         const v2Promise = searchNormativeV2({
           query_embedding,
-          scopes: [...(cteLayer.scopes ?? [])],
-          categories: [...(cteLayer.categories ?? [])],
-          documentCodes: plan?.documentCodes || [],
-          limit: 8,
+           scopes: [...(v2Layer.scopes ?? [])],
+           categories: [...(v2Layer.categories ?? [])],
+           documentCodes: plan?.documentCodes || [],
+           municipalityId: v2CorpusRequested ? normativeScope.municipioCodigo : undefined,
+           instrumentId: v2CorpusRequested ? normativeScope.instrumentId : undefined,
+           parentInstrumentId: v2CorpusRequested ? null : undefined,
+           identityChunkIds: catalogV2Requested ? identityReferenceChunkIds : undefined,
+           allowProvisional: v2ScopedIdentity,
+           limit: 8,
         });
 
         const timeoutPromise = new Promise<V2SearchResult[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
-        v2Results = await Promise.race([v2Promise, timeoutPromise]);
+        v2Results = (await Promise.race([v2Promise, timeoutPromise])) as V2SearchResult[];
         v2_time_ms = Math.round(performance.now() - t0_v2);
 
         // Validation for V2 usage
@@ -760,7 +1384,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
              usedV2 = false;
              fallbackReason = 'Cero resultados V2 tras filtro estricto (similitud o falta URL oficial)';
           } else {
-            v2FinalContext = 'NORMATIVA APLICABLE (CTE):\n\n';
+            v2FinalContext = 'NORMATIVA MUNICIPAL APLICABLE:\n\n';
             let cIndex = 1;
 
             // Collect unique chunks
@@ -781,8 +1405,10 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
               similarity: result.similarity,
               hierarchy: hierarchyForSupplementaryCandidate(result),
               status: 'vigente',
-              regimeMetadata: result.metadata?.regime ?? null,
-              visibleSourceKind: 'normative_v2',
+               regimeMetadata: result.metadata?.regime ?? null,
+               identityId: normativeScope.identityId ?? null,
+               normativeReferences: normativeScope.normativeReferences,
+               visibleSourceKind: 'normative_v2',
             }));
 
             for (const r of uniqueValidChunks) {
@@ -814,10 +1440,12 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     }
     // ----------------------------------
 
+    // Retrieval intent cannot select an empty V2 response path.
+    v2Entry = usedV2 && v2Candidates.length > 0;
     let applicability: ApplicabilityResult;
     let retrievalApplicability: ApplicabilityResult;
     let answerCandidates: NormativeCandidate[];
-    if (usedV2) {
+    if (v2Entry) {
       answerCandidates = v2Candidates;
       applicability = {
         status:
@@ -878,13 +1506,20 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     const layeredRegimeApplicability = concreteParameterRequested
       ? evaluateApplicability(parcelContext, layeredCandidates, true)
       : layeredRetrievalApplicability;
+    const isDocumentScope = requestsNormativeDocumentScope(message) || (normativeScope ? shouldUseDocumentScope(message, normativeScope, municipioCodigo) : false);
     if (questionScope === 'mixed') {
       applicability = {
         ...layeredRegimeApplicability,
+        status: layeredRetrievalApplicability.status === 'CONFLICTIVO' ? 'CONFLICTIVO' : layeredRetrievalApplicability.applicable.length > 0 ? 'DETERMINADO' : 'NO_DETERMINADO',
         applicable: layeredRetrievalApplicability.applicable,
         rejected: layeredRetrievalApplicability.rejected,
       };
       answerCandidates = layeredRetrievalApplicability.applicable;
+    } else if (isDocumentScope && !concreteParameterRequested) {
+      applicability = layeredRetrievalApplicability;
+      answerCandidates = applicability.applicable.length > 0
+        ? applicability.applicable
+        : applicability.review;
     } else {
       applicability = layeredRegimeApplicability;
       answerCandidates = applicability.applicable.length > 0
@@ -892,20 +1527,40 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         : applicability.review;
     }
     retrievalApplicability = layeredRetrievalApplicability;
+    traceCatalogRuntime(expedienteId, 'applicability', {
+      answerCandidateIds: answerCandidates.map((candidate) => candidate.id),
+      answerCandidateDocuments: answerCandidates.map((candidate) => candidate.documentName ?? null),
+      applicabilityStatus: applicability.status,
+      retrievalApplicabilityStatus: retrievalApplicability.status,
+      missingData: applicability.missingData,
+    })
 
     const hasConditionalRegimeEvidence =
       conditionalViabilityRequested &&
       applicability.canAnswerConditionalViability === true &&
       answerCandidates.length > 0;
 
+    const hasAuthoritativeCanonicalEvidence = Boolean(
+      normativeScope.authoritativeSelection &&
+      answerCandidates.some((candidate) =>
+        candidate.catalogStatus === 'ACCEPTED' &&
+        Boolean(candidate.identityId) &&
+        (candidate.normativeReferences?.length ?? 0) > 0
+      )
+    );
     const hasReviewableRegimeEvidence =
       questionScope === 'regime' &&
       applicability.status === 'PARCIAL' &&
-      applicability.review.length > 0;
+      applicability.review.length > 0 &&
+      !hasAuthoritativeCanonicalEvidence;
 
     const hardStopNoCandidates = answerCandidates.length === 0;
     const hardStopRetrievalConflict = retrievalApplicability.status === 'CONFLICTIVO';
-    const hardStopTerritorialConflict = applicability.status === 'CONFLICTIVO';
+    const hasSpecificNormativeEvidenceForIdentity = hasSpecificNormativeEvidence(answerCandidates, normativeScope);
+    const hardStopTerritorialConflict =
+      questionScope === 'regime' &&
+      applicability.status === 'CONFLICTIVO' &&
+      !hasSpecificNormativeEvidenceForIdentity;
 
     // Condicional viabilidad es un caso especial: si se pregunta si se puede construir,
     // y no hay *ninguna* evidencia que hable de viabilidad general (ej. 0 chunks aplicables
@@ -949,6 +1604,9 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         municipalScopeHasOrdinance: !!normativeScope?.ordinance,
         municipalRetrievalStrategy,
         municipalRetrievalAttemptCount,
+        municipalRetrievalStatus,
+        municipalRetrievalSpecificStatus,
+        municipalEvidenceSpecificity,
         municipalStrictCandidateCount,
         municipalDocumentScopeCandidateCount,
         municipalBroadCandidateCount,
@@ -973,6 +1631,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         finalDecision,
         reasonerAllowedWithMissingFacts,
         hardStopReasonCodes,
+        hasSpecificNormativeEvidenceForIdentity,
         applicableCount: applicability.applicable.length,
         reviewCount: applicability.review.length,
         rejectedCount: applicability.rejected.length,
@@ -987,7 +1646,7 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
         conflictCount: applicability.conflicts.length, ...extraParams, });
     }
 
-    if (mustAbstain) {
+    if (mustAbstain && !v2Entry) {
       const answer = buildSafeAbstention(applicability, parcelContext, message);
       const contract = buildAnswerContract(
         answer,
@@ -1012,31 +1671,45 @@ async function handlePost(req: NextRequest, signal: AbortSignal) {
     let contextText = '';
     let systemPrompt = '';
 
-    if (usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0) {
-      contextText = v2FinalContext;
-      systemPrompt = `Eres UrbanBrain, asistente urbanístico. Responde únicamente a partir de los fragmentos suministrados.
-No inventes requisitos, cifras ni apartados.
-
-Reglas:
-1. Diferencia entre exigencia normativa, interpretación técnica, e información insuficiente.
-2. Cita cada afirmación relevante usando los corchetes provistos [Fuente 1], [Fuente 2].
-3. Si los fragmentos no permiten responder la pregunta de forma completa, dilo expresamente. No completes con conocimiento general.
-4. No presentes tu interpretación como si fuese texto literal de la norma.
-5. Advierte al usuario cuando la respuesta pueda depender además de normativa autonómica o municipal.
-6. ${questionScope === 'mixed'
-    ? 'Responde las partes respaldadas por el contexto y separa la parte que no puede resolverse sin clasificación urbanística. No rechaces toda la consulta.'
-    : 'Limita la respuesta al alcance respaldado por las fuentes recuperadas.'}
-
-FORMATO DE RESPUESTA REQUERIDO:
-
-CONCLUSIÓN
-[Respuesta clara y directa]
-
-FUNDAMENTO NORMATIVO
-[Explicación basada en los fragmentos recuperados, citando las fuentes con corchetes]
-
-FUENTES
-[Lista de las fuentes utilizadas en formato: - CTE DB-XX, Capítulo X, apartado Y, página Z. Fuente oficial: URL]`;
+    if (v2Entry) {
+      const classification = parcelContext.urbanisticFacts?.classification?.value;
+      const category = parcelContext.urbanisticFacts?.category?.value;
+      const municipality = parcelContext.municipality?.value;
+      const facts = [
+        municipality?.name ? `Municipio: ${municipality.name}${municipality.ineCode ? ` (INE ${municipality.ineCode})` : ''}.` : '',
+        parcelContext.planningInstrument?.value ? `Instrumento de planeamiento: ${parcelContext.planningInstrument.value}.` : '',
+        parcelContext.cadastralReference?.value ? `Parcela: ${parcelContext.cadastralReference.value}.` : '',
+        parcelContext.parcelSurfaceSquareMetres ? `Superficie de parcela: ${parcelContext.parcelSurfaceSquareMetres} m².` : '',
+        parcelContext.actionArea?.value.surfaceSquareMetres ? `Superficie del área de actuación: ${parcelContext.actionArea.value.surfaceSquareMetres} m².` : '',
+        classification ? `Clasificación: ${typeof classification === 'string' ? classification : `${classification.code ?? ''}${classification.label ? ` — ${classification.label}` : ''}`}.` : '',
+        category ? `Categoría: ${typeof category === 'string' ? category : `${category.code ?? ''}${category.label ? ` — ${category.label}` : ''}`}.` : '',
+      ];
+      const confirmedCandidate = parcelContext.ordinanceCandidates?.find((candidate) => candidate.status === 'user_confirmed' && candidate.identity.trim());
+      const confirmedCode = normativeScope.ordinance ?? confirmedCandidate?.identity ?? (parcelContext.qualification?.verification === 'confirmed' ? parcelContext.qualification.value : undefined);
+      const confirmedOrdinance = confirmedCode && (confirmedCandidate || parcelContext.qualification?.verification === 'confirmed' || normativeScope.catalogStatus === 'ACCEPTED')
+        ? { code: confirmedCode, name: normativeScope.identityName }
+        : undefined;
+      const canonicalNormativeIdentityEstablished = Boolean(
+        normativeScope.authoritativeSelection &&
+        normativeScope.catalogStatus === 'ACCEPTED' &&
+        normativeScope.identityId &&
+        (normativeScope.normativeReferences?.length ?? 0) > 0
+      );
+      const uncertainties = [
+        applicability.status === 'CONFLICTIVO' ? 'La parcela presenta heterogeneidad territorial. Esta circunstancia puede limitar conclusiones que dependan de la distribución espacial exacta dentro de la parcela, pero no invalida una ordenanza confirmada ni la normativa oficial.' : '',
+        ...(buildDeterministicMissingFacts(applicability, parcelContext).filter((fact) => !/^MISSING_|^NO_/.test(fact))),
+      ];
+      const v2Prompt = buildV2EffectivePrompt({
+        facts,
+        confirmedOrdinance,
+        normativeIdentityAuthority: canonicalNormativeIdentityEstablished ? 'ESTABLISHED' : 'UNKNOWN',
+        spatialExtentAuthority: canonicalNormativeIdentityEstablished ? 'UNKNOWN' : undefined,
+        normativeReferences: normativeScope.normativeReferences ?? [],
+        normativeContext: v2FinalContext,
+        uncertainties,
+      });
+      contextText = v2Prompt.contextText;
+      systemPrompt = v2Prompt.systemPrompt;
     } else {
       systemPrompt = hasReviewableRegimeEvidence
         ? buildReviewSafetyPrompt(parcelContext, answerCandidates, questionScope)
@@ -1109,24 +1782,235 @@ ${usedV2 ? v2Citas : 'N/A'}
     let parsed: ReasonerOutput | null = null;
     let semanticComposition: SemanticCompositionResult | null = null;
 
+    let directedRetrievalUsed = false;
+    const recoverableNormativeMissingFacts = (facts: string[]) => facts.filter((fact) =>
+      /\b(?:ordenanza|normativ|art[ií]culo|ficha|compatib|edificaci[oó]n|edificabilidad|uso|parcela|posici[oó]n|zona|r[eé]gimen|planeamiento|document|regulaci[oó]n)\b/i.test(fact)
+    )
+
+    const runDirectedNormativeRetrieval = async (missingFacts: string[]) => {
+      if (
+        directedRetrievalUsed ||
+        !municipioCodigo ||
+        !normativeScope.instrumentId ||
+        !normativeScope.documentNames?.length
+      ) return false
+
+      const directedFacts = recoverableNormativeMissingFacts(missingFacts).slice(0, 8)
+      if (directedFacts.length === 0) return false
+      directedRetrievalUsed = true
+      const directedQuery = [
+        message,
+        `Ordenanza o identidad normativa autoritativa: ${normativeScope.ordinance ?? 'no determinada'}.`,
+        'Investigar específicamente estas carencias normativas:',
+        ...directedFacts.map((fact) => `- ${fact}`),
+      ].join('\n')
+      const mentionedIdentities = resolveMentionedAcceptedIdentities(
+        `${message}\n${directedFacts.join('\n')}`,
+        getInstrumentIdentityCatalog(normativeScope.municipioCodigo, normativeScope.instrumentId),
+      )
+      const initialIdentity = normativeScope.identityId
+        ? getInstrumentIdentityCatalog(normativeScope.municipioCodigo, normativeScope.instrumentId)?.identities.find((identity) => identity.id === normativeScope.identityId)
+        : undefined
+      const canonicalIdentities = [...new Map(
+        [initialIdentity, ...mentionedIdentities]
+          .filter((identity): identity is NonNullable<typeof identity> => Boolean(identity))
+          .map((identity) => [identity.id, identity])
+      ).values()]
+      const widenIdentityScope = shouldWidenDirectedNormativeScope(
+        message,
+        directedFacts,
+        normativeScope.identityId ? normativeScope.ordinance : null,
+      )
+
+      const exactIdentityReferences = canonicalIdentities.length > 1
+        ? [...new Map(canonicalIdentities.flatMap((identity) => identity.normativeReferences.flatMap((reference) =>
+          reference.chunkIds.map((chunkId) => [chunkId, identity] as const)
+        ))).entries()]
+        : []
+      if (widenIdentityScope && exactIdentityReferences.length > 0) {
+        const exactChunkIds = exactIdentityReferences.map(([chunkId]) => chunkId)
+        const exactRows = await supabase
+          .from('normativa_chunks')
+          .select(EXACT_CHUNK_SELECT)
+          .eq('municipio_codigo', municipioCodigo)
+          .in('chunk_id', exactChunkIds)
+        const scopedRows = (Array.isArray(exactRows.data) ? exactRows.data as ScopedChunkRow[] : []).filter((row) => {
+          const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : undefined
+          const metadataInstrument = typeof metadata?.instrumentId === 'string' ? metadata.instrumentId : undefined
+          return (!metadataInstrument || metadataInstrument === normativeScope.instrumentId) &&
+            (!normativeScope.documentNames?.length || normativeScope.documentNames.includes(String(row.nombre_pdf ?? '')))
+        })
+        const exactData = rankScopedChunkRows(scopedRows, query_embedding, 8, null) as V1Chunk[]
+        const additionalCandidates = mapV1Candidates(exactData, normativeScope, 'municipal', 'SPECIFIC', false).map((candidate) => {
+          const identity = exactIdentityReferences.find(([chunkId]) => chunkId === candidate.id)?.[1]
+          return identity
+            ? {
+                ...candidate,
+                ordinance: identity.officialCode,
+                identityId: identity.id,
+                catalogStatus: 'ACCEPTED' as const,
+                normativeReferences: identity.normativeReferences,
+              }
+            : candidate
+        })
+        traceCatalogRuntime(expedienteId, 'directed-retrieval', {
+          retrievalNumber: 2,
+          strategy: 'canonical_multi_identity',
+          query: directedQuery,
+          missingFacts: directedFacts,
+          municipalityCode: municipioCodigo,
+          instrumentId: normativeScope.instrumentId,
+          identities: canonicalIdentities.map((identity) => ({
+            identityId: identity.id,
+            officialCode: identity.officialCode,
+            semanticDimension: identity.semanticDimension,
+            status: identity.status,
+            normativeReferences: identity.normativeReferences,
+          })),
+          exactChunkIdsRequested: exactChunkIds,
+          filterOrdinance: 'multi_identity_exact_references',
+          widenedIdentityScope: true,
+          status: exactRows.error ? 'ERROR' : exactData.length > 0 ? 'MATCHES' : 'NO_MATCHES',
+          attemptCount: 1,
+          chunkIdsReturned: exactData.map((chunk) => String(chunk.chunk_id)),
+        })
+        if (exactRows.error || exactData.length === 0) return false
+        const candidateById = new Map(answerCandidates.map((candidate) => [candidate.id, candidate]))
+        for (const candidate of additionalCandidates) candidateById.set(candidate.id, candidate)
+        answerCandidates = [...candidateById.values()]
+        sources = mapVisibleSources(answerCandidates)
+        const additionalEvidence = additionalCandidates.map((candidate) => {
+          const sourceIndex = answerCandidates.findIndex((item) => item.id === candidate.id) + 1
+          return `[Fuente ${sourceIndex}]\nDocumento: ${candidate.documentName ?? 'Documento'}\n` +
+            `Identidad normativa: ${candidate.identityId ?? 'no demostrada'}\n` +
+            `Código oficial: ${candidate.ordinance ?? 'no determinado'}\n` +
+            `Dimensión semántica: ${candidate.regimeMetadata?.kind ?? 'no determinada'}\n` +
+            `Instrumento: ${normativeScope.instrumentId}\n` +
+            `Fragmento:\n${candidate.content}`
+        }).join('\n\n')
+        systemPrompt += `\n\nEVIDENCIA NORMATIVA ADICIONAL RECUPERADA TRAS REVISAR LAS CARENCIAS DEL PRIMER RAZONAMIENTO\n${additionalEvidence}`
+        if (v2Entry) contextText += `\n\nEVIDENCIA NORMATIVA ADICIONAL\n${additionalEvidence}`
+        return true
+      }
+      const directedEmbeddingResult = await embeddingModel.embedContent({
+        content: { role: 'user', parts: [{ text: directedQuery }] },
+        taskType: TaskType.RETRIEVAL_QUERY,
+      }, { timeout: CHAT_REQUEST_TIMEOUT_MS, signal });
+      recordRuntimeCall({
+        requestId,
+        provider: 'gemini',
+        model: 'gemini-embedding-001',
+        callType: 'embedding',
+      });
+      const directedEmbedding = Array.from(directedEmbeddingResult.embedding.values).slice(0, 768);
+      if (directedEmbedding.length < 768) return false
+
+      const directedRetrieval = await retrieveMunicipalProgressively(
+        {
+          query_embedding: directedEmbedding,
+          match_count: 8,
+          filter_municipio_codigo: municipioCodigo,
+          // Keep the canonical ordinance boundary unless the question or the
+          // missing facts explicitly require another identity/cross-zone rule.
+          filter_document_names: normativeScope.documentNames,
+          filter_ordinance: widenIdentityScope ? null : normativeScope.ordinance,
+          allowDocumentScopeFallback: widenIdentityScope,
+          retrieveMunicipal: true,
+          hasMunicipalCorpus: true,
+        },
+        async (rpcArguments) => {
+          const result = await supabase
+            .rpc('match_normativa_chunks_scoped', rpcArguments)
+            .abortSignal(signal);
+          return {
+            data: (Array.isArray(result.data) ? result.data : []) as V1Chunk[],
+            error: result.error,
+          };
+        }
+      );
+      traceCatalogRuntime(expedienteId, 'directed-retrieval', {
+        retrievalNumber: 2,
+        query: directedQuery,
+        missingFacts: directedFacts,
+        municipalityCode: municipioCodigo,
+        instrumentId: normativeScope.instrumentId,
+        documentNames: normativeScope.documentNames,
+        filterOrdinance: widenIdentityScope ? null : normativeScope.ordinance,
+        widenedIdentityScope: widenIdentityScope,
+        status: directedRetrieval.status,
+        attemptCount: directedRetrieval.attemptCount,
+        chunkIdsReturned: directedRetrieval.data.map((chunk) => String(chunk.chunk_id)),
+      });
+      if (directedRetrieval.error || directedRetrieval.data.length === 0) return false
+
+      const additionalCandidates = mapV1Candidates(
+        directedRetrieval.data,
+        normativeScope,
+        'municipal',
+        'SPECIFIC',
+        false
+      );
+      const candidateById = new Map(answerCandidates.map((candidate) => [candidate.id, candidate]));
+      for (const candidate of additionalCandidates) candidateById.set(candidate.id, candidate);
+      answerCandidates = [...candidateById.values()];
+      sources = mapVisibleSources(answerCandidates);
+      const additionalEvidence = additionalCandidates.map((candidate) => {
+        const sourceIndex = answerCandidates.findIndex((item) => item.id === candidate.id) + 1;
+        return `[Fuente ${sourceIndex}]\nDocumento: ${candidate.documentName ?? 'Documento'}\n` +
+          `Identidad normativa: ${candidate.identityId ?? 'no demostrada'}\n` +
+          `Código oficial: ${candidate.ordinance ?? 'no determinado'}\n` +
+          `Dimensión semántica: ${candidate.regimeMetadata?.kind ?? 'no determinada'}\n` +
+          `Instrumento: ${normativeScope.instrumentId}\n` +
+          `Fragmento:\n${candidate.content}`;
+      }).join('\n\n');
+      systemPrompt += `\n\nEVIDENCIA NORMATIVA ADICIONAL RECUPERADA TRAS REVISAR LAS CARENCIAS DEL PRIMER RAZONAMIENTO\n${additionalEvidence}`;
+      if (v2Entry) contextText += `\n\nEVIDENCIA NORMATIVA ADICIONAL\n${additionalEvidence}`;
+      return true
+    };
+
     const maxRetries = 1;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const reasonerRequest: ReasonerRequest = {
         systemPrompt,
-        userPrompt: usedV2 && v1Candidates.length === 0 && supplementaryV1Candidates.length === 0
+        userPrompt: v2Entry
           ? `CONTEXTO RECUPERADO:\n${contextText}\n\nPregunta: ${message}`
           : attempt > 0 ? `Tu respuesta anterior fue vacía o un JSON inválido. Por favor, corrige el formato y responde OBLIGATORIAMENTE con el schema JSON provisto.\n\nPregunta: ${message}` : message,
         signal,
         timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
       };
+      traceCatalogRuntime(expedienteId, 'prompt-boundary', {
+        attempt,
+        answerCandidateIds: answerCandidates.map((candidate) => candidate.id),
+        sourceCountBeforeLlm: sources.length,
+        promptHasR2: /R-2/i.test(`${reasonerRequest.systemPrompt}\n${reasonerRequest.userPrompt}`),
+        promptHasArt130: /Art\.?\s*130/i.test(`${reasonerRequest.systemPrompt}\n${reasonerRequest.userPrompt}`),
+        identityId: normativeScope.identityId ?? null,
+        normativeReferences: normativeScope.normativeReferences ?? [],
+      })
 
       const provider = getReasonerProvider();
+      assertRuntimeBudgetAvailable(provider.name);
       const result = await provider.generate(reasonerRequest);
-
-      v2LLMTime = result.latencyMs;
-
-      // Note: Here we could add telemetry for result.inputTokens, result.outputTokens, etc.
+      const runtimeCall = recordRuntimeCall({
+        requestId,
+        provider: result.provider,
+        model: result.model,
+        callType: 'reasoning',
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        totalTokens: result.totalTokens,
+        cachedTokens: result.cachedInputTokens,
+        reasoningTokens: result.reasoningTokens,
+        retryAttempt: attempt,
+      });
+      recordLLMUsage({ operationType: 'chat_query', operationId: requestId, requestId, expedienteId, stage: v2Entry ? 'chat-v2' : 'chat', inferenceIndex: attempt + 1, provider: result.provider, model: result.model, inputTokens: result.inputTokens ?? null, cachedInputTokens: result.cachedInputTokens ?? null, outputTokens: result.outputTokens ?? null, reasoningTokens: result.reasoningTokens ?? null, totalTokens: result.totalTokens ?? null, durationMs: result.latencyMs ?? null, toolCallsRequested: 0, finishReason: null });
+      traceCatalogRuntime(expedienteId, 'runtime-call', runtimeCall as unknown as Record<string, unknown>);
       const rawContent = result.rawContent;
+      traceCatalogRuntime(expedienteId, 'model-raw', {
+        attempt,
+        rawLength: rawContent.length,
+        rawContent,
+      })
 
       if (!rawContent.trim()) {
         reasonerParseFailureCode = 'EMPTY_CONTENT';
@@ -1173,52 +2057,51 @@ ${usedV2 ? v2Citas : 'N/A'}
       }
 
       outputParsed = true;
-      validation = validateReasonerOutput(parsed, answerCandidates, applicability, parcelContext);
+      if (attempt === 0 && parsed.missingFacts.length > 0) {
+        const addedEvidence = await runDirectedNormativeRetrieval(parsed.missingFacts);
+        if (addedEvidence) {
+          reasonerRetryUsed = true;
+          continue;
+        }
+      }
+      validation = validateReasonerOutput(parsed, answerCandidates, applicability, parcelContext, undefined, v2Entry);
+      traceStage = 'post-validation';
+      traceCatalogRuntime(expedienteId, 'validation', {
+        validClaims: validation.validClaims.length,
+        invalidClaimCount: validation.invalidClaimCount,
+        invalidClaimReasonCounts: validation.invalidClaimReasonCounts,
+        citations: validation.citations,
+      })
 
       if (validation.validClaims.length === 0) {
-        const semanticFallbackEligible =
-          (questionIntent === 'parcel_parameter' && applicability.applicable.length === 0 && applicability.review.length > 0) ||
-          (questionIntent === 'parcel_viability' && applicability.canAnswerConditionalViability === true);
-        if (semanticFallbackEligible) {
-          semanticComposition = composeSemanticAnswer(
-            parsed,
-            [],
-            message,
-            questionIntent,
-            answerCandidates,
-            applicability,
-            buildDeterministicMissingFacts(applicability, parcelContext),
-            parcelContext
-          );
-          answer = semanticComposition.answer;
-          sources = mapVisibleSources(answerCandidates);
-        } else {
-          decision = 'abstain';
-          const failedApplicability: ApplicabilityResult = {
-            ...applicability,
-            missingData: [
-              ...applicability.missingData,
-              'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
-            ],
-            canAnswerConcreteParameters: false,
-          };
-          answer = buildSafeAbstention(failedApplicability, parcelContext, message);
-          applicability = failedApplicability;
-          sources = [];
-        }
+        // Structured reasoner output always stays on the direct beta path.
+        // With no mechanically valid claims there is no evidence to render,
+        // so return the minimal technical fallback rather than invoking the
+        // legacy semantic/template compositor.
+        decision = 'abstain';
+        traceStage = 'v2-technical-fallback';
+        const failedApplicability: ApplicabilityResult = {
+          ...applicability,
+          missingData: [
+            ...applicability.missingData,
+            'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
+          ],
+          canAnswerConcreteParameters: false,
+        };
+        answer = buildV2TechnicalFallback();
+        applicability = failedApplicability;
+        sources = [];
       } else {
-        semanticComposition = composeSemanticAnswer(
-          parsed,
-          validation.validClaims,
-          message,
-          questionIntent,
-          answerCandidates,
-          applicability,
-          buildDeterministicMissingFacts(applicability, parcelContext),
-          parcelContext
-        );
-        answer = semanticComposition.answer;
+        // Once the structured reasoner has produced mechanically valid claims,
+        // preserve them verbatim through the neutral renderer. The legacy
+        // semantic compositor is intentionally unreachable from this route.
+        traceStage = 'v2-neutral-composer';
+        answer = renderValidatedClaimsNeutral(validation.validClaims);
+        traceAnswerStage(requestId, expedienteId, 'v2-neutral-composer', 'v2-neutral-composer', answer, validation.validClaims.length);
       }
+
+      traceAnswerStage(requestId, expedienteId, 'post-validation', 'v2', answer, validation.validClaims.length);
+      traceStage = 'post-validation-marker';
 
       break;
     }
@@ -1238,6 +2121,10 @@ ${usedV2 ? v2Citas : 'N/A'}
       sources = [];
       validation = { validClaims: [], citations: [], invalidClaimCount: 0, invalidClaimReasonCounts: {} };
     }
+
+    answer = sanitizePresentationText(answer);
+
+    traceAnswerStage(requestId, expedienteId, 'before-http-response', 'final-response', answer, validation?.validClaims.length ?? 0);
 
     const contract = buildAnswerContract(
       answer,
@@ -1278,37 +2165,47 @@ ${usedV2 ? v2Citas : 'N/A'}
         renderedFromClaims: outputParsed && validation && validation.validClaims.length > 0,
         reasonerRetryUsed,
         reasonerParseFailureCode,
-        primaryClaimCount: semanticComposition?.primaryClaimCount ?? 0,
-        contextClaimCount: semanticComposition?.contextClaimCount ?? 0,
-        irrelevantClaimCount: semanticComposition?.irrelevantClaimCount ?? 0,
-        semanticFallbackUsed: semanticComposition?.semanticFallbackUsed ?? false,
-        semanticFallbackReason: semanticComposition?.semanticFallbackReason ?? null,
+        primaryClaimCount: 0,
+        contextClaimCount: 0,
+        irrelevantClaimCount: 0,
+        semanticFallbackUsed: false,
+        semanticFallbackReason: null,
       }
     );
 
-    return NextResponse.json({
+    return jsonWithRequestId(requestId, {
       answer,
       sources,
       safety: contract,
     });
   } catch (error) {
+    traceCatalogRuntime(tracedExpedienteId, 'route-error', {
+      stage: traceStage,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack ?? null : null,
+    });
     if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-      return NextResponse.json({ error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' }, { status: 504 });
+      return jsonWithRequestId(requestId, { error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' }, { status: 504 });
+    }
+    if (error instanceof Error && error.name === 'RuntimeBudgetExceeded') {
+      return jsonWithRequestId(requestId, { error: 'Presupuesto de IA agotado temporalmente.' }, { status: 429 });
     }
     console.error('ROUTE_TS_ERROR', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return jsonWithRequestId(requestId, { error: 'Internal Server Error' }, { status: 500 });
   } finally {
     releaseChatSlot?.();
   }
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = randomUUID();
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutResponse = new Promise<NextResponse>((resolve) => {
     timeoutId = setTimeout(() => {
       controller.abort();
-      resolve(NextResponse.json(
+      resolve(jsonWithRequestId(requestId,
         { error: 'La consulta ha tardado demasiado. Inténtelo de nuevo.' },
         { status: 504 }
       ));
@@ -1316,7 +2213,7 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    return await Promise.race([handlePost(req, controller.signal), timeoutResponse]);
+    return await Promise.race([handlePost(req, controller.signal, requestId), timeoutResponse]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }

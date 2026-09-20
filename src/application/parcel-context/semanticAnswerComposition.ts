@@ -272,6 +272,9 @@ export function humanizeMissingFacts(facts: string[]) {
 
   for (const fact of facts) {
     const normalizedFact = normalize(fact)
+    if (/missing_regime_validation/i.test(normalizedFact) || /r[eé]gimen\s+(?:urban[ií]stico|pormenorizado)/i.test(normalizedFact)) {
+      add('La acreditación de la ordenanza o zona normativa aplicable.')
+    }
     if (/clasificaci[oó]n|clase\s+de\s+suelo/.test(normalizedFact)) {
       add('La clasificación urbanística de la parcela.')
     }
@@ -290,15 +293,19 @@ export function humanizeMissingFacts(facts: string[]) {
     if (/ficha/.test(normalizedFact)) {
       add('La ficha urbanística correspondiente, si existe.')
     }
-    if (/evidencia\s+documental/.test(normalizedFact)) {
+    if (/evidencia\s+documental|documentary_evidence/.test(normalizedFact)) {
       add('Evidencia documental suficiente para confirmar la regla aplicable.')
     }
     if (
-      !/clasificaci[oó]n|clase\s+de\s+suelo|categor[ií]a|calificaci[oó]n|ordenanza|[aá]mbito|\bzona\b|ficha|evidencia\s+documental/.test(
+      !/clasificaci[oó]n|clase\s+de\s+suelo|categor[ií]a|calificaci[oó]n|ordenanza|[aá]mbito|\bzona\b|ficha|evidencia\s+documental|documentary_evidence|missing_regime_validation|r[eé]gimen\s+(?:urban[ií]stico|pormenorizado)/.test(
         normalizedFact
       )
     ) {
-      add(fact.trim().replace(/[.;:]+$/, '') + '.')
+      if (/^[A-Z0-9_]+$/.test(fact.trim())) {
+        add('La validación técnica del régimen urbanístico aplicable.')
+      } else {
+        add(fact.trim().replace(/[.;:]+$/, '') + '.')
+      }
     }
   }
 

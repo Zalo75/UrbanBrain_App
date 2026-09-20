@@ -87,4 +87,50 @@ describe('sourceClipboard', () => {
   it('returns null when no fragment can be copied', () => {
     expect(buildSourceCitationText({ fragmento_completo: 'null', fragmento_corto: ' undefined ' })).toBeNull()
   })
+
+  it('includes OCR derivation disclaimer when active view is ocr', () => {
+    const citation = buildSourceCitationText(
+      {
+        fragmento_completo: 'Texto original con erratas',
+        nombre_pdf: 'Normativa.pdf',
+      },
+      {
+        activeViewMode: 'ocr',
+        derivedText: 'Texto original corregido por OCR',
+      }
+    )
+    expect(citation).toContain('«Texto original corregido por OCR»')
+    expect(citation).toContain('Nota: (Texto derivado por corrección OCR sobre la fuente oficial acreditada)')
+    expect(citation).toContain('Fuente: Normativa.pdf')
+  })
+
+  it('includes assisted translation disclaimer with appropriate language', () => {
+    const citationCastellano = buildSourceCitationText(
+      {
+        fragmento_completo: 'Texto en galego',
+        nombre_pdf: 'PXOM.pdf',
+      },
+      {
+        activeViewMode: 'translation',
+        targetLanguage: 'es',
+        derivedText: 'Texto traducido al castellano',
+      }
+    )
+    expect(citationCastellano).toContain('«Texto traducido al castellano»')
+    expect(citationCastellano).toContain('Nota: (Traducción asistida al castellano sobre el original acreditado)')
+
+    const citationGallego = buildSourceCitationText(
+      {
+        fragmento_completo: 'Texto en castellano',
+        nombre_pdf: 'Normativa.pdf',
+      },
+      {
+        activeViewMode: 'translation',
+        targetLanguage: 'gl',
+        derivedText: 'Texto traducido ao galego',
+      }
+    )
+    expect(citationGallego).toContain('«Texto traducido ao galego»')
+    expect(citationGallego).toContain('Nota: (Traducción asistida al gallego sobre el original acreditado)')
+  })
 })

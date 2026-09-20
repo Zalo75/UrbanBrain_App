@@ -3,6 +3,10 @@ import type {
   OfficialSourceCheck,
   PlanningClassification,
   TerritorialResolution,
+  OrdinanceCandidate,
+  OrdinanceResolutionMetadata,
+  VisualResolutionState,
+  VisualZoningObservation,
 } from '@/domain/territorial-resolver/types'
 import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks'
 import {
@@ -34,6 +38,17 @@ export function municipalitiesForProvince(municipalities: Municipality[], provin
   return municipalities.filter((municipality) => municipality.provinceId === provinceId)
 }
 
+/** Builds a non-catalogue municipality identity only from an official detection. */
+export function municipalityFromDetection(
+  detected?: SmartCaseDetection['detected']
+): Municipality | undefined {
+  if (!detected?.municipalityCode || !detected.municipalityName) return undefined
+  return resolveMunicipalityIdentity({
+    municipality: detected.municipalityName,
+    municipalityCode: detected.municipalityCode,
+  })
+}
+
 export interface DetectionProgressItem {
   id: string
   label: string
@@ -57,12 +72,30 @@ export interface SmartCaseDetection {
     planeamiento?: string
     landClass?: LandClassValue
     urbanPlanningZone?: string
+    classificationCode?: string
+    categoryCode?: string
+    instrumentId?: string
+    detailedPlanningLayer?: string
     locationSource?: 'cadastral_reference' | 'address' | 'coordinates'
   }
   progress: DetectionProgressItem[]
   sourceChecks: OfficialSourceCheck[]
   affects: TerritorialResolution['affects']['detected']
   classificationResolution?: TerritorialResolution['planning']['classificationResolution']
+  ordinanceCandidates?: OrdinanceCandidate[]
+  ordinanceResolution?: OrdinanceResolutionMetadata
+  visualResolutionState?: VisualResolutionState
+  visualObservations?: VisualZoningObservation[]
+  visualExplanation?: string
+  visualCandidates?: OrdinanceCandidate[]
+  ordinanceCatalogOptions?: Array<{
+    identityId: string
+    code: string
+    label: string
+    status: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED'
+    semanticDimension: OrdinanceCandidate['semanticDimension']
+    normativeReferences: NonNullable<OrdinanceCandidate['normativeReferences']>
+  }>
 }
 
 export interface PreflightDetection extends SmartCaseDetection {
@@ -191,6 +224,10 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
               )
             ) || undefined
           : undefined,
+      classificationCode: classification?.code,
+      categoryCode: classification?.categoryCode,
+      instrumentId: result.planning.applicableInstruments?.find((item) => item.status === 'current')?.id,
+      detailedPlanningLayer: result.planning.resources?.detailedPlanningLayer,
       locationSource:
         result.inputMethod === 'cadastral_reference'
           ? 'cadastral_reference'
@@ -236,6 +273,12 @@ export function summarizeSmartCaseDetection(result: TerritorialResolution): Pref
     sourceChecks: checks,
     affects,
     classificationResolution,
+    ordinanceCandidates: result.planning.ordinanceCandidates ?? [],
+    ordinanceResolution: result.planning.ordinanceResolution,
+    visualResolutionState: result.planning.visualResolutionState,
+    visualObservations: result.planning.visualObservations,
+    visualExplanation: result.planning.visualExplanation,
+    visualCandidates: result.planning.visualCandidates,
     result,
   }
 }
@@ -257,8 +300,12 @@ export function validateSmartCaseSubmission(
   detection?: SmartCaseDetection
 ): string | null {
   const municipality = getMunicipalityById(input.municipalityId)
-  if (!municipality || !municipality.enabled) return 'municipality_invalid'
-  if (municipality.provinceId !== input.provinceId) return 'municipality_province_mismatch'
+  const discovered = !municipality &&
+    /^\d{5}$/.test(input.municipalityId) &&
+    getProvinceByMunicipalityIneCode(input.municipalityId)?.id === input.provinceId &&
+    detection?.detected.municipalityId === input.municipalityId
+  if ((!municipality || !municipality.enabled) && !discovered) return 'municipality_invalid'
+  if (municipality && municipality.provinceId !== input.provinceId) return 'municipality_province_mismatch'
 
   if (!detection) return null
   const expected = detection.detected

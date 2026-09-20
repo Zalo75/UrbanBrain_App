@@ -81,6 +81,23 @@ describe('buildTerritorialPresentation', () => {
     })
   })
 
+  it('presenta todas las ordenanzas del resultado raster multizona aunque no haya un área única', () => {
+    const presentation = buildTerritorialPresentation(
+      { province: 'Pontevedra', municipality: 'Vila de Cruces' },
+      detectedContext({
+        instrument: 'NNSS Vila de Cruces',
+        classification: { code: 'SU', label: 'Suelo urbano', sourceFeatureIds: [] },
+        areas: [],
+        ordinanceCandidates: [
+          { identity: 'Ordenanza 1 (Alta Densidad)', coverage: { percentage: 55 }, provenance: ['sheet:1'] },
+          { identity: 'Ordenanza 2 (Media Densidad)', coverage: { percentage: 45 }, provenance: ['sheet:1'] },
+        ],
+      })
+    )
+    expect(presentation.zone).toBe('Ordenanza 1 (Alta Densidad), Ordenanza 2 (Media Densidad)')
+    expect(presentation.urbanContextAttention).toBeNull()
+  })
+
   it('identifica específicamente la zona pendiente cuando planeamiento y clasificación existen', () => {
     expect(
       getUrbanContextAttention({

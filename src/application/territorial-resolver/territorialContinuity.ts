@@ -18,6 +18,75 @@ function comparable(value: string) {
     .trim()
 }
 
+function planningContextIdentities(planning: TerritorialResolution['planning']) {
+  return new Set(
+    [
+      planning.classification?.code,
+      planning.classification?.categoryCode,
+      planning.classification?.label,
+      planning.classification?.categoryLabel,
+      planning.urbanisticFacts?.classification.value?.code,
+      planning.urbanisticFacts?.classification.value?.label,
+      planning.urbanisticFacts?.category.value?.code,
+      planning.urbanisticFacts?.category.value?.label,
+    ]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .map(comparable),
+  )
+}
+
+function planningInstrumentIds(planning: TerritorialResolution['planning']) {
+  return new Set(
+    [
+      ...(planning.applicableInstruments ?? []).map((instrument) => instrument.id),
+      ...(planning.ordinanceCandidates ?? []).map((candidate) => candidate.instrumentId),
+      ...(planning.contextualCandidates ?? []).map((candidate) => candidate.instrumentId),
+    ].filter((value): value is string => Boolean(value?.trim())),
+  )
+}
+
+function sameMunicipality(current: TerritorialResolution, previous: TerritorialResolution) {
+  if (current.municipalityCode && previous.municipalityCode) {
+    return current.municipalityCode === previous.municipalityCode
+  }
+  if (current.municipality && previous.municipality) {
+    return comparable(current.municipality) === comparable(previous.municipality)
+  }
+  // A missing identifier is not evidence of a change. The parcel identity
+  // guard still applies, and the absence is surfaced through the source check.
+  return true
+}
+
+function samePlanningInstrument(
+  current: TerritorialResolution['planning'],
+  previous: TerritorialResolution['planning'],
+) {
+  const currentIds = planningInstrumentIds(current)
+  const previousIds = planningInstrumentIds(previous)
+  if (currentIds.size > 0 && previousIds.size > 0) {
+    return [...currentIds].some((id) => previousIds.has(id))
+  }
+  if (current.instrument && previous.instrument) {
+    return comparable(current.instrument) === comparable(previous.instrument)
+  }
+  return true
+}
+
+function planningEvidenceIsUseful(planning: TerritorialResolution['planning']) {
+  return Boolean(
+    (planning.ordinanceCandidates?.length ?? 0) > 0 ||
+      (planning.contextualCandidates?.length ?? 0) > 0 ||
+      planning.ordinanceResolution?.status === 'USER_CONFIRMED' ||
+      planning.ordinanceResolution?.status === 'RESOLVED' ||
+      planning.ordinanceResolution?.status === 'RESOLVED_WITH_PRECISION_WARNING' ||
+      (planning.applicableInstruments?.length ?? 0) > 0 ||
+      (planning.documents?.length ?? 0) > 0 ||
+      Boolean(planning.classification) ||
+      planning.evidence.length > 0 ||
+      planning.status === 'determined',
+  )
+}
+
 function normalizeReference(value: string | null | undefined) {
   return value?.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 14) || undefined
 }
@@ -41,7 +110,8 @@ export function allSourceChecks(result: TerritorialResolution): OfficialSourceCh
 }
 
 export function hasTransientOfficialFailure(result: TerritorialResolution) {
-  return allSourceChecks(result).some((check) => TRANSIENT_STATUSES.has(check.status))
+  return allSourceChecks(result).some((check) => TRANSIENT_STATUSES.has(check.status)) ||
+    Boolean(result.planning.cartographicSourceChecks?.some(check => check.status === 'unavailable'))
 }
 
 export function isUsableOfficialContext(result: TerritorialResolution | undefined): boolean {
@@ -103,6 +173,132 @@ export function targetsSameParcel(
   return false
 }
 
+/**
+ * A recalculation may return the same detailed identities with a degraded
+ * semantic label (for example a VLM classifying both a category and an
+ * ordinance as `category`).  When that is the only change, retain the prior
+ * detailed determination instead of replacing a useful result with an empty
+ * candidate set.  A genuinely different set is left untouched so that real
+ * contradictions are never hidden.
+ */
+function preservePriorDetailedCandidates(
+  current: TerritorialResolution,
+  previous: TerritorialResolution | undefined,
+  sameParcel: boolean,
+) {
+  if (!sameParcel || !previous) return
+  const currentInstrumentIds = new Set(
+    (current.planning.applicableInstruments ?? []).map((instrument) => instrument.id).filter(Boolean),
+  )
+  const previousInstrumentIds = new Set(
+    (previous.planning.applicableInstruments ?? []).map((instrument) => instrument.id).filter(Boolean),
+  )
+  if (
+    currentInstrumentIds.size > 0 &&
+    previousInstrumentIds.size > 0 &&
+    ![...currentInstrumentIds].some((instrumentId) => previousInstrumentIds.has(instrumentId))
+  ) return
+  const previousCandidates = previous.planning.ordinanceCandidates ?? []
+  const currentCandidates = current.planning.ordinanceCandidates ?? []
+  const currentContextual = current.planning.contextualCandidates ?? []
+  if (previousCandidates.length === 0 || currentCandidates.length > 0 || currentContextual.length === 0) return
+
+  const previousIdentities = new Set(previousCandidates.map((candidate) => comparable(candidate.identity)))
+  const semanticDowngrade = currentContextual.some((candidate) => previousIdentities.has(comparable(candidate.identity)))
+  if (!semanticDowngrade) return
+  const contextIdentities = planningContextIdentities(current.planning)
+  const unexplainedContextual = currentContextual.some(
+    (candidate) =>
+      !previousIdentities.has(comparable(candidate.identity)) &&
+      !contextIdentities.has(comparable(candidate.identity)),
+  )
+  if (unexplainedContextual) return
+
+  const contextualByIdentity = new Map(
+    [...(previous.planning.contextualCandidates ?? []), ...currentContextual]
+      .map((candidate) => [comparable(candidate.identity), candidate] as const)
+  )
+  current.planning = {
+    ...current.planning,
+    ordinanceCandidates: previousCandidates,
+    contextualCandidates: [...contextualByIdentity.values()],
+    ordinanceResolutionStatus:
+      previous.planning.ordinanceResolutionStatus ?? current.planning.ordinanceResolutionStatus,
+    ordinanceResolution:
+      previous.planning.ordinanceResolution ?? current.planning.ordinanceResolution,
+  }
+}
+
+/**
+ * Preserve the last useful planning result when an external zoning source
+ * fails transiently. This runs before persistence, so the UI and the raw
+ * detection never receive a destructive empty replacement. A normal empty
+ * result (without a transient source check) intentionally does not enter this
+ * path.
+ */
+function preservePriorPlanningAfterTransientFailure(
+  current: TerritorialResolution,
+  previous: TerritorialResolution | undefined,
+  sameParcel: boolean,
+) {
+  if (!sameParcel || !previous || !sameMunicipality(current, previous)) return false
+  if (!samePlanningInstrument(current.planning, previous.planning)) return false
+  const planningFailed = Boolean(current.planning.sourceChecks?.some((check) =>
+    TRANSIENT_STATUSES.has(check.status),
+  ) || current.planning.cartographicSourceChecks?.some(check => check.status === 'unavailable'))
+  if (!planningFailed || !planningEvidenceIsUseful(previous.planning)) return false
+
+  const currentCandidates = current.planning.ordinanceCandidates ?? []
+  const previousCandidates = previous.planning.ordinanceCandidates ?? []
+  const currentContextual = current.planning.contextualCandidates ?? []
+  const previousContextual = previous.planning.contextualCandidates ?? []
+  // A non-empty current result is a valid fresh determination and therefore
+  // outranks the previous one. Likewise, never overwrite a fresh user
+  // confirmation with a stale automatic result.
+  if (
+    currentCandidates.length > 0 ||
+    current.planning.ordinanceResolution?.status === 'USER_CONFIRMED'
+  ) return false
+  const contextualByIdentity = new Map(
+    [...previousContextual, ...currentContextual]
+      .map((candidate) => [comparable(candidate.identity), candidate] as const),
+  )
+
+  current.planning = {
+    ...current.planning,
+    status: 'partial',
+    evidence: [...current.planning.evidence, ...previous.planning.evidence],
+    warnings: [
+      ...current.planning.warnings,
+      ...previous.planning.warnings,
+      {
+        code: 'planning_previous_context_preserved',
+        message:
+          'La fuente de planeamiento no está disponible temporalmente; se conserva la última evidencia compatible.',
+      },
+    ],
+    applicableInstruments:
+      current.planning.applicableInstruments?.length
+        ? current.planning.applicableInstruments
+        : previous.planning.applicableInstruments,
+    cataloguedInstruments:
+      current.planning.cataloguedInstruments?.length
+        ? current.planning.cataloguedInstruments
+        : previous.planning.cataloguedInstruments,
+    documents:
+      current.planning.documents?.length ? current.planning.documents : previous.planning.documents,
+    ordinanceCandidates: currentCandidates.length ? currentCandidates : previousCandidates,
+    contextualCandidates: [...contextualByIdentity.values()],
+    ordinanceResolutionStatus:
+      previous.planning.ordinanceResolutionStatus ?? current.planning.ordinanceResolutionStatus,
+    ordinanceResolution:
+      previous.planning.ordinanceResolution ?? current.planning.ordinanceResolution,
+    canAnswerConcreteParameters:
+      current.planning.canAnswerConcreteParameters ?? previous.planning.canAnswerConcreteParameters,
+  }
+  return true
+}
+
 export function attachContinuity(
   current: TerritorialResolution,
   input: ResolveParcelLocationInput,
@@ -112,6 +308,7 @@ export function attachContinuity(
   const previous = effectiveOfficialContext(previousRaw)
   const previousRawResult = previousRaw as TerritorialResolution | undefined
   const sameParcel = Boolean(previous && targetsSameParcel(input, previous))
+  const preservedPlanning = preservePriorPlanningAfterTransientFailure(current, previous, sameParcel)
   const useCurrent = isUsableOfficialContext(current)
   const usePrevious = Boolean(
     !useCurrent && previous && sameParcel && hasTransientOfficialFailure(current)
@@ -125,8 +322,10 @@ export function attachContinuity(
     const locationIncomplete = transient(current.sourceChecks)
     const planningIncomplete = transient(current.planning.sourceChecks)
     const affectsIncomplete = transient(current.affects.sourceChecks)
+    const planningCanUsePrevious =
+      planningIncomplete && sameMunicipality(current, previous) && samePlanningInstrument(current.planning, previous.planning)
 
-    if (locationIncomplete || planningIncomplete || affectsIncomplete) {
+    if (locationIncomplete || planningCanUsePrevious || affectsIncomplete) {
       usesPreviousComponent = true
       effective = {
         ...current,
@@ -139,7 +338,7 @@ export function attachContinuity(
         provinceCode: current.provinceCode ?? previous.provinceCode,
         coordinates: current.coordinates ?? previous.coordinates,
         parcelGeometry: current.parcelGeometry ?? previous.parcelGeometry,
-        planning: planningIncomplete ? previous.planning : current.planning,
+        planning: current.planning,
         affects: affectsIncomplete ? previous.affects : current.affects,
         evidence: [...current.evidence, ...previous.evidence],
         resolvedAt: previous.resolvedAt,
@@ -147,6 +346,8 @@ export function attachContinuity(
       }
     }
   }
+
+  preservePriorDetailedCandidates(current, previous, sameParcel)
 
   let manualContext = manualContextArg ?? (sameParcel ? previousRawResult?.continuity?.manualContext : undefined)
   const currentPlanningHasTransientFailure = current.planning.sourceChecks?.some(
@@ -164,7 +365,7 @@ export function attachContinuity(
   current.continuity = {
     lastOfficialContext: previous,
     effectiveOfficialContext: effective,
-    usingPreviousOfficialContext: usesPreviousComponent,
+    usingPreviousOfficialContext: usesPreviousComponent || preservedPlanning,
     sameParcelAsPrevious: sameParcel,
     manualContext,
   }

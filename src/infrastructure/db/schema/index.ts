@@ -468,6 +468,22 @@ export const contextDetections = pgTable('context_detections', {
   detectedAt: timestamp('detected_at').defaultNow().notNull(),
 });
 
+export const hasAlignments = pgTable('has_alignments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expedienteId: uuid('expediente_id').references(() => expedientes.id, { onDelete: 'cascade' }).notNull(),
+  cadastralReference: text('cadastral_reference').notNull(),
+  historicalViewId: text('historical_view_id').notNull(),
+  historicalProvenance: jsonb('historical_provenance').notNull(),
+  modernViewId: text('modern_view_id').notNull(),
+  modernProvenance: jsonb('modern_provenance').notNull(),
+  bbox: jsonb('bbox').notNull(),
+  crs: text('crs').notNull(),
+  transform: jsonb('transform').notNull(),
+  nativeDimensions: jsonb('native_dimensions').notNull(),
+  status: text('status').default('approved').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // ==========================================
 // FASE 2A: Corpus Normativo V2 (Piloto)
 // ==========================================
@@ -727,3 +743,38 @@ export const factualShadowEvaluations = pgTable('factual_shadow_evaluations', {
     expedienteIdIdx: index('factual_shadow_eval_exp_id_idx').on(table.expedienteId),
   }
 });
+
+export const sourceTransformations = pgTable(
+  'source_transformations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    expedienteId: uuid('expediente_id')
+      .references(() => expedientes.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceRef: text('source_ref').notNull(),
+    sourceHash: text('source_hash').notNull(),
+    derivationType: text('derivation_type').notNull(),
+    sourceLanguage: text('source_language').default('auto').notNull(),
+    targetLanguage: text('target_language'),
+    translationSource: text('translation_source'),
+    inputDerivationId: uuid('input_derivation_id'),
+    inputDerivationHash: text('input_derivation_hash'),
+    derivedText: text('derived_text').notNull(),
+    model: text('model').notNull(),
+    provider: text('provider').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    lookupIdx: index('source_transformations_lookup_idx').on(
+      table.expedienteId,
+      table.sourceRef,
+      table.sourceHash,
+      table.derivationType,
+      table.targetLanguage
+    ),
+    refHashIdx: index('source_transformations_ref_hash_idx').on(
+      table.sourceRef,
+      table.sourceHash
+    ),
+  })
+);

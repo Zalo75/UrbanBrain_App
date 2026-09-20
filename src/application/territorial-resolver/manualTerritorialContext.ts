@@ -71,7 +71,19 @@ export function applyManualFactDecisions(
   decisions: NonNullable<ManualTerritorialContext['urbanisticFacts']>
   effective: UrbanisticRegimeFacts
 } {
-  const decisions = manualContext?.urbanisticFacts ?? {}
+  const decisions = { ...manualContext?.urbanisticFacts }
+  for (const dimension of ['classification', 'category'] as const) {
+    const determination = manualContext?.[dimension === 'classification' ? 'classificationDetermination' : 'categoryDetermination']?.technician
+    if (!decisions[dimension] && determination?.value) {
+      decisions[dimension] = {
+        origin: 'technician_selection', value: { code: determination.value, label: determination.value },
+        reason: 'Explicit technician determination',
+        recordedAt: determination.recordedAt ?? manualContext!.recordedAt,
+        recordedBy: determination.recordedBy ?? '', verification: determination.verification,
+        validatedAt: determination.validatedAt, validatedBy: determination.validatedBy,
+      }
+    }
+  }
   const hasV2Decisions = Boolean(
     decisions.classification || decisions.category || decisions.consolidation
   )

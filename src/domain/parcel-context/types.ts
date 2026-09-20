@@ -1,8 +1,10 @@
+import type { ParcelAccounting } from '@/domain/territorial-resolver/parcelAccounting'
 import type {
   ActionAreaSelection,
   ParcelGeometry,
   TerritorialEvidence,
   UrbanisticRegimeFacts,
+  OrdinanceCandidate,
 } from '@/domain/territorial-resolver/types'
 
 export type ParcelContextSource =
@@ -38,6 +40,7 @@ export interface ParcelConflict {
 }
 
 export interface NormalizedParcelContext {
+  coverage?: ParcelAccounting
   cadastralReference?: ParcelContextField<string>
   address?: ParcelContextField<string>
   coordinates?: ParcelContextField<ParcelCoordinates>
@@ -45,6 +48,7 @@ export interface NormalizedParcelContext {
   province?: ParcelContextField<{ id?: string; name: string }>
   landClass?: ParcelContextField<string>
   qualification?: ParcelContextField<string>
+  ordinanceCandidates?: OrdinanceCandidate[]
   planningArea?: ParcelContextField<string>
   planningInstrument?: ParcelContextField<string>
   validity?: ParcelContextField<string>
@@ -119,6 +123,7 @@ export interface ParcelRegimeIdentityScope {
     intersectionAreaSquareMetres?: number
   }
   qualification?: string
+  ordinances?: OrdinanceCandidate[]
   planningArea?: string
   instrumentId?: string
   status: ParcelRegimeIdentityStatus
@@ -147,6 +152,8 @@ export interface ParcelRegimeIdentity {
 
 export interface NormativeCandidate {
   id: string
+  /** Stable evidence identifiers accepted by the accredited-reality branch. */
+  sourceAliases?: string[]
   content: string
   municipalityName?: string | null
   documentName?: string | null
@@ -161,6 +168,12 @@ export interface NormativeCandidate {
   landClass?: string | null
   planningArea?: string | null
   parentInstrument?: string | null
+  /** Whether retrieval was filtered to the canonical ordinance or only to its documents. */
+  evidenceSpecificity?: 'SPECIFIC' | 'NON_SPECIFIC'
+  identityId?: string | null
+  normativeReferences?: Array<{ documentId: string; chunkIds: string[]; article?: string; relation: 'defines' | 'regulates' | 'mentions'; sourceId: string }>
+  catalogStatus?: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED' | null
+  trustLevel?: 'OFFICIAL_SCOPED_PROVISIONAL' | string | null
 }
 
 export interface ApplicabilityResult {

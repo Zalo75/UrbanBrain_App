@@ -24,6 +24,19 @@ describe('parseCitations', () => {
     ])
   })
 
+  it('tokenizes stableSourceRef citations for instrument-document, candidate, and planning', () => {
+    const content = 'Suelo rural [Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC]. Altura 7m [Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008]. Instrumento [Fuente planning:evidence].'
+    expect(parseCitations(content)).toEqual([
+      { type: 'text', value: 'Suelo rural ' },
+      { type: 'citation', sourceRef: 'candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC', originalText: '[Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC]' },
+      { type: 'text', value: '. Altura 7m ' },
+      { type: 'citation', sourceRef: 'instrument-document:46725:chunk:3d2d66d94d4c5e55_00008', originalText: '[Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008]' },
+      { type: 'text', value: '. Instrumento ' },
+      { type: 'citation', sourceRef: 'planning:evidence', originalText: '[Fuente planning:evidence]' },
+      { type: 'text', value: '.' },
+    ])
+  })
+
   it('preserves malformed citations and unrelated bracketed content literally', () => {
     const content = '[Fuente 0] [Fuente -1] [Fuente uno] [Documento 1] [Fuente 2'
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TerritorialResolution } from '@/domain/territorial-resolver/types';
+import type { TerritorialDetectionSummary } from '@/application/parcel-context/normalizeParcelContext';
 import { buildTerritorialContextView } from './territorialContextView';
 
 const base: TerritorialResolution = {
@@ -31,6 +32,24 @@ const base: TerritorialResolution = {
 describe('buildTerritorialContextView', () => {
   it('no rompe la ficha ante una detección histórica con otro formato', () => {
     expect(buildTerritorialContextView({ status: 'legacy', summary: {} })).toBeNull();
+  });
+
+  it('proyecta la clasificación operativa canónica aunque falte candidateId', () => {
+    const summary: TerritorialDetectionSummary = {
+      schemaVersion: 1,
+      landClass: 'urbanizable',
+      classificationResolution: {
+        status: 'review_required', nextAction: 'manual_selection', candidates: [], discrepancies: [],
+        reviewReasons: ['insufficient_geometry'], sourceChecks: [], officialLinks: [], evidence: [],
+        finalSelection: { origin: 'manual', operationalValue: 'urbanizable', areaNames: ['SURT1'], technicianValidated: false },
+      },
+      planningArea: 'SURT1', planningApplicabilityStatus: 'partial', locationStatus: 'confirmed', locationConfidence: 'high',
+      coverage: { status: 'unresolved', portions: [], analysedSurfaceSquareMetres: 100, coveredSurfaceSquareMetres: 0, unresolvedSurfaceSquareMetres: 100, toleranceSquareMetres: 1, overlapSurfaceSquareMetres: 0, reasons: [] },
+      resolvedAt: base.resolvedAt,
+    }
+    const view = buildTerritorialContextView(summary)
+    expect(view?.classification).toMatchObject({ code: 'urbanizable', label: 'urbanizable' })
+    expect(view?.areas).toEqual(['SURT1'])
   });
 
   it('presenta como conflictiva una discrepancia entre punto y parcela', () => {
@@ -162,5 +181,70 @@ describe('buildTerritorialContextView', () => {
 
     expect(unverified?.technicallyReviewed).toBe(false);
     expect(reviewed?.technicallyReviewed).toBe(true);
+  });
+
+  it('expone USER_CONFIRMED al recargar una selección de candidata existente', () => {
+    const view = buildTerritorialContextView({
+      ...base,
+      status: 'unresolved',
+      cadastralReference: '1234567NH4913S',
+      municipality: 'Betanzos',
+      municipalityCode: '15009',
+      planning: {
+        status: 'not_determined',
+        evidence: [],
+        warnings: [],
+      },
+      continuity: {
+        usingPreviousOfficialContext: true,
+        sameParcelAsPrevious: true,
+        effectiveOfficialContext: {
+          ...base,
+          cadastralReference: '1234567NH4913S',
+          municipality: 'Betanzos',
+          municipalityCode: '15009',
+          planning: {
+            status: 'determined',
+            evidence: [],
+            warnings: [],
+            ordinanceCandidates: [{
+              identity: 'R-2',
+              semanticDimension: 'ordinance',
+              provenance: ['official:wms'],
+            }],
+            ordinanceResolution: {
+              status: 'REVIEW_REQUIRED',
+              confidence: 'high',
+              provenance: ['official:wms'],
+            },
+          },
+        },
+        manualContext: {
+          provenance: 'manual',
+          verification: 'unverified',
+          recordedAt: '2026-07-14T12:00:00.000Z',
+          ordinance: 'R-2',
+          ordinanceDetermination: {
+            technician: {
+              value: 'R-2',
+              origin: 'technician_selection',
+              source: 'manual',
+              verification: 'unverified',
+              recordedAt: '2026-07-14T12:00:00.000Z',
+              recordedBy: 'user-a',
+            },
+          },
+        },
+      },
+    });
+
+    expect(view?.ordinanceResolution).toMatchObject({
+      status: 'USER_CONFIRMED',
+      confirmationSource: 'user',
+      confirmedByUser: true,
+      provenance: ['official:wms'],
+    });
+    expect(view?.ordinanceCandidates).toHaveLength(1);
+    expect(view?.ordinanceCandidates?.[0]).toMatchObject({ identity: 'R-2' });
   });
 });

@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { acquireChatSlot, CHAT_RATE_LIMIT, resetChatRequestGuardForTests } from './chatRequestGuard'
+import { acquireChatSlot, CHAT_RATE_LIMIT, CHAT_REQUEST_TIMEOUT_MS, resetChatRequestGuardForTests } from './chatRequestGuard'
 
 afterEach(resetChatRequestGuardForTests)
 
 describe('chat request guard', () => {
+  it('keeps the global chat budget at 120 seconds for the cartographic experiment', () => {
+    expect(CHAT_REQUEST_TIMEOUT_MS).toBe(120_000)
+  })
+
   it('rejects a second concurrent request for the same user', () => {
     const first = acquireChatSlot('user-a', 1_000)
     expect(first.ok).toBe(true)

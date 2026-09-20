@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedParcelContext } from '@/domain/parcel-context/types'
 import type { PlanningNormativeDocumentType } from '@/domain/planning-knowledge/types'
+import type { TerritorialDetectionSummary } from './normalizeParcelContext'
 import {
   buildNormativeSearchScope,
   canSearchNormativeInformation,
@@ -41,7 +42,7 @@ function context(
   }
 }
 
-function rawPlanning(
+function canonicalDetection(
   municipality: string,
   municipalityCode: string,
   documents: Array<{
@@ -51,15 +52,16 @@ function rawPlanning(
     sourceUrl: string
     binding: 'general' | 'area_specific' | 'unverified_for_detected_area'
     documentType?: PlanningNormativeDocumentType
-  }>
-) {
+  }>,
+  overrides: Partial<TerritorialDetectionSummary> = {}
+) : TerritorialDetectionSummary {
   return {
-    status: 'confirmed',
-    municipality,
+    schemaVersion: 1,
+    municipalityName: municipality,
     municipalityCode,
-    planning: {
-      status: 'determined',
-      applicableInstruments: [
+    planningStatus: 'vigente',
+    planningApplicabilityStatus: 'determined',
+    applicableInstruments: [
         {
           id: 'instrument-current',
           name: 'Instrumento vigente',
@@ -68,23 +70,17 @@ function rawPlanning(
           sourceUrl: 'https://example.invalid/instrument',
         },
       ],
-      documents,
-      evidence: [],
-      warnings: [],
-    },
-    affects: {
-      analysisGeometry: 'parcel',
-      detected: [],
-      canRuleOutUndetectedAffects: false,
-      warnings: [],
-    },
-    candidates: [],
-    evidence: [],
+    planningDocuments: documents,
+    planningEvidence: [],
+    planningWarnings: [],
     warnings: [],
     conflicts: [],
-    confidence: 'high',
+    affects: { analysisGeometry: 'parcel', detected: [], warnings: [], canRuleOutUndetectedAffects: false },
+    locationStatus: 'confirmed',
+    locationConfidence: 'high',
     inputMethod: 'cadastral_reference',
     resolvedAt: '2026-07-29T10:00:00.000Z',
+    ...overrides,
   }
 }
 
@@ -93,7 +89,7 @@ describe('buildNormativeSearchScope', () => {
     const scope = buildNormativeSearchScope({
       context: context('Municipio genérico', '15001', { area: 'Ámbito 1' }),
       municipioCodigo: '15001',
-      rawDetection: rawPlanning('Municipio genérico', '15001', [
+      detected: canonicalDetection('Municipio genérico', '15001', [
         {
           id: 'ordinance.pdf',
           instrumentId: 'instrument-current',
@@ -172,7 +168,7 @@ describe('buildNormativeSearchScope', () => {
     const scope = buildNormativeSearchScope({
       context: context('Culleredo', '15031', { area: 'LEDOÑO' }),
       municipioCodigo: '15031',
-      rawDetection: rawPlanning('Culleredo', '15031', []),
+      detected: canonicalDetection('Culleredo', '15031', []),
     })
 
     expect(scope).toMatchObject({
@@ -191,13 +187,7 @@ describe('buildNormativeSearchScope', () => {
         source: 'manual',
       }),
       municipioCodigo: '15009',
-      detected: {
-        manualContext: {
-          ordinance: 'Ordenanza R4',
-          verification: 'technician_validated',
-        },
-      },
-      rawDetection: rawPlanning('Betanzos', '15009', [
+      detected: canonicalDetection('Betanzos', '15009', [
         {
           id: '0060no011.pdf',
           instrumentId: 'instrument-current',
@@ -205,7 +195,7 @@ describe('buildNormativeSearchScope', () => {
           sourceUrl: 'https://example.invalid/0060no011.pdf',
           binding: 'general',
         },
-      ]),
+      ], { manualContext: { ordinance: 'Ordenanza R4', verification: 'technician_validated' } }),
     })
 
     expect(scope).toMatchObject({
@@ -221,7 +211,7 @@ describe('buildNormativeSearchScope', () => {
     const scope = buildNormativeSearchScope({
       context: context('Sada', '15075', { area: 'APT-1' }),
       municipioCodigo: '15075',
-      rawDetection: rawPlanning('Sada', '15075', [
+      detected: canonicalDetection('Sada', '15075', [
         {
           id: 'apt-1.pdf',
           instrumentId: 'instrument-current',
@@ -244,7 +234,7 @@ describe('buildNormativeSearchScope', () => {
     const scope = buildNormativeSearchScope({
       context: context(name, code),
       municipioCodigo: code,
-      rawDetection: rawPlanning(name, code, []),
+      detected: canonicalDetection(name, code, []),
     })
 
     expect(scope.confidence).toBe('unknown')
@@ -268,5 +258,56 @@ describe('buildNormativeSearchScope', () => {
 
     expect(scope.ordinance).toBeUndefined()
     expect(canSearchNormativeInformation(scope)).toBe(false)
+  })
+
+  it('usa una candidata oficial confirmada por el usuario sin tratarla como texto manual pendiente', () => {
+    const scope = buildNormativeSearchScope({
+      context: context('Teo', '15082'),
+      municipioCodigo: '15082',
+      detected: canonicalDetection('Teo', '15082', [
+        {
+          id: 'r2.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Ordenanza R-2',
+          sourceUrl: 'https://example.invalid/r2.pdf',
+          binding: 'general',
+          documentType: 'ordinance',
+        },
+      ], {
+        ordinanceResolution: { status: 'USER_CONFIRMED', identity: { code: 'R-2', label: 'R-2' } },
+        manualContext: { ordinance: 'R-2', verification: 'unverified', ordinanceDetermination: { technician: { value: 'R-2', origin: 'technician_selection', source: 'manual', verification: 'unverified' } } },
+      }),
+    })
+
+    expect(scope).toMatchObject({
+      ordinance: 'R-2',
+      confidence: 'confirmed',
+      documentNames: ['r2.pdf'],
+    })
+    expect(canSearchNormativeInformation(scope)).toBe(true)
+  })
+
+  it('recupera una confirmación legacy desde el contexto normalizado', () => {
+    const scope = buildNormativeSearchScope({
+      context: context('Teo', '15082', { ordinance: 'R-2', source: 'manual' }),
+      municipioCodigo: '15082',
+      detected: canonicalDetection('Teo', '15082', [
+        {
+          id: 'r2.pdf',
+          instrumentId: 'instrument-current',
+          title: 'Ordenanza R-2',
+          sourceUrl: 'https://example.invalid/r2.pdf',
+          binding: 'general',
+          documentType: 'ordinance',
+        },
+      ]),
+    })
+
+    expect(scope).toMatchObject({
+      ordinance: 'R-2',
+      confidence: 'confirmed',
+      documentNames: ['r2.pdf'],
+    })
+    expect(canSearchNormativeInformation(scope)).toBe(true)
   })
 })

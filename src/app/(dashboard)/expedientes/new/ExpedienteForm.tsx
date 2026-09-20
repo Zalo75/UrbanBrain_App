@@ -14,6 +14,7 @@ import { AvailableZonesSummary } from '@/components/territorial/AvailableZonesSu
 import { GeometricAuditAccordion } from '@/components/territorial/GeometricAuditAccordion'
 import { MapcentricWorkspace } from '@/components/territorial/MapcentricWorkspace'
 import { ParcelMap } from '@/components/maps/ParcelMap'
+import { PordPlanViewer } from '@/components/territorial/PordPlanViewer'
 import { clearAutomaticClassificationCandidate } from '@/application/territorial-resolver/actionAreaSelection'
 import type { Municipality, Province } from '@/shared/territory'
 import type { ClassificationCandidate } from '@/domain/territorial-resolver/types'
@@ -29,6 +30,7 @@ import {
   landClassFromCandidate,
   planningZoneNameFromCandidate,
   municipalitiesForProvince,
+  municipalityFromDetection,
   type DetectionProgressItem,
   type SmartCaseDetection,
 } from './smartCaseDetection'
@@ -146,6 +148,8 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   const [planeamiento, setPlaneamiento] = useState('')
   const [landClass, setLandClass] = useState('')
   const [urbanPlanningZone, setUrbanPlanningZone] = useState('')
+  const [ordinanceIdentity, setOrdinanceIdentity] = useState('')
+  const [ordinanceSelectionTouched, setOrdinanceSelectionTouched] = useState(false)
   const [selectedClassificationCandidateId, setSelectedClassificationCandidateId] = useState('')
   const [exploredCandidateId, setExploredCandidateId] = useState('')
   const [classificationSelectionReason, setClassificationSelectionReason] = useState('')
@@ -172,12 +176,36 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
   }, [detectionInvalidated])
   const [createState, createAction, isCreating] = useActionState(guardedCreateExpediente, initialCreateExpedienteState)
 
+  const detectedMunicipality = municipalityFromDetection(detection?.detected)
+  const effectiveMunicipalities = useMemo(() => {
+    if (!detectedMunicipality || municipalities.some((municipality) => municipality.id === detectedMunicipality.id)) return municipalities
+    return [...municipalities, detectedMunicipality]
+  }, [detectedMunicipality, municipalities])
   const availableMunicipalities = useMemo(
-    () => municipalitiesForProvince(municipalities, selectedProvince),
-    [municipalities, selectedProvince]
+    () => municipalitiesForProvince(effectiveMunicipalities, selectedProvince),
+    [effectiveMunicipalities, selectedProvince]
   )
-  const selectedMunicipalityData = municipalities.find((municipality) => municipality.id === selectedMunicipality)
+  const selectedMunicipalityData = effectiveMunicipalities.find((municipality) => municipality.id === selectedMunicipality)
   const planningOptions = planningOptionsByMunicipality[selectedMunicipality] ?? []
+  const ordinanceOptions = useMemo(() => {
+    return (detection?.ordinanceCatalogOptions ?? []).filter(option => option.status === 'ACCEPTED')
+  }, [detection?.ordinanceCatalogOptions])
+
+  const visualProposals = useMemo(() => {
+    const instrumentId = detection?.detected.instrumentId
+    if (!instrumentId) return []
+    return (detection.visualCandidates ?? []).filter((candidate) =>
+      candidate.instrumentId === instrumentId &&
+      Boolean(candidate.identityId) &&
+      (candidate.semanticDimension === 'ordinance' || candidate.semanticDimension === 'zoning')
+    )
+  }, [detection?.detected.instrumentId, detection?.visualCandidates])
+  const strongVisualProposal = useMemo(() => {
+    const strong = visualProposals.filter((candidate) =>
+      candidate.confidence === 'high' && candidate.catalogStatus === 'ACCEPTED'
+    )
+    return strong.length === 1 ? strong[0] : undefined
+  }, [visualProposals])
   const automaticClassificationCandidate = clearAutomaticClassificationCandidate(
     detection?.classificationResolution
   )
@@ -209,6 +237,14 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     if (!isCreating) submitLock.current = false
   }, [isCreating])
 
+  useEffect(() => {
+    // Preselection is deliberately local to the creation form. It is still
+    // a proposal and only the final technician action persists confirmation.
+    if (!ordinanceSelectionTouched && !ordinanceIdentity && strongVisualProposal) {
+      setOrdinanceIdentity(strongVisualProposal.identity)
+    }
+  }, [ordinanceIdentity, ordinanceSelectionTouched, strongVisualProposal])
+
   useEffect(() => () => {
     traceTerritorialDetection('form_unmounted', {
       requestId: latestDetectionRequest.current,
@@ -237,6 +273,8 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     setPlaneamiento('')
     setLandClass('')
     setUrbanPlanningZone('')
+    setOrdinanceIdentity('')
+    setOrdinanceSelectionTouched(false)
     setSelectedClassificationCandidateId('')
     setExploredCandidateId('')
     setClassificationSelectionReason('')
@@ -320,6 +358,8 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
       })
       setDetection(result.detection)
       setDetectionId(result.detectionId)
+      setOrdinanceIdentity('')
+      setOrdinanceSelectionTouched(false)
       setDetectionInvalidated(false)
       setTerritorialInputSource(values.locationSource ?? source)
       if (values.cadastralReference) setRefCatastral(values.cadastralReference)
@@ -378,9 +418,10 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
     setLandClass(candidateLandClass ?? '')
     setUrbanPlanningZone(planningZoneNameFromCandidate(candidate))
     setClassificationSelectionReason('')
-    setClassificationManuallyOverridden(
-      automaticClassificationCandidate?.id !== candidate.id
-    )
+    // Choosing one of the candidates already detected by UrbanBrain is an
+    // evidence-backed scope choice, not a manual correction.  A justification
+    // is requested only after the user edits the detected values themselves.
+    setClassificationManuallyOverridden(false)
     if (!candidateLandClass) {
       toast.info(
         'El código oficial se conserva como evidencia, pero no tiene una equivalencia automática segura. Seleccione manualmente el valor operativo.'
@@ -626,7 +667,7 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                     </button>
                   )}
                 </div>
-              ) : selectedClassificationCandidateId === exploredCandidateId ? (
+              ) : selectedClassificationCandidateId === exploredCandidateId && detection.classificationResolution.status === 'clear' ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" data-testid="auto-detected-badge">
                   <Sparkles className="h-3 w-3" />
                   Zona de trabajo
@@ -677,12 +718,128 @@ export function ExpedienteForm({ provinces, municipalities }: { provinces: Provi
                   required
                 />
               </div>
-            )}
+          )}
         </div>
       </section>
 
+      {detection && !detectionInvalidated && (
+        <section className="space-y-4 pt-4" aria-label="Identidad normativa">
+          <h2 className="border-b pb-2 text-xl font-semibold">D. Identidad normativa</h2>
+          <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/20">
+            <p className="text-sm font-semibold text-sky-950 dark:text-sky-100">
+              {detection.ordinanceResolution?.status === 'RESOLVED'
+                ? 'Propuesta normativa encontrada'
+                : 'Revisión técnica de identidad normativa'}
+            </p>
+            <p className="mt-1 text-sm text-sky-900 dark:text-sky-200">
+              La propuesta procede del instrumento detectado y no se convierte en confirmación hasta que la seleccione el técnico.
+            </p>
+          </div>
+
+          {visualProposals.length > 0 && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 dark:border-violet-900 dark:bg-violet-950/20" data-testid="visual-zoning-proposals">
+              <p className="font-semibold text-violet-950 dark:text-violet-100">Propuesta de UrbanBrain</p>
+              <p className="mt-1 text-sm text-violet-900 dark:text-violet-200">
+                La interpretación del PORD ha encontrado estas identidades candidatas. Revísela y confirme manualmente; no es una autoridad automática.
+              </p>
+              <ul className="mt-3 space-y-2 text-sm">
+                {visualProposals.map((candidate) => (
+                  <li key={candidate.identityId ?? candidate.identity} className="rounded-md border border-violet-200/80 bg-background/70 p-2 dark:border-violet-800">
+                    <span className="font-semibold">{candidate.identity}</span>
+                    {candidate.confidence && <span className="ml-2 text-xs text-muted-foreground">{confidenceLabel(candidate.confidence)}</span>}
+                    {candidate.reason && <span className="mt-1 block text-xs text-muted-foreground">{candidate.reason}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {detection.visualObservations && detection.visualObservations.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100" data-testid="visual-zoning-observations">
+              <p className="font-semibold">Evidencia visual adicional para revisión técnica</p>
+              <p className="mt-1">
+                {visualProposals.length > 0
+                  ? 'Además de las propuestas, se conservan las observaciones del PORD que no tienen una identidad canónica segura.'
+                  : 'Se conserva la observación del PORD, pero no se ha podido vincular de forma segura con una identidad canónica.'}
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {detection.visualObservations.map((observation, index) => (
+                  <li key={`${observation.description ?? 'observation'}-${index}`}>
+                    {observation.description ?? observation.observedText ?? observation.observedLabel ?? observation.observedCode ?? observation.observedNumber ?? 'Grafismo no identificado'}
+                    {observation.confidence && ` · ${confidenceLabel(observation.confidence)}`}
+                  </li>
+                ))}
+              </ul>
+              {detection.visualExplanation && <p className="mt-2 text-xs">{detection.visualExplanation}</p>}
+            </div>
+          )}
+
+          <div className="grid gap-2">
+            <Label htmlFor="ordinanceIdentity">Identidad normativa a confirmar</Label>
+            {ordinanceOptions.length > 0 ? (
+              <select
+                id="ordinanceIdentity"
+                name="ordinanceIdentity"
+                value={ordinanceIdentity}
+                onChange={(event) => {
+                  setOrdinanceSelectionTouched(true)
+                  setOrdinanceIdentity(event.target.value)
+                }}
+                className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm"
+                data-testid="ordinance-identity-select"
+              >
+                <option value="">No confirmar todavía</option>
+                {ordinanceOptions.map((option) => (
+                  <option key={option.identityId} value={option.code}>
+                    {option.code} — {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                No hay una identidad canónica seleccionable para este instrumento. El expediente puede continuar a revisión técnica.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              La identidad se mantiene separada de la clasificación, categoría y alcance geométrico de la parcela.
+            </p>
+          </div>
+
+          {ordinanceIdentity && (() => {
+            const selectedCandidate = detection.ordinanceCandidates?.find(
+              (candidate) => candidate.identity.trim().toLocaleUpperCase() === ordinanceIdentity.trim().toLocaleUpperCase()
+            )
+            const selectedOption = ordinanceOptions.find((option) => option.code === ordinanceIdentity)
+            return (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-100">
+                <p className="font-semibold">Confirmación técnica preparada: {ordinanceIdentity}</p>
+                <p className="mt-1 text-xs">
+                  {selectedCandidate?.documentaryEvidence ?? selectedOption?.label ?? 'Identidad del catálogo del instrumento'}
+                </p>
+                <p className="mt-1 text-xs">La confirmación no atribuye esta identidad a toda la parcela ni fija su superficie.</p>
+              </div>
+            )
+          })()}
+
+          <PordPlanViewer
+            municipality={detection.detected.municipalityName}
+            instrument={detection.detected.planeamiento}
+            wmsLayer={detection.detected.detailedPlanningLayer}
+            parcelGeometry={detection.detected.parcelGeometry}
+            classificationCode={detection.detected.classificationCode}
+            categoryCode={detection.detected.categoryCode}
+            affects={detection.affects.map((affect) => ({
+              category: affect.category,
+              name: affect.name,
+              confidence: affect.confidence,
+            }))}
+            officialLegendUrl={detection.ordinanceResolution?.reviewMaterials?.legendUrl}
+          />
+        </section>
+      )}
+
       <section className="space-y-6 pt-4">
-        <h2 className="border-b pb-2 text-xl font-semibold">D. Datos del encargo</h2>
+        <h2 className="border-b pb-2 text-xl font-semibold">E. Datos del encargo</h2>
         <div className="grid gap-3">
           <Label htmlFor="actionType" className="text-base font-medium">Tipo de actuación</Label>
           <select id="actionType" name="actionType" value={actionType} onChange={(event) => setActionType(event.target.value)} className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm">

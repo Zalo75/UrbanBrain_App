@@ -87,6 +87,8 @@ export interface ContextDetermination<T> {
 export interface ContextDeterminationState<T> {
   automatic?: ContextDetermination<T>
   technician?: ContextDetermination<T>
+  candidates?: OrdinanceCandidate[]
+  status?: string
 }
 
 export interface ManualTerritorialContext {
@@ -319,6 +321,7 @@ export interface ClassificationSourceResult {
   officialLinks: OfficialResourceLink[]
   evidence: TerritorialEvidence[]
   warnings: TerritorialWarning[]
+  resources?: TerritorialResourceCatalog
 }
 
 export interface ClassificationSourcePort {
@@ -438,9 +441,12 @@ export interface PlanningDocumentReference {
   sourceUrl: string
   binding: 'general' | 'area_specific' | 'unverified_for_detected_area'
   documentType?: PlanningNormativeDocumentType
+  preview?: string
 }
 
 export interface PlanningApplicability {
+  cartographicSourceChecks?: Array<{ provider: string; status: 'available' | 'no_observation' | 'unavailable'; checkedAt: string; reason?: string }>
+
   status: 'determined' | 'partial' | 'conflict' | 'not_determined'
   instrument?: string
   approvalDate?: string
@@ -457,6 +463,150 @@ export interface PlanningApplicability {
   evidence: TerritorialEvidence[]
   warnings: TerritorialWarning[]
   sourceChecks?: OfficialSourceCheck[]
+  resources?: TerritorialResourceCatalog
+  /** Raw visual evidence retained even when identity resolution is uncertain. */
+  visualResolutionState?: VisualResolutionState
+  visualObservations?: VisualZoningObservation[]
+  visualExplanation?: string
+  /** Canonicalized model proposals, never a user confirmation. */
+  visualCandidates?: OrdinanceCandidate[]
+  ordinanceCandidates?: OrdinanceCandidate[]
+  /** Identities observed in the territorial evidence that are not competing
+   * ordinance/zoning alternatives (for example classification or category).
+   * They remain available for audit/context without entering ordinance choice. */
+  contextualCandidates?: OrdinanceCandidate[]
+  /** Normalized product-facing ordinance resolution state. Kept optional for legacy persisted contexts. */
+  ordinanceResolution?: OrdinanceResolutionMetadata
+  /** Backwards-compatible technical status used by existing consumers. */
+  ordinanceResolutionStatus?:
+    | 'automatically_determined'
+    | 'assisted_confirmation_required'
+    | 'manual_confirmation_required'
+    | 'ambiguous'
+    | 'multizone'
+}
+
+export type OrdinanceProductStatus =
+  | 'RESOLVED'
+  | 'RESOLVED_WITH_PRECISION_WARNING'
+  | 'REVIEW_REQUIRED'
+  | 'USER_CONFIRMED'
+
+export interface OrdinanceReviewMaterial {
+  mapImage?: string
+  mapUrl?: string
+  parcelOverlay?: string
+  overlayUrl?: string
+  legendImage?: string
+  legendUrl?: string
+  candidateOrdinances: Array<{ code: string; label: string; evidence?: string }>
+  precisionWarning?: string
+  sourceEvidence: string[]
+}
+
+export interface OrdinanceResolutionMetadata {
+  status: OrdinanceProductStatus
+  identity?: { code?: string; label?: string }
+  /** Explicit semantic dimension when the identity was recovered from a
+   * legacy/continuity record rather than a fully typed candidate. */
+  semanticDimension?: Extract<UrbanisticIdentitySemanticType, 'ordinance' | 'zoning'>
+  confidence?: TerritorialConfidence | 'unknown'
+  source?: string
+  provenance: string[]
+  alignmentMethod?: string
+  estimatedErrorMeters?: number
+  warning?: string
+  reviewMaterials?: OrdinanceReviewMaterial
+  confirmationSource?: 'automatic' | 'user'
+  /** Explicit audit marker; never infer this from an AI confidence value. */
+  confirmedByUser?: boolean
+  contextualCandidates?: OrdinanceCandidate[]
+  identityId?: string
+  hasEligibility?: any
+  normativeReferences?: Array<{
+    documentId: string
+    chunkIds: string[]
+    article?: string
+    relation: 'defines' | 'regulates' | 'mentions'
+    sourceId: string
+  }>
+}
+
+/** Canonical dimension of a detected urbanistic identity. Optional for legacy
+ * observations; an absent value is intentionally handled conservatively. */
+export type UrbanisticIdentitySemanticType =
+  | 'classification'
+  | 'category'
+  | 'qualification'
+  | 'zoning'
+  | 'ordinance'
+  | 'degree'
+  | 'area'
+  | 'affect'
+  | 'protection'
+  | 'unknown'
+
+export type VisualResolutionState = 'resolved' | 'multizone' | 'ambiguous' | 'unresolved'
+
+/** Evidence observed by a visual interpreter before it is canonicalized. */
+export interface VisualZoningObservation {
+  observedText?: string | null
+  observedCode?: string | null
+  observedNumber?: string | null
+  observedLabel?: string | null
+  observedSymbols?: string[]
+  observedColors?: string[]
+  observedPatterns?: string[]
+  observedBoundaries?: string[]
+  spatialRelation?: 'contains' | 'intersects' | 'ambiguous' | 'unknown'
+  parcelRelation?: 'contains' | 'intersects' | 'ambiguous' | 'unknown'
+  description?: string
+  competingLabels?: string[]
+  confidence?: TerritorialConfidence
+  semanticDimension?: UrbanisticIdentitySemanticType
+  provenance?: string[]
+}
+
+export interface VisualZoningInterpretation {
+  resolutionState: VisualResolutionState
+  observations: VisualZoningObservation[]
+  explanation?: string
+}
+
+/** Canonical candidate shared by territorial and parcel-context contracts. */
+export interface OrdinanceCandidate {
+  identity: string
+  normalizedIdentity?: string
+  semanticDimension?: UrbanisticIdentitySemanticType
+  instrumentId: string
+  sourceRef?: string
+  sourceDocument?: string
+  spatialEvidence?: string
+  graphicEvidence?: string
+  legendEvidence?: string
+  documentaryEvidence?: string
+  instrumentMembership?: boolean
+  provenance: string[]
+  coverage?: { percentage?: number; areaSquareMetres?: number; method?: string }
+  confidence?: TerritorialConfidence
+  status?: 'active' | 'review' | 'user_confirmed'
+  competingCandidates?: string[]
+  alignmentMethod?: string
+  estimatedErrorMeters?: number
+  warning?: string
+  reason?: string
+  reviewMaterials?: OrdinanceReviewMaterial
+  confirmationSource?: 'automatic' | 'user'
+  /** Stable, instrument-scoped identity from the official catalog. */
+  identityId?: string
+  catalogStatus?: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED'
+  normativeReferences?: Array<{
+    documentId: string
+    chunkIds: string[]
+    article?: string
+    relation: 'defines' | 'regulates' | 'mentions'
+    sourceId: string
+  }>
 }
 
 export interface TerritorialAffect {
@@ -582,4 +732,37 @@ export interface ActionAreaSelectionState {
   history: ActionAreaSelectionSnapshot[]
   revokedAt?: string
   revokedBy?: string
+}
+
+export interface TerritorialResourceCatalog {
+  municipalityCode: string
+  instrumentId: string
+  source: 'siotuga' | 'arcgis' | 'mixed'
+  classificationLayer?: string
+  detailedPlanningLayer?: string
+  planningTileIndex?: string
+  boundaryLayer?: string
+  wfsCapabilitiesUrl?: string
+  wmsCapabilitiesUrl?: string
+  arcGisSources?: ArcGisSourceInfo[]
+}
+
+export interface ZoningIdentity {
+  code: string | null;
+  label: string | null;
+  sourceType: 'arcgis_featureserver' | 'arcgis_mapserver' | 'siotuga_wfs' | 'prepared_zoning' | string;
+  sourceUrl: string;
+  layerId: string | number | null;
+  rawAttributes: Record<string, unknown>;
+  confidence: 'high' | 'medium' | 'low';
+  evidence: string[];
+  semanticDimension?: UrbanisticIdentitySemanticType;
+}
+
+export interface ArcGisSourceInfo {
+  url: string;
+  sourceType: 'featureserver' | 'mapserver' | 'experience' | 'webmap' | string;
+  title?: string;
+  provenance?: string[];
+  confidence: 'high' | 'medium' | 'low';
 }

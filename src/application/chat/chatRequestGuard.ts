@@ -1,5 +1,5 @@
 export const MAX_CHAT_MESSAGE_LENGTH = 4_000
-export const CHAT_REQUEST_TIMEOUT_MS = 45_000
+export const CHAT_REQUEST_TIMEOUT_MS = 120_000
 export const CHAT_RATE_WINDOW_MS = 60_000
 export const CHAT_RATE_LIMIT = 6
 

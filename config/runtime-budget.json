@@ -1,0 +1,15 @@
+{
+  "version": "2026-08-31",
+  "humanCurrency": "EUR",
+  "providerBillingCurrency": "USD",
+  "conversion": {
+    "maxEurPerUsd": 1.2,
+    "basis": "conservative-fixed-ceiling",
+    "effectiveDate": "2026-08-31"
+  },
+  "openai": {
+    "softStopEur": 4,
+    "hardStopEur": 5
+  },
+  "note": "USD ceilings are derived as EUR ceiling divided by maxEurPerUsd; this guarantees the EUR ceiling under the configured conversion bound."
+}

@@ -54,6 +54,21 @@ function geometry(ring = culleredoRing): ParcelGeometry {
   return { type: 'MultiPolygon', coordinates: [[[...ring]]], crs: 'EPSG:4326' };
 }
 
+function penamoaStyleComplexRing() {
+  const ring: Array<[number, number]> = [];
+  const center: [number, number] = [-8.4287, 43.3652];
+  for (let index = 0; index < 840; index += 1) {
+    const angle = (index / 840) * Math.PI * 2;
+    const radius = 0.0022 + (index % 7 === 0 ? 0.00001 : 0);
+    ring.push([
+      center[0] + Math.cos(angle) * radius,
+      center[1] + Math.sin(angle) * radius,
+    ]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
 function coordinateRing(value: string, order: 'lng-lat' | 'lat-lng') {
   const numbers = value.trim().split(/\s+/).map(Number);
   const ring: Array<[number, number]> = [];
@@ -707,6 +722,28 @@ describe('SiotugaClassificationAdapter', () => {
     expect(candidate?.parcelCoverage?.intersectionGeometry).toBeDefined();
     expect(candidate?.parcelCoverage?.intersectionGeometry?.type).toBe('MultiPolygon');
     expect(Array.isArray(candidate?.parcelCoverage?.intersectionGeometry?.coordinates)).toBe(true);
+  });
+
+  it('calcula cobertura para una geometría compleja de tipo Penamoa sin triangulación manual', async () => {
+    const parcel = geometry([
+      [-8.4290, 43.3650],
+      [-8.4284, 43.3650],
+      [-8.4284, 43.3655],
+      [-8.4290, 43.3655],
+      [-8.4290, 43.3650],
+    ]);
+    const complexOfficialRing = penamoaStyleComplexRing();
+    const fetcher = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      text: async () => gml(feature('penamoa-complex', 'SUB', 'SUB', complexOfficialRing, 'SURT1')),
+    }));
+    const adapter = new SiotugaClassificationAdapter(culleredoPlanning(), fetcher);
+    const result = await adapter.findApplicablePlanning({ municipalityCode: '15031', geometry: parcel });
+    const candidate = result.classificationResolution?.candidates[0];
+
+    expect(candidate?.parcelCoverage?.intersectionGeometry).toBeDefined();
+    expect(candidate?.parcelCoverage?.intersectionAreaSquareMetres).toBeGreaterThan(0);
+    expect(candidate?.parcelCoverage?.parcelPercentage).toBeGreaterThan(99);
   });
 
   it('genera geometrías de intersección independientes para parcela multicategoría que suman el 100 % de la parcela', async () => {

@@ -2,11 +2,29 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 
+export interface ReasonerImage { id: string; label: string; mediaType: 'image/png'; data: string }
+
+export function openAIReasonerUserContent(request: ReasonerRequest) {
+  if (!request.images?.length) return request.userPrompt
+  return [
+    { type: 'input_text' as const, text: request.userPrompt },
+    ...request.images.flatMap(image => [
+      { type: 'input_text' as const, text: `IMAGEN ${image.id}: ${image.label}` },
+      { type: 'input_image' as const, image_url: `data:${image.mediaType};base64,${image.data}`, detail: 'high' as const },
+    ]),
+  ]
+}
+
 export interface ReasonerRequest {
+  images?: ReasonerImage[]
   systemPrompt: string
   userPrompt: string
   signal?: AbortSignal
   timeoutMs?: number
+  // Optional dynamic schema for structured outputs
+  responseSchemaName?: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  responseSchema?: any
 }
 
 export interface ReasonerResult {
@@ -22,11 +40,27 @@ export interface ReasonerResult {
 }
 
 export interface ReasonerProvider {
+  readonly name: string
   generate(request: ReasonerRequest): Promise<ReasonerResult>
 }
 
+/** DeepSeek Chat Completions only supports generic JSON mode. Schema-bearing
+ * requests must use its Responses API structured-output format. */
+export function deepSeekResponseFormat(request: ReasonerRequest) {
+  if (request.responseSchemaName && request.responseSchema) {
+    return {
+      type: 'json_schema' as const,
+      name: request.responseSchemaName,
+      schema: request.responseSchema,
+    }
+  }
+  return { type: 'json_object' as const }
+}
+
 export class DeepSeekReasonerProvider implements ReasonerProvider {
+  readonly name = 'deepseek';
   private openai: OpenAI;
+  private responsesClient: OpenAI;
   private model = 'deepseek-v4-flash';
 
   constructor() {
@@ -34,10 +68,49 @@ export class DeepSeekReasonerProvider implements ReasonerProvider {
       baseURL: 'https://api.deepseek.com/v1',
       apiKey: process.env.DEEPSEEK_API_KEY || ''
     });
+    // DeepSeek's Responses API is served at /responses (without /v1).
+    this.responsesClient = new OpenAI({
+      baseURL: 'https://api.deepseek.com',
+      apiKey: process.env.DEEPSEEK_API_KEY || ''
+    });
   }
 
   async generate(request: ReasonerRequest): Promise<ReasonerResult> {
+    if (request.images?.length) throw new Error('DeepSeek reasoner does not support accredited cartographic images');
     const t0 = performance.now();
+
+    if (request.responseSchemaName && request.responseSchema) {
+      const response = await this.responsesClient.responses.create({
+        model: this.model,
+        input: [
+          { role: 'system', content: request.systemPrompt },
+          { role: 'user', content: request.userPrompt },
+        ],
+        text: {
+          format: {
+            ...deepSeekResponseFormat(request),
+            strict: true,
+          } as any,
+        },
+        reasoning: { effort: 'none' },
+      }, {
+        signal: request.signal,
+        ...(request.timeoutMs === undefined ? {} : { timeout: request.timeoutMs }),
+      });
+
+      const t1 = performance.now();
+      return {
+        rawContent: (response as any).output_text || '',
+        provider: 'deepseek',
+        model: this.model,
+        latencyMs: Math.round(t1 - t0),
+        inputTokens: response.usage?.input_tokens,
+        outputTokens: response.usage?.output_tokens,
+        totalTokens: response.usage?.total_tokens,
+        cachedInputTokens: (response.usage as any)?.input_tokens_details?.cached_tokens,
+        reasoningTokens: (response.usage as any)?.output_tokens_details?.reasoning_tokens,
+      };
+    }
 
     const completionRequest = {
       model: this.model,
@@ -52,10 +125,10 @@ export class DeepSeekReasonerProvider implements ReasonerProvider {
       thinking: { type: 'disabled' };
     };
 
-    const completion = await this.openai.chat.completions.create(completionRequest, {
-      signal: request.signal,
-      timeout: request.timeoutMs
-    });
+    const requestOptions: { signal?: AbortSignal; timeout?: number } = { signal: request.signal };
+    if (request.timeoutMs !== undefined) requestOptions.timeout = request.timeoutMs;
+    
+    const completion = await this.openai.chat.completions.create(completionRequest, requestOptions);
 
     const t1 = performance.now();
 
@@ -74,6 +147,7 @@ export class DeepSeekReasonerProvider implements ReasonerProvider {
 }
 
 export class OpenAIReasonerProvider implements ReasonerProvider {
+  readonly name = 'openai';
   private openai: OpenAI;
   private model: string;
 
@@ -87,47 +161,53 @@ export class OpenAIReasonerProvider implements ReasonerProvider {
   async generate(request: ReasonerRequest): Promise<ReasonerResult> {
     const t0 = performance.now();
 
+    const schemaName = request.responseSchemaName || 'ReasonerOutput';
+    const schemaDefinition = request.responseSchema || {
+      type: 'object',
+      properties: {
+        answerMode: { type: 'string', enum: ['definitive', 'conditional', 'partial', 'abstain'] },
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              type: { type: 'string', enum: ['territorial_fact', 'normative_fact', 'normative_conditional', 'parcel_conclusion', 'limitation'] },
+              text: { type: 'string' },
+              sourceRefs: { type: 'array', items: { type: 'number' } },
+              appliesToParcel: {
+                anyOf: [
+                  { type: 'boolean' },
+                  { type: 'string', enum: ['conditional', 'unknown'] }
+                ]
+              },
+              numericTokens: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['id', 'type', 'text', 'sourceRefs', 'appliesToParcel', 'numericTokens'],
+            additionalProperties: false
+          }
+        },
+        missingFacts: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['answerMode', 'claims', 'missingFacts'],
+      additionalProperties: false
+    };
+
     // Using Responses API for gpt-5.6-luna
+    const requestOptions: { signal?: AbortSignal; timeout?: number } = { signal: request.signal };
+    if (request.timeoutMs !== undefined) requestOptions.timeout = request.timeoutMs;
+    
     const response = await this.openai.responses.create({
       model: this.model,
       input: [
         { role: 'system', content: request.systemPrompt },
-        { role: 'user', content: request.userPrompt }
+        { role: 'user', content: openAIReasonerUserContent(request) }
       ],
       text: {
         format: {
           type: 'json_schema',
-          name: 'ReasonerOutput',
-          schema: {
-            type: 'object',
-            properties: {
-              answerMode: { type: 'string', enum: ['definitive', 'conditional', 'partial', 'abstain'] },
-              claims: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    id: { type: 'string' },
-                    type: { type: 'string', enum: ['territorial_fact', 'normative_fact', 'normative_conditional', 'parcel_conclusion', 'limitation'] },
-                    text: { type: 'string' },
-                    sourceRefs: { type: 'array', items: { type: 'number' } },
-                    appliesToParcel: {
-                      anyOf: [
-                        { type: 'boolean' },
-                        { type: 'string', enum: ['conditional', 'unknown'] }
-                      ]
-                    },
-                    numericTokens: { type: 'array', items: { type: 'string' } }
-                  },
-                  required: ['id', 'type', 'text', 'sourceRefs', 'appliesToParcel', 'numericTokens'],
-                  additionalProperties: false
-                }
-              },
-              missingFacts: { type: 'array', items: { type: 'string' } }
-            },
-            required: ['answerMode', 'claims', 'missingFacts'],
-            additionalProperties: false
-          },
+          name: schemaName,
+          schema: schemaDefinition,
           strict: true
         }
       },
@@ -135,10 +215,7 @@ export class OpenAIReasonerProvider implements ReasonerProvider {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         effort: (process.env.URBANBRAIN_OPENAI_REASONING_EFFORT as any) || 'medium'
       }
-    }, {
-      signal: request.signal,
-      timeout: request.timeoutMs
-    });
+    }, requestOptions);
 
     const t1 = performance.now();
 
@@ -179,6 +256,7 @@ export function getReasonerProvider(): ReasonerProvider {
   // Wrap the provider to capture the request if configured
   if (process.env.NODE_ENV === 'development' && process.env.URBANBRAIN_CAPTURE_REASONER_REQUEST === '1') {
     return {
+      name: provider.name,
       generate: async (request: ReasonerRequest) => {
         try {
           const capturePath = path.join(process.cwd(), '.reasoner_request_capture.json');

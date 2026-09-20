@@ -3,6 +3,9 @@ import { buildSafeHttpUrl } from './chatCitations'
 export interface SourceCopyInput {
   fragmento_completo?: unknown
   fragmento_corto?: unknown
+  content?: unknown
+  texto?: unknown
+  text?: unknown
   nombre_pdf?: unknown
   titulo_detectado?: unknown
   pagina_detectada?: unknown
@@ -19,7 +22,17 @@ function isTechnicalMarker(value: string) {
 }
 
 export function normalizeFragment(value: unknown): string | null {
-  if (typeof value !== 'string') return null
+  if (typeof value !== 'string') {
+    if (value && typeof value === 'object') {
+      try {
+        const stringified = JSON.stringify(value, null, 2).trim()
+        return isTechnicalMarker(stringified) ? null : stringified
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
 
   const normalized = value.trim()
   if (!normalized) return null
@@ -85,14 +98,46 @@ export function normalizeSourcePage(value: unknown): string | null {
 }
 
 export function getCopyableSourceFragment(source: SourceCopyInput): string | null {
-  return normalizeFragment(source.fragmento_completo) ?? normalizeFragment(source.fragmento_corto)
+  return (
+    normalizeFragment(source.fragmento_completo) ??
+    normalizeFragment(source.fragmento_corto) ??
+    normalizeFragment(source.content) ??
+    normalizeFragment(source.texto) ??
+    normalizeFragment(source.text)
+  )
 }
 
-export function buildSourceCitationText(source: SourceCopyInput): string | null {
-  const fragment = getCopyableSourceFragment(source)
+export interface BuildSourceCitationOptions {
+  activeViewMode?: 'original' | 'ocr' | 'translation'
+  targetLanguage?: string | null
+  derivedText?: string | null
+}
+
+export function buildSourceCitationText(
+  source: SourceCopyInput,
+  options?: BuildSourceCitationOptions
+): string | null {
+  const isDerivedOcr = options?.activeViewMode === 'ocr' && Boolean(normalizeFragment(options.derivedText))
+  const isDerivedTranslation = options?.activeViewMode === 'translation' && Boolean(normalizeFragment(options.derivedText))
+
+  let fragment: string | null = null
+  if (isDerivedOcr || isDerivedTranslation) {
+    fragment = normalizeFragment(options?.derivedText)
+  } else {
+    fragment = getCopyableSourceFragment(source)
+  }
+
   if (!fragment) return null
 
   const metadata: string[] = []
+
+  if (isDerivedOcr) {
+    metadata.push('Nota: (Texto derivado por corrección OCR sobre la fuente oficial acreditada)')
+  } else if (isDerivedTranslation) {
+    const langLabel = options?.targetLanguage?.toLowerCase().startsWith('gl') ? 'gallego' : 'castellano'
+    metadata.push(`Nota: (Traducción asistida al ${langLabel} sobre el original acreditado)`)
+  }
+
   const documentName = normalizeDocumentName(source.nombre_pdf)
   const detectedReference = normalizeCitationReference(source.titulo_detectado)
   const page = normalizeSourcePage(source.pagina_detectada)

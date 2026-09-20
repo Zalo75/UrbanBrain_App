@@ -10,6 +10,13 @@ const migration = readFileSync(
   ),
   'utf8'
 ).toLowerCase();
+const ownerIsolatedProductTablesMigration = readFileSync(
+  resolve(
+    process.cwd(),
+    'supabase/migrations/20260920120000_harden_has_source_transformations_owner_rls.sql'
+  ),
+  'utf8'
+).toLowerCase();
 const rollback = readFileSync(
   resolve(
     process.cwd(),
@@ -53,6 +60,11 @@ const tablesProtectedByEarlierMigrations = [
   'factual_shadow_evaluations',
 ];
 
+const tablesProtectedByLaterOwnerIsolation = [
+  'has_alignments',
+  'source_transformations',
+];
+
 describe('remaining public-table RLS hardening migration', () => {
   it('closes every table omitted by the earlier versioned RLS migrations', () => {
     const schemaTables = [...schema.matchAll(/pgTable\(\s*['"]([^'"]+)['"]/g)].map(
@@ -61,11 +73,19 @@ describe('remaining public-table RLS hardening migration', () => {
     const coveredTables = new Set([
       ...tablesProtectedByEarlierMigrations,
       ...newlyProtectedTables,
+      ...tablesProtectedByLaterOwnerIsolation,
     ]);
 
-    expect(schemaTables).toHaveLength(25);
+    expect(schemaTables).toHaveLength(27);
     expect(schemaTables.filter((table) => !coveredTables.has(table))).toEqual([]);
   });
+
+  it.each(tablesProtectedByLaterOwnerIsolation)(
+    'tracks public.%s in the later owner-isolation migration',
+    (table) => {
+      expect(ownerIsolatedProductTablesMigration).toContain(`public.${table}`);
+    }
+  );
 
   it.each(newlyProtectedTables)('hardens public.%s when it exists', (table) => {
     expect(migration).toContain(`'${table}'`);

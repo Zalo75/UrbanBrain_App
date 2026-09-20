@@ -170,6 +170,32 @@ Fundamento [Fuente 1].`,
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' })
   })
 
+  it('keeps the browser abort above the 120 second server budget', async () => {
+    const chatResponse = deferredResponse()
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown) =>
+        String(input).includes('/api/chat/history')
+          ? Promise.resolve(historyResponse([]))
+          : chatResponse.promise
+      )
+    )
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    fireEvent.change(screen.getByPlaceholderText('Escribe tu consulta normativa...'), {
+      target: { value: 'Consulta multiescala' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar consulta' }))
+
+    expect(setTimeoutSpy.mock.calls.some(([, timeout]) => timeout === 125_000)).toBe(true)
+
+    await act(async () => {
+      chatResponse.resolve({ ok: true, json: async () => ({ answer: 'Respuesta', sources: [] }) })
+      await chatResponse.promise
+    })
+  })
+
   it('stops following new content after manual upward scrolling and resumes from the button', async () => {
     const chatResponse = deferredResponse()
     vi.stubGlobal(
@@ -261,7 +287,10 @@ function historyResponse(history: unknown[]) {
   return { ok: true, json: async () => ({ history }) }
 }
 
-async function renderSourceDetail(overrides: Record<string, unknown> = {}) {
+async function renderSourceDetail(
+  overrides: Record<string, unknown> = {},
+  view: 'text' | 'pdf' | null = 'text'
+) {
   vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
     {
       role: 'assistant',
@@ -272,6 +301,11 @@ async function renderSourceDetail(overrides: Record<string, unknown> = {}) {
 
   render(<ChatInterface expedienteId="exp-a" />)
   fireEvent.click(await screen.findByRole('link', { name: '[Fuente 1]' }))
+  if (view === 'text') {
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
+  } else if (view === 'pdf') {
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
+  }
 }
 
 function stubClipboard(clipboard: unknown) {
@@ -477,9 +511,8 @@ describe('ChatInterface citations', () => {
 
     const citation = await screen.findByRole('link', { name: '[Fuente 1]' })
     expect(citation.getAttribute('href')).toBe('https://example.test/norma.pdf?edition=2#page=4')
-    expect(citation.getAttribute('target')).toBe('_blank')
-    expect(citation.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(citation.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(true)
+    expect(citation.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(false)
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
 
     const viewer = await screen.findByTitle('Visor PDF Documento 1')
     expect(viewer.getAttribute('src')).toBe('https://example.test/norma.pdf?edition=2#page=4')
@@ -505,6 +538,7 @@ describe('ChatInterface citations', () => {
 
     render(<ChatInterface expedienteId="exp-a" />)
     fireEvent.click(await screen.findByRole('link', { name: '[Fuente 1]' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
 
     const firstViewer = await screen.findByTitle('Visor PDF Documento 1')
     const sourcePanel = getSourcePanelScrollContainer()
@@ -514,6 +548,7 @@ describe('ChatInterface citations', () => {
     sourcePanel.scrollTop = 240
     expect(sourcePanel.scrollTop).toBe(240)
     fireEvent.click(screen.getByRole('link', { name: '[Fuente 2]' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
 
     const secondViewer = await screen.findByTitle('Visor PDF Documento 2')
     expect(sourcePanel.contains(secondViewer)).toBe(true)
@@ -523,10 +558,161 @@ describe('ChatInterface citations', () => {
     })
   })
 
+  it('renders and opens stableSourceRef citations for instrument-document, candidate, and planning', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Rural [Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC]. Altura [Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008]. Planeamiento [Fuente planning:evidence].',
+        sources: [
+          source(1, 'https://siotuga.xunta.gal/wfs', null, {
+            chunk_id: 'candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC',
+            nombre_pdf: 'Evidencia territorial acreditada',
+            fragmento_completo: 'Hecho observado en candidato territorial SNRSC.',
+          }),
+          source(2, 'https://siotuga.xunta.gal/inventario.php', null, {
+            chunk_id: 'planning:evidence',
+            nombre_pdf: 'Evidencia territorial acreditada',
+            fragmento_completo: 'Evidencia del instrumento 22262.',
+          }),
+          source(8, 'https://example.test/0101no111.pdf', 1, {
+            chunk_id: 'instrument-document:46725:chunk:3d2d66d94d4c5e55_00008',
+            nombre_pdf: '0101no111.pdf',
+            fragmento_completo: 'Art. 219: Condiciones de volumen y edificación: Altura máxima 7,00 m.',
+          }),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-carino" />)
+
+    const chunkCitation = await screen.findByRole('link', { name: '[Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008]' })
+    expect(chunkCitation).toBeTruthy()
+    fireEvent.click(chunkCitation)
+
+    expect(await screen.findByText('0101no111.pdf')).toBeTruthy()
+    expect(screen.queryByTitle('Visor PDF 0101no111.pdf')).toBeNull()
+    expect(screen.queryByText(/Art\. 219: Condiciones de volumen y edificación/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'TEXTO' }))
+    expect(await screen.findByText(/Art\. 219: Condiciones de volumen y edificación/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }))
+    expect(await screen.findByTitle('Visor PDF 0101no111.pdf')).toBeTruthy()
+
+    const candidateCitation = screen.getByRole('link', { name: '[Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC]' })
+    fireEvent.click(candidateCitation)
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
+    expect(await screen.findByText(/Hecho observado en candidato territorial SNRSC\./)).toBeTruthy()
+
+    const planningCitation = screen.getByRole('link', { name: '[Fuente planning:evidence]' })
+    fireEvent.click(planningCitation)
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
+    expect(await screen.findByText(/Evidencia del instrumento 22262\./)).toBeTruthy()
+  })
+
+  it('specifically displays non-empty accredited text for planning:evidence and keeps PDF working', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Evidencia territorial [Fuente planning:evidence].',
+        sources: [
+          source(2, 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1&idconcello=15901', null, {
+            chunk_id: 'planning:evidence',
+            nombre_pdf: 'Evidencia territorial acreditada',
+            fragmento_completo: 'SOURCE_REF: planning:evidence\nEvidencia del instrumento y sus fuentes:\nDescubrimiento dinámico SIOTUGA; instrumento 22262.',
+          }),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-carino" />)
+
+    const citation = await screen.findByRole('link', { name: '[Fuente planning:evidence]' })
+    fireEvent.click(citation)
+
+    // Verify source is selected
+    expect(await screen.findByText('planning:evidence')).toBeTruthy()
+
+    // 1. TEXTO displays the accredited text and does NOT show external document warning
+    fireEvent.click(screen.getByRole('button', { name: 'TEXTO' }))
+    const recoveredText = await screen.findByText(/Descubrimiento dinámico SIOTUGA; instrumento 22262\./)
+    expect(recoveredText).toBeTruthy()
+    expect(screen.queryByText(/Esta fuente enlaza una ficha o documento externo/)).toBeNull()
+    expect(screen.queryByRole('tab', { name: /OCR corregido/i })).toBeNull()
+    expect(screen.queryByRole('tab', { name: /Traducción asistida/i })).toBeNull()
+
+    // 2. PDF displays external link notice and keeps document access working
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }))
+    expect(await screen.findByText(/Esta fuente enlaza una ficha o documento externo/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Abrir documento original' })).toBeTruthy()
+  })
+
+  it('specifically displays non-empty accredited text for candidate and keeps PDF working', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Candidato [Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC].',
+        sources: [
+          source(1, 'https://siotuga.xunta.gal/siotuga/inventario.php?inv=1', null, {
+            chunk_id: 'candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC',
+            nombre_pdf: 'Evidencia territorial acreditada',
+            fragmento_completo: 'Hecho observado en candidato territorial SNRSC: VILAR-CARIÑO DE ARRIBA.',
+          }),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-carino" />)
+
+    const citation = await screen.findByRole('link', { name: '[Fuente candidate:_15901_PXOM_200002_AD_3CLAS_22262:SNR|SNRSC]' })
+    fireEvent.click(citation)
+
+    // TEXTO displays candidate accredited reality
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
+    expect(await screen.findByText(/VILAR-CARIÑO DE ARRIBA/)).toBeTruthy()
+    expect(screen.queryByText(/Esta fuente enlaza una ficha o documento externo/)).toBeNull()
+
+    // PDF displays external link notice
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }))
+    expect(await screen.findByText(/Esta fuente enlaza una ficha o documento externo/)).toBeTruthy()
+  })
+
+  it('specifically displays literal accredited text for instrument-document and keeps PDF visor working', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => historyResponse([
+      {
+        role: 'assistant',
+        content: 'Normativa [Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008].',
+        sources: [
+          source(8, 'https://example.test/0101no111.pdf', 1, {
+            chunk_id: 'instrument-document:46725:chunk:3d2d66d94d4c5e55_00008',
+            nombre_pdf: '0101no111.pdf',
+            pagina_detectada: 1,
+            fragmento_completo: 'Art. 219: Condiciones de volumen y edificación: Altura máxima 7,00 m.',
+          }),
+        ],
+      },
+    ])))
+
+    render(<ChatInterface expedienteId="exp-carino" />)
+
+    const citation = await screen.findByRole('link', { name: '[Fuente instrument-document:46725:chunk:3d2d66d94d4c5e55_00008]' })
+    fireEvent.click(citation)
+
+    // TEXTO displays literal chunk text
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
+    expect(await screen.findByText(/Art\. 219: Condiciones de volumen y edificación: Altura máxima 7,00 m\./)).toBeTruthy()
+
+    // PDF displays official PDF iframe viewer
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }))
+    const iframe = await screen.findByTitle('Visor PDF 0101no111.pdf')
+    expect(iframe).toBeTruthy()
+    expect(iframe.getAttribute('src')).toBe('https://example.test/0101no111.pdf#page=1')
+  })
+
   it('does not reset the source panel scroll for an action that keeps the active source', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     stubClipboard({ writeText })
-    await renderSourceDetail()
+    await renderSourceDetail({}, 'pdf')
 
     const viewer = await screen.findByTitle('Visor PDF Documento 1')
     const sourcePanel = getSourcePanelScrollContainer()
@@ -557,6 +743,7 @@ describe('ChatInterface citations', () => {
     expect(card.tagName).toBe('BUTTON')
     fireEvent.keyDown(card, { key: 'Enter' })
     fireEvent.click(card)
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
     expect(await screen.findByText(/Página no determinada/i)).toBeTruthy()
     expect(screen.getByTitle('Visor PDF Documento 1').getAttribute('src')).toBe(
       'https://example.test/norma.pdf?edition=2'
@@ -581,6 +768,7 @@ describe('ChatInterface citations', () => {
     expect(externalCitation.getAttribute('href')).toBe('https://example.test/ficha.html')
     expect(screen.queryByRole('link', { name: '[Fuente 2]' })).toBeNull()
     fireEvent.click(externalCitation)
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }))
     expect(await screen.findByText(/ficha o documento externo/i)).toBeTruthy()
     expect(screen.queryByTitle('Visor PDF Documento 1')).toBeNull()
     expect(screen.getByRole('button', { name: 'Abrir documento original' })).toBeTruthy()
@@ -600,6 +788,7 @@ describe('ChatInterface citations', () => {
     const citation = await screen.findByRole('button', { name: '[Fuente 1]' })
     expect(screen.queryByRole('link', { name: '[Fuente 1]' })).toBeNull()
     fireEvent.click(citation)
+    fireEvent.click(await screen.findByRole('button', { name: 'TEXTO' }))
     expect(await screen.findByText(/Evidencia completa disponible/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Abrir documento original' })).toBeNull()
     expect(screen.queryByText(/Enlace oficial no disponible/i)).toBeNull()
@@ -800,5 +989,87 @@ describe('ChatInterface citations', () => {
     expect((await screen.findByText('Fragmento copiado.')).textContent).toBe('Fragmento copiado.')
     expect(screen.queryByText(/Comprueba los permisos/)).toBeNull()
     expect(writeText).toHaveBeenCalledTimes(2)
+  })
+
+  it('switches between reading tabs and renders Original accredited badge', async () => {
+    await renderSourceDetail({ fragmento_completo: 'Texto normativo original.' })
+
+    // Subtabs exist under TEXTO view
+    const originalTab = await screen.findByRole('tab', { name: /Original/i })
+    const ocrTab = screen.getByRole('tab', { name: /OCR corregido/i })
+    const transTab = screen.getByRole('tab', { name: /Traducción asistida/i })
+
+    expect(originalTab).toBeDefined()
+    expect(ocrTab).toBeDefined()
+    expect(transTab).toBeDefined()
+
+    // Default is Original tab with accredited badge
+    expect(screen.getByText('Original acreditado')).toBeDefined()
+    expect(screen.getByText(/Texto normativo original/)).toBeDefined()
+
+    // Switch to OCR tab
+    fireEvent.click(ocrTab)
+    expect(screen.getByText('Limpiar defectos de OCR')).toBeDefined()
+
+    // Switch to Translation tab
+    fireEvent.click(transTab)
+    expect(screen.getByText(/Traducir a gallego/i)).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Galego' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Català' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Euskara' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'English' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Castellano' })).toBeNull()
+  })
+
+  it('triggers on-demand OCR transformation and displays disclaimer badge', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/chat/history')) {
+        return historyResponse([
+          {
+            role: 'assistant',
+            content: 'Consulta [Fuente 1].',
+            sources: [source(1, 'https://example.test/doc.pdf', 1, { fragmento_completo: 'Art. 1 Texto con erratas' })],
+          },
+        ])
+      }
+      if (url.includes('/api/sources/transform') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            derivation: {
+              id: 'derivation-ocr-1',
+              expedienteId: 'exp-a',
+              sourceRef: '1',
+              sourceHash: 'hash-123',
+              derivationType: 'ocr_correction',
+              derivedText: 'Art. 1 Texto corregido limpiamente',
+              model: 'deterministic-ocr-cleaner-v1',
+              provider: 'local',
+              createdAt: new Date().toISOString(),
+            },
+            fromCache: false,
+          }),
+        }
+      }
+      return { ok: true, json: async () => ({ derivations: [] }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ChatInterface expedienteId="exp-a" />)
+    const citation = await screen.findByRole('link')
+    fireEvent.click(citation)
+
+    // Open TEXTO
+    fireEvent.click(await screen.findByRole('button', { name: /TEXTO/i }))
+
+    // Click OCR tab
+    fireEvent.click(screen.getByRole('tab', { name: /OCR corregido/i }))
+
+    const transformButton = screen.getByRole('button', { name: /Limpiar defectos de OCR/i })
+    fireEvent.click(transformButton)
+
+    // Should display disclaimer badge and derived text
+    expect(await screen.findByText(/OCR corregido — limpieza tipográfica automática/i)).toBeDefined()
+    expect(screen.getByText('Art. 1 Texto corregido limpiamente')).toBeDefined()
   })
 })

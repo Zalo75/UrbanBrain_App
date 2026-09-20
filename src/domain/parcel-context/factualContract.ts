@@ -1,3 +1,5 @@
+import type { ParcelAccounting } from '@/domain/territorial-resolver/parcelAccounting'
+﻿import type { OrdinanceCandidate } from '@/domain/territorial-resolver/types'
 import type {
   UrbanisticFactStatus,
   OfficialSource,
@@ -27,6 +29,28 @@ export interface FactualCandidate {
   semanticCompleteness?: SemanticCompleteness
   parcelPercentage?: number
   intersectionAreaSquareMetres?: number
+  planningAreas?: string[]
+  confidence?: TerritorialConfidence | 'unknown'
+  provenance?: FactualProvenance
+  status?: UrbanisticFactStatus | 'unresolved'
+  discrepancies?: string[]
+}
+
+export interface FactualRegimeCandidate {
+  classification?: FactualCandidate
+  category?: FactualCandidate
+  planningAreas?: string[]
+  parcelPercentage?: number
+  intersectionAreaSquareMetres?: number
+  confidence?: TerritorialConfidence | 'unknown'
+  provenance?: FactualProvenance
+  status: UrbanisticFactStatus | 'unresolved'
+  discrepancies?: string[]
+}
+
+export interface FactualCoverageSummary {
+  classifiedCoveragePercent?: number
+  unclassifiedCoveragePercent?: number
 }
 
 export interface FactualClassification {
@@ -94,12 +118,16 @@ export interface FactualScope {
 export interface FactualScopeFacts {
   classification?: FactualClassification
   categories?: FactualCategory[]
+  candidates?: FactualRegimeCandidate[]
+  ordinances?: OrdinanceCandidate[]
+  coverageSummary?: FactualCoverageSummary
   consolidation?: FactualConsolidation
   planningAreas?: FactualPlanningArea[]
   affects?: FactualAffectsState
 }
 
 export interface TerritorialFactualContract {
+  coverage?: ParcelAccounting
   identity: {
     municipalityName?: string
     municipalityCode?: string
@@ -119,6 +147,7 @@ export interface TerritorialFactualContract {
   // Legacy compatibility fields; factsByScope is canonical for scoped resolution.
   classification: FactualClassification
   categories: FactualCategory[]
+  ordinances?: OrdinanceCandidate[]
   consolidation: FactualConsolidation
   planningAreas: FactualPlanningArea[]
   affects: FactualAffectsState
@@ -127,3 +156,5 @@ export interface TerritorialFactualContract {
     planningInstrument?: string
   }
 }
+
+

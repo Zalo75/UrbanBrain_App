@@ -1,12 +1,16 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { AuthPort } from '@/domain/ports/AuthPort'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 
 export class SupabaseAuthAdapter implements AuthPort {
   async updateSession(request: NextRequest): Promise<NextResponse> {
+    const requestHeaders = new Headers(request.headers)
+
     let supabaseResponse = NextResponse.next({
-      request,
+      request: {
+        headers: requestHeaders,
+      },
     })
 
     const supabase = createServerClient(
@@ -20,7 +24,9 @@ export class SupabaseAuthAdapter implements AuthPort {
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
             supabaseResponse = NextResponse.next({
-              request,
+              request: {
+                headers: requestHeaders,
+              },
             })
             cookiesToSet.forEach(({ name, value, options }) =>
               supabaseResponse.cookies.set(name, value, options)
@@ -34,6 +40,23 @@ export class SupabaseAuthAdapter implements AuthPort {
     const {
       data: { user },
     } = await supabase.auth.getUser()
+
+    if (user) {
+      requestHeaders.set('x-user-id', user.id)
+    } else {
+      requestHeaders.delete('x-user-id')
+    }
+
+    // Ensure downstream server components and route handlers receive the authentic x-user-id
+    const finalResponse = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    })
+    supabaseResponse.cookies.getAll().forEach((c) => {
+      finalResponse.cookies.set(c.name, c.value)
+    })
+    supabaseResponse = finalResponse
 
     const isProtectedPath =
       request.nextUrl.pathname.startsWith('/dashboard') ||
@@ -62,6 +85,16 @@ export class SupabaseAuthAdapter implements AuthPort {
   }
 
   async getUserId(): Promise<string | null> {
+    try {
+      if (typeof headers === 'function') {
+        const headerStore = await headers()
+        const headerUserId = headerStore?.get('x-user-id')
+        if (headerUserId) return headerUserId
+      }
+    } catch {
+      // headers() might not be available in non-request contexts (tests/scripts)
+    }
+
     const supabase = await this._getServerClient()
     const { data: { user } } = await supabase.auth.getUser()
     return user ? user.id : null

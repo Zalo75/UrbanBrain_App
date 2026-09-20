@@ -6,8 +6,41 @@ import {
   trustedMunicipalityFilter,
 } from './normalizeParcelContext'
 import type { TerritorialDetectionSummary } from './normalizeParcelContext'
+import { buildTerritorialFactualContract } from './buildFactualContract'
+import { buildNormativeSearchScope } from './normativeSearchScope'
+import { evaluateApplicability } from './applicabilityEngine'
 
 describe('buildNormalizedParcelContext', () => {
+  it('proyecta la clasificación canónica a hechos, contrato y alcance sin confirmar el régimen', () => {
+    const detected: TerritorialDetectionSummary = {
+      landClass: 'urbanizable',
+      classificationDetermination: { technician: { value: 'urbanizable', origin: 'technician_selection', source: 'manual', verification: 'unverified', recordedAt: '2026-09-07', recordedBy: 'legacy' } },
+      planningArea: 'SURT1',
+      municipalityName: 'A Coruña', municipalityCode: '15030',
+      planningInstrument: 'PGOM', planningStatus: 'vigente',
+      planningApplicabilityStatus: 'partial', parcelSurfaceSquareMetres: 4415.17,
+      urbanisticFacts: {
+        classification: { status: 'manual_review_required', confidence: 'high', evidence: [], warnings: [], discrepancies: [], nextAction: 'review_official_sources' },
+        category: { status: 'not_available', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'manual_selection' },
+        consolidation: { status: 'not_applicable', confidence: 'unknown', evidence: [], warnings: [], discrepancies: [], nextAction: 'none' },
+      },
+    }
+    const context = buildNormalizedParcelContext({ expediente: {}, detected })
+    const contract = buildTerritorialFactualContract(context)
+    const scope = buildNormativeSearchScope({ context, municipioCodigo: '15030', detected })
+    const applicability = evaluateApplicability(context, [], true)
+
+    expect(context.landClass).toMatchObject({ value: 'urbanizable', verification: 'unverified' })
+    expect(context.urbanisticFacts?.classification).toMatchObject({
+      value: { code: 'urbanizable' },
+      status: 'manual_review_required',
+    })
+    expect(contract.factsByScope?.parcel?.classification).toMatchObject({ code: 'urbanizable', determination: 'manual' })
+    expect(scope.classification).toBe('urbanizable')
+    expect(scope.planningZone).toBe('SURT1')
+    expect(scope.actionAreaValidated).toBe(true)
+    expect(applicability.missingData).not.toContain('clasificación del suelo')
+  })
   it('acepta el snapshot territorial normalizado sin mezclar su procedencia', () => {
     const detected: TerritorialDetectionSummary = {
       cadastralReference: '7709702NH4970N0001SZ',
@@ -32,6 +65,38 @@ describe('buildNormalizedParcelContext', () => {
       source: 'siotuga',
     })
     expect(context.validity?.value).toBe('vigente')
+  })
+
+  it('no crea conflicto municipal cuando Catastro aporta el nombre y el expediente el mismo INE', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { municipio: '36059', refCatastral: '36059A03900148' },
+      detected: {
+        municipalityName: 'VILA DE CRUCES',
+        municipalityCode: '36059',
+        cadastralReference: '36059A03900148',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+      },
+    })
+
+    console.log('CONFLICTS:', context.conflicts); expect(context.conflicts.filter((conflict) => conflict.field === 'municipality')).toHaveLength(0)
+    expect(context.municipality?.value.ineCode).toBe('36059')
+  })
+
+  it('mantiene el conflicto cuando los códigos INE son distintos', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { municipio: '15030' },
+      detected: {
+        municipalityName: 'VILA DE CRUCES',
+        municipalityCode: '36059',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+      },
+    })
+
+    expect(context.conflicts.filter((conflict) => conflict.field === 'municipality')).toHaveLength(1)
   })
 
   it('normaliza una referencia catastral válida y conserva su procedencia', () => {
@@ -288,6 +353,141 @@ describe('buildNormalizedParcelContext', () => {
     })
   })
 
+  it('hidrata una ordenanza USER_CONFIRMED como hecho autoritativo del expediente', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        municipalityName: 'Teo',
+        municipalityCode: '15082',
+        planningInstrument: 'Plan oficial',
+        planningSource: 'siotuga',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        locationSource: 'catastro',
+        ordinanceCandidates: [{
+          identity: 'R-2',
+          instrumentId: 'instrument-teo',
+          semanticDimension: 'ordinance',
+          provenance: ['official:wms', 'official:legend'],
+          status: 'user_confirmed',
+          confidence: 'high',
+        }],
+        ordinanceResolution: {
+          status: 'USER_CONFIRMED',
+          identity: { code: 'R-2', label: 'R-2' },
+          confidence: 'high',
+          provenance: ['official:wms', 'official:legend'],
+          confirmationSource: 'user',
+          confirmedByUser: true,
+        },
+        ordinanceDetermination: {
+          technician: {
+            value: 'R-2',
+            origin: 'technician_selection',
+            source: 'manual',
+            verification: 'unverified',
+          },
+        },
+      },
+    })
+
+    expect(context.ordinanceCandidates).toHaveLength(1)
+    expect(context.ordinanceCandidates?.[0]).toMatchObject({
+      identity: 'R-2',
+      status: 'user_confirmed',
+      provenance: ['official:wms', 'official:legend'],
+    })
+    expect(context.qualification).toMatchObject({
+      value: 'R-2',
+      source: 'manual',
+      verification: 'confirmed',
+    })
+  })
+
+  it('proyecta USER_CONFIRMED a qualification aunque falte la lista de candidatas legacy', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {
+        refCatastral: '1234567NH4913S0001AB',
+        municipio: 'teo',
+        planeamiento: 'PXOM de Teo',
+      },
+      detected: {
+        municipalityName: 'Teo',
+        municipalityCode: '15082',
+        locationSource: 'catastro',
+        locationStatus: 'confirmed',
+        locationConfidence: 'high',
+        planningInstrument: 'PXOM de Teo',
+        planningSource: 'siotuga',
+        planningStatus: 'vigente',
+        ordinanceResolution: {
+          status: 'USER_CONFIRMED',
+          identity: { code: 'R-2', label: 'R-2' },
+          confirmedByUser: true,
+          confirmationSource: 'user',
+        },
+        planningCanAnswerConcreteParameters: false,
+      },
+    })
+
+    expect(context.qualification).toMatchObject({
+      value: 'R-2',
+      source: 'manual',
+      verification: 'confirmed',
+    })
+  })
+
+  it('usa candidates legacy aunque la representación productiva esté vacía y deduplica ambas', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        ordinanceCandidates: [],
+        ordinanceDetermination: {
+          candidates: [{
+            identity: 'R-2',
+            instrumentId: 'instrument-teo',
+            semanticDimension: 'ordinance',
+            provenance: ['official:legend'],
+            status: 'active',
+          }],
+        },
+      } as unknown as TerritorialDetectionSummary,
+    })
+
+    expect(context.ordinanceCandidates).toHaveLength(1)
+    expect(context.ordinanceCandidates?.[0]).toMatchObject({
+      identity: 'R-2',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'ordinance',
+    })
+  })
+
+  it('marca como USER_CONFIRMED la candidata legacy que coincide con la resolución persistida', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: {},
+      detected: {
+        ordinanceCandidates: [{
+          identity: 'R-2',
+          instrumentId: 'instrument-teo',
+          provenance: ['official:wms'],
+          confidence: 'high',
+        }],
+        ordinanceResolution: {
+          status: 'USER_CONFIRMED',
+          identity: { code: 'R-2', label: 'R-2' },
+          confirmationSource: 'user',
+          confirmedByUser: true,
+        },
+      },
+    })
+
+    expect(context.ordinanceCandidates?.[0]).toMatchObject({
+      identity: 'R-2',
+      status: 'user_confirmed',
+      confirmationSource: 'user',
+    })
+  })
+
   it('keeps a selected detected zone unverified and unable to enable concrete parameters', () => {
     const context = buildNormalizedParcelContext({
       expediente: {},
@@ -404,11 +604,26 @@ describe('buildNormalizedParcelContext', () => {
       },
     })
 
-    expect(context.qualification).toMatchObject({
+    expect(context.qualification).toBeUndefined()
+    expect(context.planningArea).toMatchObject({
       value: 'Núcleo rural común',
-      source: 'expediente',
-      verification: 'unverified',
+      source: 'siotuga',
+      verification: 'confirmed',
     })
+  })
+
+  it('never promotes an expediente area name to an ordinance or qualification', () => {
+    const context = buildNormalizedParcelContext({
+      expediente: { urbanPlanningZone: 'Chanteiro' },
+      detected: {
+        planningArea: 'Chanteiro',
+        planningSource: 'siotuga',
+        qualification: undefined,
+      },
+    })
+
+    expect(context.planningArea?.value).toBe('Chanteiro')
+    expect(context.qualification).toBeUndefined()
   })
 
   it('continues to reconstruct historically technician-validated action areas as confirmed', () => {

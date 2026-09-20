@@ -15,7 +15,10 @@ import type {
   TerritorialResolution,
   TerritorialWarning,
 } from '@/domain/territorial-resolver/types'
-import { officialFailureKind } from '@/infrastructure/territorial-resolver/officialHttp'
+import { resolveOrdinanceCandidatesDetailed } from './ordinanceCandidateResolver'
+import { enrichOrdinanceCandidate, getInstrumentIdentityCatalog, isAutomaticallyAuthoritative } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase'
+import { defaultDetailedZoningStrategies } from '@/infrastructure/territorial-resolver/defaultDetailedZoningStrategies'
+import { isExternalServiceFailure, officialFailureKind } from '@/infrastructure/territorial-resolver/officialHttp'
 
 const GALICIA_BOUNDS = { minLat: 41.8, maxLat: 43.9, minLng: -9.4, maxLng: -6.7 }
 
@@ -213,7 +216,98 @@ async function addApplicability(
       geometry: result.parcelGeometry,
     }),
   ])
-  if (planning.status === 'fulfilled') result.planning = planning.value
+  if (planning.status === 'fulfilled') {
+    result.planning = planning.value
+    try {
+      const seeds: string[] = []
+      if (result.planning.documents) {
+        for (const doc of result.planning.documents) {
+          if (doc.sourceUrl && (doc.sourceUrl.toLowerCase().includes('arcgis.com') || doc.sourceUrl.toLowerCase().includes('featureserver') || doc.sourceUrl.toLowerCase().includes('mapserver'))) {
+            seeds.push(doc.sourceUrl)
+          }
+        }
+      }
+      if (seeds.length > 0) {
+        const { ArcGisSourceDiscovery } = await import('@/infrastructure/territorial-resolver/ArcGisSourceDiscovery')
+        const discovery = new ArcGisSourceDiscovery()
+        const discovered = await discovery.discover(seeds)
+        if (discovered.length > 0) {
+          if (!result.planning.resources) {
+            result.planning.resources = {
+              municipalityCode: result.municipalityCode ?? 'unknown',
+              instrumentId: result.planning.instrument || 'unknown',
+              source: 'arcgis'
+            }
+          }
+          result.planning.resources!.arcGisSources = discovered
+        }
+      }
+
+      const detailedResolution = await resolveOrdinanceCandidatesDetailed(result.planning, {
+        municipalityCode: result.municipalityCode,
+        coordinates: result.coordinates,
+        geometry: result.parcelGeometry,
+        strategies: defaultDetailedZoningStrategies(),
+      })
+      const instrumentId = result.planning.applicableInstruments?.find((item) => item.status === 'current')?.id ?? result.planning.instrument
+      const catalog = getInstrumentIdentityCatalog(result.municipalityCode, instrumentId)
+      const detailedCandidates = detailedResolution.candidates.map((candidate) => enrichOrdinanceCandidate(candidate, catalog))
+      // Keep canonical visual proposals separate from the full documentary
+      // selector.  Unresolved/ambiguous observations remain on planning even
+      // when no candidate can be safely canonicalized.
+      result.planning.visualCandidates = detailedCandidates
+      // Documentary candidates answer the manual-selection question (which
+      // identities exist in this instrument). Keep them as the product list
+      // when available; parcel-level observations remain in the resolution
+      // metadata and must not create duplicate/noisy manual options.
+      result.planning.ordinanceCandidates = result.planning.ordinanceCandidates?.length
+        ? result.planning.ordinanceCandidates
+        : detailedCandidates
+      result.planning.contextualCandidates = detailedResolution.contextualCandidates
+      result.planning.ordinanceResolutionStatus = detailedResolution.status
+      result.planning.ordinanceResolution = detailedResolution.metadata
+      const automaticCandidate = detailedCandidates.length === 1 && detailedResolution.metadata.status === 'RESOLVED'
+        ? detailedCandidates[0]
+        : undefined
+      if (automaticCandidate && isAutomaticallyAuthoritative(automaticCandidate)) {
+        result.planning.ordinanceResolution = {
+          ...result.planning.ordinanceResolution,
+          status: 'RESOLVED',
+          identity: { code: automaticCandidate.identity, label: automaticCandidate.identity },
+          confidence: automaticCandidate.confidence ?? 'unknown',
+          provenance: automaticCandidate.provenance,
+          source: 'structured_catalog',
+          confirmationSource: 'automatic',
+          identityId: automaticCandidate.identityId,
+          normativeReferences: automaticCandidate.normativeReferences,
+        }
+      }
+    } catch (error) {
+      if (isExternalServiceFailure(error)) {
+        // Keep documentary candidates already obtained from the instrument.
+        // A failure in the optional parcel-level strategy must not turn a
+        // valid manual identity list into a dead end.
+        result.planning.ordinanceCandidates = result.planning.ordinanceCandidates ?? []
+        result.planning.ordinanceResolutionStatus = 'manual_confirmation_required'
+        result.planning.ordinanceResolution = {
+          status: 'REVIEW_REQUIRED',
+          confidence: 'unknown',
+          provenance: [],
+          reviewMaterials: { candidateOrdinances: [], sourceEvidence: [] },
+        }
+        if (result.planning.sourceChecks) {
+          result.planning.sourceChecks.push({
+            source: 'siotuga',
+            status: 'unavailable',
+            message: error instanceof Error ? error.message : 'Servicio auxiliar de ordenanzas no disponible temporalmente.',
+            checkedAt: result.resolvedAt,
+          })
+        }
+      } else {
+        throw error
+      }
+    }
+  }
   else {
     result.planning = emptyPlanning('La consulta de planeamiento no está disponible temporalmente.')
   }

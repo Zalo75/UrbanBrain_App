@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { TerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
@@ -61,10 +61,14 @@ beforeAll(() => {
     configurable: true,
     value: vi.fn(),
   })
+  Object.defineProperty(Element.prototype, 'scrollTo', {
+    configurable: true,
+    value: vi.fn(),
+  })
 })
 
 describe('TerritorialContextPanel', () => {
-  it('muestra abierto el diagnóstico y expone los controles manuales previstos', () => {
+  it('muestra abierto el diagnóstico y expone los controles manuales previstos', async () => {
     const { container } = render(
       <TerritorialContextPanel
         expedienteId="exp-a"
@@ -107,6 +111,7 @@ describe('TerritorialContextPanel', () => {
   it('ofrece resolucion oficial, reintento y continuacion manual diferenciada', () => {
     render(<TerritorialContextPanel expedienteId="exp-a" initialInput={{}} context={null} />)
 
+    expect(screen.getByRole('link', { name: 'Abrir HAS' })).toHaveAttribute('href', '/expedientes/exp-a/has')
     expect(screen.getByRole('form', { name: /resolver localizaci.n/i })).toBeTruthy()
     expect(screen.getByLabelText('Referencia catastral')).toBeTruthy()
     expect(screen.getByLabelText('Latitud')).toBeTruthy()
@@ -169,7 +174,7 @@ describe('TerritorialContextPanel', () => {
 
     expect(screen.getByText('Conflictivo')).toBeTruthy()
     expect(screen.getByTestId('parcel-map')).toBeTruthy()
-    expect(screen.getByText(/no demuestra ausencia de otras afecciones/i)).toBeTruthy()
+    expect(screen.getByText(/Comprobaciones automáticas realizadas sobre capas oficiales verificadas/i)).toBeTruthy()
     expect(screen.queryByText(/se abst.* de dar par.*metros/i)).toBeNull()
   })
 
@@ -254,7 +259,7 @@ describe('TerritorialContextPanel', () => {
 
     expect(screen.getByText('Parcial')).toBeTruthy()
     expect(screen.getByText('BIC: contorno de protección')).toBeTruthy()
-    expect(screen.getByText(/no demuestra ausencia de otras afecciones/i)).toBeTruthy()
+    expect(screen.getByText(/Comprobaciones automáticas realizadas sobre capas oficiales verificadas/i)).toBeTruthy()
   })
 
   it('explica que una consulta de afecciones fallida no equivale a ausencia', () => {
@@ -393,7 +398,7 @@ describe('TerritorialContextPanel', () => {
     expect(screen.queryByText('Origen: Decisión del técnico')).toBeNull()
   })
 
-  it('diferencia valores automáticos y manuales y permite editar clasificación y afecciones', () => {
+  it('diferencia valores automáticos y manuales y permite editar clasificación y afecciones', async () => {
     render(
       <TerritorialContextPanel
         expedienteId="exp-a"
@@ -440,8 +445,17 @@ describe('TerritorialContextPanel', () => {
     expect(screen.getByText(/Clasificación automática original/i)).toBeTruthy()
     expect(screen.getByText(/Auditoría manual legacy/i)).toBeTruthy()
     expect(screen.getByText(/excluida operativamente/i)).toBeTruthy()
+    const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus')
+    const scrollTo = Element.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>
+    vi.mocked(Element.prototype.scrollIntoView).mockClear()
+    scrollTo.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Editar afecciones' }))
     expect(screen.getByText('Revisión manual de afecciones')).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Confirmar' })))
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }))
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+    focusSpy.mockRestore()
     fireEvent.click(screen.getByRole('button', { name: 'Añadir afección' }))
     expect(screen.getByLabelText('Afección nueva')).toBeTruthy()
   })
@@ -501,5 +515,118 @@ describe('TerritorialContextPanel', () => {
     expect(getHiddenInput('address').value).toBe('Calle Falsa 123') // from initialInput
     expect(getHiddenInput('lat').value).toBe('43.1')
     expect(getHiddenInput('lng').value).toBe('-8.1')
+  })
+
+  it('muestra revisión asistida y sólo permite seleccionar candidatas acreditadas', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-review"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          planningStatus: 'determined',
+          ordinanceResolution: {
+            status: 'REVIEW_REQUIRED',
+            confidence: 'unknown',
+            provenance: ['sheet:official'],
+            reviewMaterials: {
+              candidateOrdinances: [
+                { code: 'ORD-1', label: 'Ordenanza 1', evidence: 'Art. 57' },
+                { code: 'ORD-2', label: 'Ordenanza 2', evidence: 'Art. 58' },
+              ],
+              sourceEvidence: ['https://official.example/plan'],
+              mapUrl: 'https://official.example/map',
+              legendUrl: 'https://official.example/legend',
+              precisionWarning: 'Cartografía escaneada; revise los límites próximos.',
+            },
+          },
+          ordinanceCandidates: [
+            { identity: 'ORD-1', documentaryEvidence: 'Art. 57', provenance: ['sheet:1'] },
+            { identity: 'ORD-2', documentaryEvidence: 'Art. 58', provenance: ['sheet:1'] },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText(/no puede determinar autom.ticamente/i)).toBeTruthy()
+    expect(screen.getByText('CONFIRMAR ORDENANZA')).toBeTruthy()
+    expect(screen.getByRole('radio', { name: /ORD-1/ })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: /ORD-2/ })).toBeTruthy()
+    expect(screen.getByText('NO PUEDO DETERMINARLA')).toBeTruthy()
+    const confirmationForm = screen.getByRole('button', { name: 'CONFIRMAR ORDENANZA' }).closest('form')
+    expect(confirmationForm?.querySelector('input[name="candidateConfirmation"]')?.getAttribute('value')).toBe('on')
+  })
+
+  it('preselecciona como propuesta la candidata con cobertura dominante sin presentarla como confirmada', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-proposal"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          planningStatus: 'determined',
+          ordinanceResolution: { status: 'REVIEW_REQUIRED', confidence: 'medium', provenance: ['official:sheet'] },
+          ordinanceCandidates: [
+            { identity: 'ORD-1', identityId: 'identity:ord-1', coverage: { percentage: 65 }, provenance: ['official:sheet'] },
+            { identity: 'ORD-2', coverage: { percentage: 35 }, provenance: ['official:sheet'] },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole('radio', { name: /ORD-1.*PROPUESTA/i })).toBeChecked()
+    expect(screen.getByText(/PROPUESTA DE URBANBRAIN: ORD-1/i)).toBeTruthy()
+    expect(screen.getByText(/no es una identidad confirmada y requiere revisión técnica/i)).toBeTruthy()
+    expect(screen.queryByText('CONFIRMADO POR USUARIO')).toBeNull()
+  })
+
+  it('no preselecciona una candidata cuando la cobertura no identifica una dominante', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-tie"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          planningStatus: 'determined',
+          ordinanceResolution: { status: 'REVIEW_REQUIRED', confidence: 'unknown', provenance: ['official:sheet'] },
+          ordinanceCandidates: [
+            { identity: 'ORD-1', coverage: { percentage: 50 }, provenance: ['official:sheet'] },
+            { identity: 'ORD-2', coverage: { percentage: 50 }, provenance: ['official:sheet'] },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByRole('radio', { name: /ORD-1/ })).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: /ORD-2/ })).not.toBeChecked()
+    expect(screen.queryByText(/PROPUESTA DE URBANBRAIN/i)).toBeNull()
+  })
+
+  it('no muestra confirmación automática cuando la resolución de producto requiere revisión', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-review-status"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          planningStatus: 'determined',
+          ordinanceResolution: {
+            status: 'REVIEW_REQUIRED',
+            confidence: 'high',
+            provenance: ['official:wms'],
+            reviewMaterials: { candidateOrdinances: [], sourceEvidence: [] },
+          },
+          ordinanceDetermination: {
+            candidates: [{ identity: 'R-2', provenance: ['official:wms'] }],
+            status: 'automatically_determined',
+            technician: { value: 'R-2', verification: 'technician_validated' },
+          } as unknown as TerritorialContextView['ordinanceDetermination'],
+          ordinanceCandidates: [{ identity: 'R-2', provenance: ['official:wms'] }],
+        }}
+      />
+    )
+
+    expect(screen.getByText('REVISIÓN TÉCNICA NECESARIA')).toBeTruthy()
+    expect(screen.queryByText('CONFIRMADO AUTOMÁTICAMENTE')).toBeNull()
   })
 })

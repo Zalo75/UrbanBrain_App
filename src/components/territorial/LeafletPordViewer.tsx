@@ -16,6 +16,7 @@ import { Crosshair, Maximize2, MapPinned } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
 
 import type { ParcelGeometry } from '@/domain/territorial-resolver/types'
+import { getBaseMapLayer } from '@/components/maps/baseMapLayers'
 
 type ViewerMode = 'actual' | 'planeamiento' | 'comparar'
 type ViewerLayer = 'parcel' | 'actionArea' | 'classification' | 'category' | 'affects' | 'historic'
@@ -43,6 +44,7 @@ interface Props {
   classificationCode?: string
   categoryCode?: string
   affects?: AffectLegendItem[]
+  officialLegendUrl?: string
 }
 
 const AFFECT_STYLES: Array<{ key: string; label: string; color: string }> = [
@@ -132,12 +134,14 @@ export default function LeafletPordViewer({
   classificationCode,
   categoryCode,
   affects = [],
+  officialLegendUrl,
 }: Props) {
   const [mode, setMode] = useState<ViewerMode>('actual')
   const [pordOpacity, setPordOpacity] = useState(MODE_DEFAULTS.actual.pordOpacity)
   const [centerTrigger, setCenterTrigger] = useState(0)
   const [viewTarget, setViewTarget] = useState<ViewTarget>('adjust')
   const [wmsFailed, setWmsFailed] = useState(false)
+  const [officialLegendFailed, setOfficialLegendFailed] = useState(false)
   const [visibleLayers, setVisibleLayers] = useState<Record<ViewerLayer, boolean>>({
     parcel: true,
     actionArea: true,
@@ -154,6 +158,21 @@ export default function LeafletPordViewer({
       ? `https://siotuga.xunta.gal/siotuga/ws?codine=${municipalityCode}`
       : 'https://siotuga.xunta.gal/siotuga/ws'
   }, [wmsLayer])
+  const effectiveOfficialLegendUrl = useMemo(() => {
+    if (officialLegendUrl) return officialLegendUrl
+    const municipalityCode = wmsLayer?.split('_')[1]
+    if (!municipalityCode || !wmsLayer) return undefined
+    const legend = new URL('https://siotuga.xunta.gal/siotuga/ws')
+    legend.search = new URLSearchParams({
+      codine: municipalityCode,
+      SERVICE: 'WMS',
+      VERSION: '1.1.1',
+      REQUEST: 'GetLegendGraphic',
+      FORMAT: 'image/png',
+      LAYER: wmsLayer,
+    }).toString()
+    return legend.toString()
+  }, [officialLegendUrl, wmsLayer])
 
   function selectMode(nextMode: ViewerMode) {
     setMode(nextMode)
@@ -171,6 +190,8 @@ export default function LeafletPordViewer({
   }
 
   const mapCenter: [number, number] = [43.28, -8.21]
+  const pnoaBaseLayer = getBaseMapLayer('pnoa')
+  const pnoaMaxNativeZoom = pnoaBaseLayer.kind === 'xyz' ? pnoaBaseLayer.maxNativeZoom : undefined
   const classifiedGeometry = actionAreaGeometry ?? parcelGeometry
   const classColor = classificationColor(classificationCode, categoryCode)
 
@@ -216,10 +237,11 @@ export default function LeafletPordViewer({
       <div className="relative h-[480px] w-full overflow-hidden rounded-lg border bg-muted shadow-inner sm:h-[560px]">
         <MapContainer center={mapCenter} zoom={16} style={{ height: '100%', width: '100%', zIndex: 0 }}>
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            url={pnoaBaseLayer.url}
+            maxNativeZoom={pnoaMaxNativeZoom}
             maxZoom={20}
             opacity={modeConfig.baseOpacity}
-            attribution="© OpenStreetMap contributors © CARTO"
+            attribution={pnoaBaseLayer.attribution}
           />
 
           {wmsLayer && !wmsFailed && (
@@ -319,6 +341,30 @@ export default function LeafletPordViewer({
           </button>
         </div>
       </div>
+
+      {effectiveOfficialLegendUrl && !officialLegendFailed && (
+        <aside className="rounded-md border border-blue-200 bg-background p-3 shadow-sm" aria-label="Leyenda oficial PORD">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-foreground">Leyenda oficial PORD</h4>
+            <a className="text-xs underline text-muted-foreground" href={effectiveOfficialLegendUrl} target="_blank" rel="noreferrer">
+              Abrir fuente
+            </a>
+          </div>
+          <div className="max-h-72 overflow-auto rounded border bg-white p-2">
+            <img
+              src={effectiveOfficialLegendUrl}
+              alt="Leyenda cartográfica oficial del plano PORD"
+              className="h-auto max-w-full"
+              onError={() => setOfficialLegendFailed(true)}
+            />
+          </div>
+        </aside>
+      )}
+      {effectiveOfficialLegendUrl && officialLegendFailed && (
+        <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+          SIOTUGA no entregó una leyenda oficial PORD utilizable para esta capa.
+        </p>
+      )}
 
       {wmsFailed && (
         <p role="status" className="text-xs text-amber-800 dark:text-amber-300">

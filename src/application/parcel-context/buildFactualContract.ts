@@ -218,11 +218,12 @@ interface BuildScopeFactsInput {
 }
 
 function buildScopeFacts({ urbanisticFacts, planningArea, constraints, context }: BuildScopeFactsInput): FactualScopeFacts | undefined {
-  if (!urbanisticFacts && !planningArea && constraints === undefined) return undefined
+  if (!urbanisticFacts && !planningArea && constraints === undefined && !context.ordinanceCandidates?.length) return undefined
 
   return {
     classification: urbanisticFacts ? buildClassification(urbanisticFacts) : undefined,
     categories: urbanisticFacts ? buildCategories(urbanisticFacts) : undefined,
+    ordinances: context.ordinanceCandidates,
     consolidation: urbanisticFacts ? buildConsolidation(urbanisticFacts) : undefined,
     planningAreas: buildPlanningAreas(planningArea),
     affects: constraints !== undefined ? buildAffects(constraints, context) : undefined,
@@ -604,6 +605,7 @@ export function buildTerritorialFactualContract(
   const legacyAffects = buildAffects([...context.knownConstraints, ...(context.parcelKnownConstraints ?? [])], context)
 
   return {
+    coverage: context.coverage,
     identity: {
       municipalityName: context.municipality?.value.name,
       municipalityCode: context.municipality?.value.ineCode,
@@ -622,7 +624,7 @@ export function buildTerritorialFactualContract(
           : undefined,
       actionArea: context.actionArea
         ? {
-            areaSquareMetres: context.actionArea.value.surfaceSquareMetres,
+            areaSquareMetres: context.actionArea.value.surfaceSquareMetres > 0 ? context.actionArea.value.surfaceSquareMetres : undefined,
             hasGeometry: !!context.actionArea.value.geometry,
             source: context.actionArea.value.source,
           }
@@ -631,6 +633,7 @@ export function buildTerritorialFactualContract(
     factsByScope,
     classification: legacyClassification,
     categories: activeFacts?.categories ?? [],
+    ordinances: factsByScope.parcel?.ordinances,
     consolidation: legacyConsolidation,
     planningAreas: activeFacts?.planningAreas ?? [],
     affects: legacyAffects,

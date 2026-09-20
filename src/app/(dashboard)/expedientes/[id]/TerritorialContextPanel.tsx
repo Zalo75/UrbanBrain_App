@@ -53,11 +53,26 @@ function confidenceLabel(confidence: TerritorialContextView['confidence']) {
   return confidence === 'high' ? 'Alta' : confidence === 'medium' ? 'Media' : 'Baja';
 }
 
+function ordinanceProposal(candidates: TerritorialContextView['ordinanceCandidates']) {
+  if (!candidates?.length) return undefined
+  if (candidates.length === 1) return candidates[0]
+  if (!candidates.every((candidate) => Number.isFinite(candidate.coverage?.percentage))) return undefined
+  const ranked = [...candidates].sort((a, b) => b.coverage!.percentage! - a.coverage!.percentage!)
+  return ranked[0]!.coverage!.percentage! > ranked[1]!.coverage!.percentage! ? ranked[0] : undefined
+}
+
 export function TerritorialContextPanel({
   expedienteId,
   initialInput,
   context,
 }: Props) {
+  console.log('UB-E2E-TRACE panel-props', JSON.stringify({
+    expedienteId,
+    ordinanceCandidates: context?.ordinanceCandidates ?? [],
+    ordinanceDetermination: context?.ordinanceDetermination ?? null,
+    ordinanceResolution: context?.ordinanceResolution ?? null,
+    planningStatus: context?.planningStatus ?? null,
+  }));
   const router = useRouter();
   const action = resolveTerritorialContextAction.bind(null, expedienteId);
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -65,6 +80,29 @@ export function TerritorialContextPanel({
   const [manualAffectAddOpen, setManualAffectAddOpen] = useState(false);
   const [exploredCandidateId, setExploredCandidateId] = useState<string | undefined>(undefined);
   const manualOrdinanceRef = useRef<HTMLInputElement>(null);
+  const manualAffectsRef = useRef<HTMLDivElement>(null);
+  const manualScrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const openManualEditor = () => {
+    setManualOpen(true);
+    const reveal = () => {
+      const editor = manualAffectsRef.current;
+      const scrollContainer = manualScrollContainerRef.current;
+      if (!editor || !scrollContainer) return;
+      scrollContainer.scrollTo({
+        top: Math.max(0, editor.offsetTop - scrollContainer.offsetTop - 16),
+        behavior: 'smooth',
+      });
+      editor.querySelector<HTMLElement>(
+        'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])'
+      )?.focus({ preventScroll: true });
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(reveal);
+    } else {
+      setTimeout(reveal, 0);
+    }
+  };
 
   useEffect(() => {
     if (state.status === 'success') router.refresh();
@@ -91,6 +129,9 @@ export function TerritorialContextPanel({
         : 'Desconocido';
 
   const status = context ? statusCopy[context.status] : statusCopy.undetermined;
+  const ordinanceResolutionStatus = context?.ordinanceResolution?.status;
+  const ordinanceReviewMaterials = context?.ordinanceResolution?.reviewMaterials;
+  const proposedOrdinance = ordinanceProposal(context?.ordinanceCandidates);
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
   );
@@ -130,7 +171,15 @@ export function TerritorialContextPanel({
         </span>
       </summary>
 
-      <div className="max-h-[52vh] overflow-y-auto border-t px-4 py-4 lg:px-6">
+      <div ref={manualScrollContainerRef} className="max-h-[52vh] overflow-y-auto border-t px-4 py-4 lg:px-6">
+        {context?.coverage && <section aria-label="Cobertura de la geometría analizada" className="mb-4 rounded border p-3 text-sm">
+          <p className="font-medium">Cobertura de la geometría analizada</p>
+          <p>Superficie medida: {context.coverage.analysedSurfaceSquareMetres?.toLocaleString('es-ES', { maximumFractionDigits: 2 }) ?? 'Desconocida'} m²</p>
+          <p>Con evidencia espacial de clasificación: {context.coverage.coveredSurfaceSquareMetres?.toLocaleString('es-ES', { maximumFractionDigits: 2 }) ?? 'Desconocida'} m²</p>
+          <p>Pendiente de resolver: {context.coverage.unresolvedSurfaceSquareMetres?.toLocaleString('es-ES', { maximumFractionDigits: 2 }) ?? 'Desconocida'} m²</p>
+          {context.coverage.status !== 'accounted' && <p>La falta de cobertura vectorial no significa ausencia de planeamiento. Consulte las fuentes y revise las zonas pendientes.</p>}
+        </section>}
+
         <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
           <form
             action={formAction}
@@ -171,7 +220,7 @@ export function TerritorialContextPanel({
               <p className="text-muted-foreground mt-2 text-xs">
                 Se guardar&aacute;n como manuales y nunca se presentar&aacute;n como una comprobaci&oacute;n oficial.
               </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <input type="hidden" name="manualAffectsEdited" value="1" />
                 <div className="grid gap-2 sm:col-span-2">
                   <Label htmlFor="territorial-manual-municipality">Municipio conocido</Label>
@@ -226,7 +275,7 @@ export function TerritorialContextPanel({
                     placeholder="Información conocida, dudas o comprobaciones pendientes"
                   />
                 </div>
-                <div className="grid gap-3 sm:col-span-2">
+                <div ref={manualAffectsRef} className="grid gap-3 sm:col-span-2">
                   <p className="text-sm font-medium">Revisión manual de afecciones</p>
                   {displayedAutomaticAffects.map((affect, index) => {
                     const decision = context?.manualContext?.affectDecisions?.find(
@@ -424,10 +473,23 @@ export function TerritorialContextPanel({
 
           <div className="space-y-4">
             {!context ? (
-              <div className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-                Introduzca una localización para consultar Catastro, SIOTUGA y las capas oficiales
-                disponibles.
-              </div>
+              <>
+                <div className="bg-background rounded-lg border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Ajuste por Superposición (HAS)</h3>
+                      <p className="mt-1 text-xs text-slate-600">Disponible para revisión manual en cualquier estado del expediente. La disponibilidad no implica que UrbanBrain recomiende ejecutarlo.</p>
+                    </div>
+                    <a href={`/expedientes/${expedienteId}/has`} className="inline-flex items-center justify-center rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">
+                      Abrir HAS
+                    </a>
+                  </div>
+                </div>
+                <div className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
+                  Introduzca una localización para consultar Catastro, SIOTUGA y las capas oficiales
+                  disponibles.
+                </div>
+              </>
             ) : (
               <>
                 {(context.usingPreviousOfficialContext || context.manualContext) && (
@@ -515,15 +577,51 @@ export function TerritorialContextPanel({
                   </div>
                 </div>
 
+                <div className="bg-background mt-4 rounded-lg border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Ajuste por Superposición (HAS)</h3>
+                      <p className="mt-1 text-xs text-slate-600">Disponible para revisión manual en cualquier estado del expediente. La disponibilidad no implica que UrbanBrain recomiende ejecutarlo.</p>
+                    </div>
+                    <a href={`/expedientes/${expedienteId}/has`} className="inline-flex items-center justify-center rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">
+                      Abrir HAS
+                    </a>
+                  </div>
+                </div>
+
                 {/* INICIO BETA EXPRESS: ZONA NORMATIVA */}
                 {context.planningStatus === 'determined' && (
                   <div className="bg-background rounded-lg border border-blue-200 shadow-sm overflow-hidden mt-4">
                     <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center justify-between">
                       <div>
                         <h3 className="font-semibold text-blue-900">CALIFICACI&Oacute;N / ZONA NORMATIVA</h3>
-                        {context.ordinanceDetermination?.technician ? (
+                        {ordinanceResolutionStatus === 'USER_CONFIRMED' ? (
+                          <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
+                            <CheckCircle2 className="h-3 w-3" /> CONFIRMADO POR USUARIO
+                          </p>
+                        ) : ordinanceResolutionStatus === 'REVIEW_REQUIRED' ? (
+                          <p className="text-xs font-medium text-amber-700 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3 w-3" /> REVISI&Oacute;N T&Eacute;CNICA NECESARIA
+                          </p>
+                        ) : context.ordinanceDetermination?.technician?.verification === 'technician_validated' ? (
                           <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
                             <CheckCircle2 className="h-3 w-3" /> CONFIRMADO POR T&Eacute;CNICO
+                          </p>
+                        ) : ordinanceResolutionStatus === 'RESOLVED' ? (
+                          <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
+                            <CheckCircle2 className="h-3 w-3" /> RESUELTO AUTOM&Aacute;TICAMENTE
+                          </p>
+                        ) : ordinanceResolutionStatus === 'RESOLVED_WITH_PRECISION_WARNING' ? (
+                          <p className="text-xs font-medium text-amber-700 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3 w-3" /> RESUELTO CON AVISO DE PRECISI&Oacute;N
+                          </p>
+                        ) : context.ordinanceDetermination?.status === 'automatically_determined' ? (
+                          <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
+                            <CheckCircle2 className="h-3 w-3" /> CONFIRMADO AUTOM&Aacute;TICAMENTE
+                          </p>
+                        ) : context.ordinanceDetermination?.status === 'multizone' || (context.ordinanceCandidates?.length ?? 0) > 1 ? (
+                          <p className="text-xs font-medium text-amber-700 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3 w-3" /> MULTIZONA · REQUIERE REVISI&Oacute;N T&Eacute;CNICA
                           </p>
                         ) : (
                           <p className="text-xs font-medium text-amber-700 flex items-center gap-1 mt-1">
@@ -546,12 +644,120 @@ export function TerritorialContextPanel({
                             classificationCode={context.classification?.code}
                             categoryCode={context.classification?.categoryCode}
                             affects={context.affects}
+                            officialLegendUrl={ordinanceReviewMaterials?.legendUrl}
                           />
                         </div>
                       </details>
                     </div>
+
+                    {ordinanceResolutionStatus === 'REVIEW_REQUIRED' && (
+                      <div className="border-b border-amber-200 bg-amber-50 px-4 py-4 text-amber-950">
+                        <p className="text-sm font-semibold">Revisi&oacute;n t&eacute;cnica necesaria</p>
+                        <p className="mt-1 text-xs">
+                          UrbanBrain no puede determinar autom&aacute;ticamente la ordenanza con suficiente precisi&oacute;n para esta cartograf&iacute;a.
+                        </p>
+                        {ordinanceReviewMaterials?.precisionWarning && (
+                          <p className="mt-2 text-xs font-medium">{ordinanceReviewMaterials.precisionWarning}</p>
+                        )}
+                        {(ordinanceReviewMaterials?.mapUrl || ordinanceReviewMaterials?.legendUrl) && (
+                          <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                            {ordinanceReviewMaterials.mapUrl && <a className="underline" href={ordinanceReviewMaterials.mapUrl} target="_blank" rel="noreferrer">Abrir plano/fuente</a>}
+                            {ordinanceReviewMaterials.legendUrl && <a className="underline" href={ordinanceReviewMaterials.legendUrl} target="_blank" rel="noreferrer">Abrir leyenda/fuente</a>}
+                          </div>
+                        )}
+                        {context.ordinanceResolution?.hasEligibility?.eligible === true && (
+                          <div className="mt-4 border border-blue-200 bg-blue-50 p-4 rounded-md">
+                            <h4 className="font-semibold text-sm text-blue-900">Ajuste por Superposición (HAS) disponible</h4>
+                            <p className="text-xs text-blue-800 mt-1 mb-3">La cartografía de este municipio permite el ajuste manual del plano histórico sobre la parcela para determinar la normativa.</p>
+                            <p className="mt-2 text-xs font-medium text-blue-800">HAS recomendada para esta revisión por la evidencia disponible.</p>
+                          </div>
+                        )}
+                        {(context.ordinanceCandidates?.length ?? 0) > 0 || (context.ordinanceCatalogOptions?.length ?? 0) > 0 ? (
+                          <form action={formAction} className="mt-3 space-y-3">
+                            <input type="hidden" name="intent" value="manual" />
+                            <input type="hidden" name="candidateConfirmation" value="on" />
+                            <input type="hidden" name="refCatastral" value={context.cadastralReference ?? initialInput.cadastralReference ?? ''} />
+                            <input type="hidden" name="address" value={context.address ?? initialInput.address ?? ''} />
+                            {Number.isFinite(context.coordinates?.lat ?? initialInput.lat) ? <input type="hidden" name="lat" value={context.coordinates?.lat ?? initialInput.lat ?? ''} /> : null}
+                            {Number.isFinite(context.coordinates?.lng ?? initialInput.lng) ? <input type="hidden" name="lng" value={context.coordinates?.lng ?? initialInput.lng ?? ''} /> : null}
+                            <p className="text-xs font-medium">Seleccione una identidad del mismo instrumento</p>
+                            {proposedOrdinance && (
+                              <p role="note" className="rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-950">
+                                <strong>PROPUESTA DE URBANBRAIN: {proposedOrdinance.identity}.</strong> Es una hipótesis de trabajo basada en la evidencia disponible; no es una identidad confirmada y requiere revisión técnica.
+                              </p>
+                            )}
+                            {context.ordinanceCatalogOptions?.length ? (
+                              <select name="manualOrdinance" required defaultValue={context.ordinanceCatalogOptions.some((option) => option.status === 'ACCEPTED' && option.code === proposedOrdinance?.identity) ? proposedOrdinance?.identity : context.ordinanceResolution?.identity?.code ?? ''} className="w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-sm">
+                                <option value="" disabled>Seleccione una identidad del catálogo</option>
+                                {context.ordinanceCatalogOptions.filter((option) => option.status === 'ACCEPTED').map((option) => (
+                                  <option key={option.identityId} value={option.code}>{option.code} — {option.label}{option.status === 'REVIEW_REQUIRED' ? ' (requiere revisión)' : ''}</option>
+                                ))}
+                              </select>
+                            ) : <div className="grid gap-2 sm:grid-cols-2">
+                              {context.ordinanceCandidates!.map((candidate) => (
+                                <label key={`review-${candidate.identity}`} className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-white p-2 text-xs has-[:checked]:border-amber-700 has-[:checked]:ring-1 has-[:checked]:ring-amber-700">
+                                  <input type="radio" name="manualOrdinance" value={candidate.identity} required defaultChecked={candidate.identity === proposedOrdinance?.identity} className="mt-0.5" />
+                                  <span><span className="block font-medium">{candidate.identity}{candidate.identity === proposedOrdinance?.identity ? ' · PROPUESTA' : ''}</span><span className="text-slate-600">{candidate.documentaryEvidence ?? 'Evidencia del instrumento'}</span></span>
+                                </label>
+                              ))}
+                            </div>}
+                            <Button type="submit" disabled={pending}>CONFIRMAR ORDENANZA</Button>
+                          </form>
+                        ) : (
+                          <p className="mt-3 text-xs">No hay identidades pormenorizadas suficientemente acreditadas para seleccionar.</p>
+                        )}
+                        <form action={formAction} className="mt-3">
+                          <input type="hidden" name="intent" value="manual" />
+                          <input type="hidden" name="manualOrdinanceRevoke" value="on" />
+                          <input type="hidden" name="refCatastral" value={context.cadastralReference ?? initialInput.cadastralReference ?? ''} />
+                          <Button type="submit" variant="ghost" disabled={pending}>NO PUEDO DETERMINARLA</Button>
+                        </form>
+                      </div>
+                    )}
+
+                    {(context.ordinanceCandidates?.length ?? 0) > 0 && (
+                      <div className="border-b bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-semibold text-slate-800">
+                          Identidades detectadas por el plano detallado
+                        </p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          {context.ordinanceCandidates!.map((candidate) => (
+                            <div key={`${candidate.identity}-${candidate.sourceRef ?? ''}`} className="rounded-md border bg-white p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-medium">{candidate.identity}</p>
+                                {candidate.coverage?.percentage !== undefined && (
+                                  <span className="font-mono text-xs text-slate-600">
+                                    {candidate.coverage.percentage}%
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-[11px] text-slate-600">
+                                {candidate.documentaryEvidence ?? 'Evidencia documental del mismo instrumento'}
+                              </p>
+                              <p className="mt-1 text-[10px] text-slate-500">
+                                Confianza: {candidate.confidence ?? 'no determinada'}
+                                {candidate.sourceDocument ? ` · ${candidate.sourceDocument}` : ''}
+                              </p>
+                              {candidate.provenance.length > 0 && (
+                                <details className="mt-2 text-[10px] text-slate-500">
+                                  <summary className="cursor-pointer">Ver procedencia</summary>
+                                  <ul className="mt-1 space-y-0.5 break-all">
+                                    {candidate.provenance.map((item) => <li key={item}>• {item}</li>)}
+                                  </ul>
+                                </details>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {(context.ordinanceDetermination?.status === 'multizone' || context.ordinanceCandidates!.length > 1) && (
+                          <p className="mt-2 text-xs font-medium text-amber-800">
+                            Se conservan todas las zonas con cobertura material. No se ha elegido una ordenanza dominante.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     
-                    <form action={formAction} className="p-4 bg-white flex flex-col gap-3">
+                    {ordinanceResolutionStatus !== 'REVIEW_REQUIRED' && <form action={formAction} className="p-4 bg-white flex flex-col gap-3">
                       <input type="hidden" name="intent" value="manual" />
                       <input type="hidden" name="refCatastral" value={context.cadastralReference ?? initialInput.cadastralReference ?? ''} />
                       <input type="hidden" name="address" value={context.address ?? initialInput.address ?? ''} />
@@ -561,14 +767,19 @@ export function TerritorialContextPanel({
                       
                       <div className="grid gap-2">
                         <Label htmlFor="territorial-manual-ordinance-main">Identidad de la zona / ordenanza</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="territorial-manual-ordinance-main"
-                            name="manualOrdinance"
-                            className="max-w-md"
-                            defaultValue={context.ordinanceDetermination?.technician?.value ?? context.manualContext?.ordinance ?? ''}
-                            placeholder="Ej. R1, ORD-3, Residencial extensiva..."
-                          />
+                         <div className="flex gap-2">
+                           {context.ordinanceCatalogOptions?.length ? (
+                             <select id="territorial-manual-ordinance-main" name="manualOrdinance" className="max-w-md rounded-md border px-3 py-2 text-sm" defaultValue={context.ordinanceResolution?.identity?.code ?? context.ordinanceDetermination?.technician?.value ?? context.manualContext?.ordinance ?? ''}>
+                               <option value="">Seleccione una identidad</option>
+                               {context.ordinanceCatalogOptions.filter((option) => option.status === 'ACCEPTED').map((option) => <option key={option.identityId} value={option.code}>{option.code} — {option.label}</option>)}
+                             </select>
+                           ) : <Input
+                             id="territorial-manual-ordinance-main"
+                             name="manualOrdinance"
+                             className="max-w-md"
+                             defaultValue={context.ordinanceDetermination?.technician?.value ?? context.manualContext?.ordinance ?? ''}
+                             placeholder="Ej. R1, ORD-3, Residencial extensiva..."
+                           />}
                           <Button type="submit" disabled={pending}>
                             Guardar confirmaci&oacute;n
                           </Button>
@@ -577,7 +788,7 @@ export function TerritorialContextPanel({
                           Introduzca la clave o denominaci&oacute;n que aparece en el plano oficial de ordenaci&oacute;n.
                         </p>
                       </div>
-                    </form>
+                    </form>}
                   </div>
                 )}
                 {/* FIN BETA EXPRESS: ZONA NORMATIVA */}
@@ -694,7 +905,7 @@ export function TerritorialContextPanel({
                 <div className="bg-background rounded-lg border p-4">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm font-semibold">Afecciones</h3>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setManualOpen(true)}>
+                    <Button type="button" variant="ghost" size="sm" onClick={openManualEditor}>
                       Editar afecciones
                     </Button>
                   </div>
@@ -729,8 +940,13 @@ export function TerritorialContextPanel({
                   )}
                   {!context.canRuleOutUndetectedAffects && (
                     <p className="mt-3 text-xs text-amber-800">
-                      La cobertura es parcial: este resultado no demuestra ausencia de otras
-                      afecciones.
+                      {(() => {
+                        const coverageWarning = context.warnings.find((warning) => /cubre capas verificadas de/i.test(warning));
+                        const coveredFamilies = coverageWarning?.match(/cubre capas verificadas de (.*?);/i)?.[1];
+                        return coveredFamilies
+                          ? `Comprobadas automáticamente: ${coveredFamilies}. Otras afecciones sectoriales pueden requerir comprobación adicional.`
+                          : 'Comprobaciones automáticas realizadas sobre capas oficiales verificadas. Otras afecciones sectoriales pueden requerir comprobación adicional.';
+                      })()}
                     </p>
                   )}
                 </div>
@@ -832,6 +1048,7 @@ export function TerritorialContextPanel({
                       classificationCode={context.classification?.code}
                       categoryCode={context.classification?.categoryCode}
                       affects={context.affects}
+                      officialLegendUrl={ordinanceReviewMaterials?.legendUrl}
                     />
                   </div>
                 </details>

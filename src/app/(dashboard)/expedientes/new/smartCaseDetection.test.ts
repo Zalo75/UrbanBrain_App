@@ -7,6 +7,7 @@ import {
   landClassFromClassification,
   municipalitiesForProvince,
   planningZoneNameFromCandidate,
+  municipalityFromDetection,
   summarizeSmartCaseDetection,
   validateSmartCaseSubmission,
 } from './smartCaseDetection'
@@ -50,6 +51,12 @@ function resolution(overrides: Partial<TerritorialResolution> = {}): Territorial
 }
 
 describe('smart case detection', () => {
+  it('expone Pontevedra y una identidad INE descubierta aunque no exista en el catálogo inicial', () => {
+    const detected = summarizeSmartCaseDetection(resolution({ municipality: 'VILA DE CRUCES', municipalityCode: '36059', province: 'PONTEVEDRA' }))
+    expect(detected.detected).toMatchObject({ municipalityId: '36059', municipalityCode: '36059', provinceId: 'pontevedra', provinceName: 'Pontevedra' })
+    expect(municipalityFromDetection(detected.detected)).toMatchObject({ id: '36059', provinceId: 'pontevedra', coverageStatus: 'pending' })
+    expect(validateSmartCaseSubmission({ provinceId: 'pontevedra', municipalityId: '36059', cadastralReference: detected.detected.cadastralReference, lat: detected.detected.lat, lng: detected.detected.lng, address: detected.detected.address }, detected)).toBeNull()
+  })
   it('autoselecciona Culleredo por INE y mantiene RC completa y parcelaria', () => {
     const detected = summarizeSmartCaseDetection(resolution())
 
@@ -183,6 +190,89 @@ describe('smart case detection', () => {
     expect(detected.progress.find((item) => item.id === 'classification')).toMatchObject({ status: 'success' })
     expect(detected.detected.landClass).toBe('urbano_no_consolidado')
     expect(detected.result.planning.classification?.categoryCode).toBe('SUSC')
+  })
+
+  it('transporta la identidad normativa detallada y sus referencias hasta el preflight', () => {
+    const candidate = {
+      identity: 'R-2',
+      semanticDimension: 'ordinance' as const,
+      instrumentId: '27387',
+      sourceRef: 'https://official.test/27387no101.pdf',
+      sourceDocument: '27387no101.pdf',
+      spatialEvidence: 'La evidencia parcelaria requiere revisión técnica.',
+      graphicEvidence: 'Zona gráfica observada en el plano oficial.',
+      legendEvidence: 'Correspondencia con la leyenda oficial.',
+      documentaryEvidence: 'Ordenanza R-2.',
+      instrumentMembership: true,
+      provenance: ['https://official.test/27387no101.pdf'],
+      identityId: '27387:ordinance:R-2',
+      catalogStatus: 'ACCEPTED' as const,
+      normativeReferences: [{
+        documentId: '27387no101.pdf',
+        chunkIds: ['chunk-r2'],
+        relation: 'defines' as const,
+        sourceId: 'https://official.test/27387no101.pdf',
+      }],
+    }
+    const detected = summarizeSmartCaseDetection(resolution({
+      municipality: 'Teo',
+      municipalityCode: '15082',
+      planning: {
+        ...resolution().planning,
+        applicableInstruments: [{
+          id: '27387', name: 'PXOM de Teo', kind: 'general', status: 'current',
+          sourceUrl: 'https://official.test/27387',
+        }],
+        ordinanceCandidates: [candidate],
+        ordinanceResolution: {
+          status: 'REVIEW_REQUIRED',
+          confidence: 'high',
+          provenance: candidate.provenance,
+          identityId: candidate.identityId,
+          normativeReferences: candidate.normativeReferences,
+        },
+      },
+    }))
+
+    expect(detected.ordinanceCandidates).toEqual([candidate])
+    expect(detected.ordinanceResolution).toMatchObject({
+      identityId: '27387:ordinance:R-2',
+      normativeReferences: candidate.normativeReferences,
+    })
+    expect(detected.detected.instrumentId).toBe('27387')
+  })
+
+  it('conserva observaciones visuales y propuestas canónicas sin convertirlas en confirmación', () => {
+    const observation = {
+      observedText: '19',
+      description: 'Número visible dentro del recinto de la parcela.',
+      spatialRelation: 'contains' as const,
+      confidence: 'high' as const,
+      provenance: ['https://official.test/pord.png'],
+    }
+    const candidate = {
+      identity: '19',
+      instrumentId: '27387',
+      semanticDimension: 'ordinance' as const,
+      provenance: observation.provenance,
+      identityId: '27387:ordinance:19',
+      catalogStatus: 'ACCEPTED' as const,
+      confidence: 'high' as const,
+    }
+    const detected = summarizeSmartCaseDetection(resolution({
+      planning: {
+        ...resolution().planning,
+        applicableInstruments: [{ id: '27387', name: 'PXOM', kind: 'general', status: 'current', sourceUrl: 'https://official.test/27387' }],
+        visualResolutionState: 'resolved',
+        visualObservations: [observation],
+        visualCandidates: [candidate],
+      },
+    }))
+
+    expect(detected.visualObservations).toEqual([observation])
+    expect(detected.visualCandidates).toEqual([candidate])
+    expect(detected.visualResolutionState).toBe('resolved')
+    expect(detected.ordinanceResolution).toBeUndefined()
   })
 
   it('confirma sólo el instrumento catalogado de Oleiros y mantiene desactivada la clasificación', () => {

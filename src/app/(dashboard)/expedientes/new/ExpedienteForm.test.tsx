@@ -7,6 +7,10 @@ vi.mock('./actions', () => ({
   getPlanningOptionsAction: vi.fn(async () => []),
 }))
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
 vi.mock('@/components/maps/ParcelMap', () => ({
   ParcelMap: ({
     geometry,
@@ -552,6 +556,100 @@ describe('ExpedienteForm', () => {
     expect(landClass.selectedOptions[0]?.text).toMatch(/Seleccionar si no se ha determinado/i)
   })
 
+  it('does not expose HAS before an eligible expediente has been created', async () => {
+    const parcelGeometry = {
+      type: 'MultiPolygon' as const,
+      crs: 'EPSG:4326' as const,
+      coordinates: [[[[-8.246, 42.794], [-8.245, 42.794], [-8.245, 42.795], [-8.246, 42.794]]]],
+    }
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000104',
+      detection: {
+        detected: {
+          cadastralReference: '8084401NH6388S',
+          parcelReference: '8084401NH6388S',
+          provinceId: 'pontevedra',
+          provinceName: 'Pontevedra',
+          municipalityId: '36059',
+          municipalityName: 'Vila de Cruces',
+          municipalityCode: '36059',
+          parcelGeometry,
+          planeamiento: 'Normas Subsidiarias de Planeamiento',
+          instrumentId: '23045',
+          locationSource: 'cadastral_reference',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+        ordinanceCandidates: [],
+        ordinanceResolution: {
+          status: 'REVIEW_REQUIRED',
+          provenance: [],
+          hasEligibility: {
+            eligible: true,
+            reason: 'OFFICIAL_RASTER_WITHOUT_USABLE_SPATIAL_REFERENCE',
+            municipalityCode: '36059',
+            instrumentId: '23045',
+            parcelGeometry,
+            sheet: {
+              id: '23045:1002su001.jpg',
+              sourceUrl: 'https://official.example/23045/1002su001.jpg',
+              format: 'jpg',
+              provenance: ['siotuga:inventory:1002su001.jpg'],
+            },
+          },
+        },
+        ordinanceCatalogOptions: [],
+      },
+    })
+    render(<ExpedienteForm provinces={[...provinces, { id: 'pontevedra', name: 'Pontevedra', ccaaId: 'galicia', enabled: true }]} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '8084401NH6388S' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe(
+        '00000000-0000-4000-8000-000000000104'
+      )
+    })
+    expect(screen.getByTestId('parcel-map').getAttribute('data-has-geometry')).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Abrir HAS' })).toBeNull()
+    expect(screen.queryByText('HAS: Nuevo Expediente')).toBeNull()
+  })
+
+  it('does not show HAS when the creator detection has no spatial eligibility signal', async () => {
+    vi.mocked(detectContextAction).mockResolvedValue({
+      detectionId: '00000000-0000-4000-8000-000000000105',
+      detection: {
+        detected: {
+          cadastralReference: '8084401NH6388S',
+          municipalityId: '36059',
+          municipalityName: 'Vila de Cruces',
+          municipalityCode: '36059',
+          provinceId: 'pontevedra',
+          provinceName: 'Pontevedra',
+        },
+        progress: [],
+        sourceChecks: [],
+        affects: [],
+        ordinanceResolution: { status: 'REVIEW_REQUIRED', provenance: [] },
+      },
+    })
+    render(<ExpedienteForm provinces={[...provinces, { id: 'pontevedra', name: 'Pontevedra', ccaaId: 'galicia', enabled: true }]} municipalities={municipalities} />)
+    fireEvent.change(screen.getByLabelText(/Referencia catastral/i), {
+      target: { value: '8084401NH6388S' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /analizar parcela/i }))
+
+    await waitFor(() => {
+      expect((document.querySelector('input[name="preflightDetectionId"]') as HTMLInputElement).value).toBe(
+        '00000000-0000-4000-8000-000000000105'
+      )
+    })
+    expect(screen.queryByRole('button', { name: 'Abrir HAS' })).toBeNull()
+  })
+
   // ─── Auto-sync: zona seleccionada en el mapa → formulario actualizado ───────
 
   const candidateA = {
@@ -674,9 +772,8 @@ describe('ExpedienteForm', () => {
     expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Fijar como Zona de Trabajo/i }))
     expect(screen.queryByTestId('auto-detected-badge')).toBeNull()
-    expect(screen.getByText(/Modificado manualmente/i)).toBeTruthy()
-    const reason = screen.getByLabelText(/Motivo de la selección manual/i)
-    expect(reason.getAttribute('required')).not.toBeNull()
+    expect(screen.queryByText(/Modificado manualmente/i)).toBeNull()
+    expect(screen.queryByLabelText(/Motivo de la selección manual/i)).toBeNull()
   })
 
   it('shows manual-override badge when user edits classification after zone selection', async () => {

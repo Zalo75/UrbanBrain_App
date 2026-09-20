@@ -245,7 +245,7 @@ describe('NormativeAnswerPerf Telemetry', () => {
     process.env.KNOWLEDGE_ENGINE = undefined
   })
 
-  it('3. validation failure keeps reason codes and uses the conditional viability fallback', async () => {
+  it('3. validation failure keeps reason codes and uses the direct technical fallback', async () => {
 
     mocks.completionCreate.mockResolvedValueOnce({
       choices: [{ message: { content: JSON.stringify({ intent: 'normativa_lookup', required_scopes: [], required_categories: [], needs_context: true, needs_sources: true, extracted_parameters: {} }) } }] }).mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ answerMode: 'definitive', claims: [{ id: '1', type: 'parcel_conclusion', text: 'El régimen se aplica', sourceRefs: [999], appliesToParcel: true, numericTokens: [] }], missingFacts: [] }) } }],
@@ -262,9 +262,9 @@ describe('NormativeAnswerPerf Telemetry', () => {
     const telemetryObj = telemetryCall![1]
 
     expect(telemetryObj.validationValid).toBe(false)
-    expect(telemetryObj.finalDecision).toBe('answer')
-    expect(telemetryObj.semanticFallbackUsed).toBe(true)
-    expect(telemetryObj.semanticFallbackReason).toBe('CONDITIONAL_VIABILITY_ONLY')
+    expect(telemetryObj.finalDecision).toBe('abstain')
+    expect(telemetryObj.semanticFallbackUsed).toBe(false)
+    expect(telemetryObj.semanticFallbackReason).toBe(null)
     expect(Array.isArray(telemetryObj.validationReasonCodes)).toBe(true)
     expect(telemetryObj.validationReasonCodes.length).toBeGreaterThan(0)
     expect(telemetryObj.validationReasonCodes).toContain('NON_EXISTENT_SOURCE')
@@ -277,7 +277,9 @@ describe('NormativeAnswerPerf Telemetry', () => {
       body: JSON.stringify({ expedienteId: 'exp-telemetry', message: '¿Se puede construir? PREGUNTA_SECRETA_XYZ' }),
     }))
 
-    const allInfoLogs = consoleInfoSpy.mock.calls.map((c: any) => JSON.stringify(c)).join(' ')
+    const allInfoLogs = consoleInfoSpy.mock.calls
+      .filter((c: any) => c[0] !== 'UB-E2E-TRACE')
+      .map((c: any) => JSON.stringify(c)).join(' ')
     expect(allInfoLogs).not.toContain('PREGUNTA_SECRETA_XYZ')
     expect(allInfoLogs).not.toContain('El régimen del suelo rústico') // Chunk text
     expect(allInfoLogs).not.toContain('CONCLUSIÓN') // LLM Response text

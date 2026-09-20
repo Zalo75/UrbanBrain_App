@@ -1,6 +1,7 @@
 import { evaluateClassificationResolution } from '@/domain/territorial-resolver/classificationDecision'
 import { withUrbanisticFacts } from '@/domain/territorial-resolver/urbanisticFacts'
 import type {
+  ClassificationSourceResult,
   ClassificationSourcePort,
   OfficialSource,
   ParcelGeometry,
@@ -109,6 +110,11 @@ export class MultiSourceClassificationResolver implements PlanningPort {
       ).values(),
     ]
 
+    const resources = results.find(
+      (result): result is PromiseFulfilledResult<ClassificationSourceResult> =>
+        result.status === 'fulfilled' && Boolean(result.value.resources)
+    )?.value.resources
+
     return withUrbanisticFacts({
       ...planning,
       classification: selectedCandidate?.classification,
@@ -117,6 +123,7 @@ export class MultiSourceClassificationResolver implements PlanningPort {
       evidence,
       sourceChecks: [...(planning.sourceChecks ?? []), ...sourceChecks],
       warnings: mergedWarnings,
+      resources: resources ?? planning.resources,
     }, this.now().toISOString())
   }
 }

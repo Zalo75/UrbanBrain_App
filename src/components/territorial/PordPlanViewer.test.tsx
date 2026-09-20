@@ -73,6 +73,21 @@ const actionAreaGeometry = {
 }
 
 describe('LeafletPordViewer', () => {
+  it('renders the official PORD legend inside the viewer when available', () => {
+    render(
+      <LeafletPordViewer
+        wmsLayer="_15004_PXOM_202002_AD_PORD_02CL_28295"
+        officialLegendUrl="https://official.example/wms?REQUEST=GetLegendGraphic&LAYER=detail"
+      />,
+    )
+    expect(screen.getByRole('region', { name: 'Visor comparativo PORD' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Leyenda cartográfica oficial del plano PORD' })).toHaveAttribute(
+      'src',
+      'https://official.example/wms?REQUEST=GetLegendGraphic&LAYER=detail',
+    )
+    expect(screen.getByText('Leyenda oficial PORD')).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     fitBounds.mockClear()
   })

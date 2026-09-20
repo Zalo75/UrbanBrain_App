@@ -1,0 +1,2135 @@
+{
+  "schemaVersion": "catalog-identity-pilot.v1",
+  "generatedAt": "2026-08-27T12:13:41.773Z",
+  "municipalityCode": "15082",
+  "municipalityName": "Teo",
+  "instrumentId": "27387",
+  "instrument": {
+    "name": "PLAN XERAL DE ORDENACIÓN MUNICIPAL",
+    "approvalDate": "2010-06-04",
+    "sourceId": "siotuga:inventory:15082:general"
+  },
+  "algorithm": {
+    "sourceScope": "public.normativa_chunks where municipio_codigo='15082' and nombre_pdf like '27387%'",
+    "extraction": "explicit heading/table/article only; mentions are excluded; duplicate documents are corroboration only",
+    "authority": "official same-instrument text; LLM output is not authoritative"
+  },
+  "officialSources": [
+    {
+      "documentId": "27387no101.pdf",
+      "type": "normative_text",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/TEO/documents/27387no101.pdf",
+      "role": "primary normative publication"
+    },
+    {
+      "documentId": "27387no300.pdf",
+      "type": "normative_text",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/TEO/documents/27387no300.pdf",
+      "role": "official index/equivalent copy"
+    },
+    {
+      "documentId": "27387no304.pdf",
+      "type": "normative_text",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/TEO/documents/27387no304.pdf",
+      "role": "official equivalent copy"
+    },
+    {
+      "documentId": "27387no306.pdf",
+      "type": "normative_text",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/TEO/documents/27387no306.pdf",
+      "role": "official equivalent copy"
+    }
+  ],
+  "identities": [
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "area",
+      "officialCode": "ZONA-1",
+      "officialName": "Cornixa Noroeste",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00040"
+          ],
+          "quote": "Zona 1: Cornixa Noroeste",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:area:ZONA-1"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "area",
+      "officialCode": "ZONA-2",
+      "officialName": "Cornixa Norleste",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00041"
+          ],
+          "quote": "Zona 2: Cornixa Norleste",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:area:ZONA-2"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "area",
+      "officialCode": "ZONA-5",
+      "officialName": "Vertente Sta. Lucia Leste",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00045"
+          ],
+          "quote": "Zona 5: Vertente Sta. Lucia Leste",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00048"
+          ],
+          "quote": "Zona 5: Vertente Sta. Lucia Leste",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:area:ZONA-5"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "area",
+      "officialCode": "ZONA-6",
+      "officialName": "Meseta Oeste",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00046"
+          ],
+          "quote": "Zona 6: Meseta Oeste",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:area:ZONA-6"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "area",
+      "officialCode": "ZONA-7",
+      "officialName": "Cornixa Oeste",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no501.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no501.pdf",
+          "chunkIds": [
+            "1073e1e46a49ee5f_00047"
+          ],
+          "quote": "Zona 7: Cornixa Oeste",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:area:ZONA-7"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "8",
+      "officialName": "Condicións de integración no núcleo",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00120"
+          ],
+          "quote": "ordenanza\n8. Condicións de integración no núcleo",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00223"
+          ],
+          "quote": "ordenanza\n8. Condicións de integración no núcleo",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00120"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00223"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:8"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "N-1",
+      "officialName": "Núcleo rural tradicionalXl'NTA PE GAMO1 A",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00111"
+          ],
+          "quote": "Ordenanza N-1. Núcleo rural tradicionalXl'NTA PE GAMO1 A",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00214"
+          ],
+          "quote": "Ordenanza N-1. Núcleo rural tradicional",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00111"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00214"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:N-1"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "N-2",
+      "officialName": "Expansión de núcleo rural",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00013"
+          ],
+          "quote": "Ordenanza N-2. Expansión de núcleo rural ",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00202"
+          ],
+          "quote": "Ordenanza N-2. Expansión de núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00203"
+          ],
+          "quote": "Ordenanza N-2. Expansión de núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00117"
+          ],
+          "quote": "Ordenanza N-2. Expansión de núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00220"
+          ],
+          "quote": "Ordenanza N-2. Expansión de núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00013"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00202"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00203"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00117"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00220"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:N-2"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "N-3",
+      "officialName": "Fincas Singulares en núcleo rural",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00013"
+          ],
+          "quote": "Ordenanza N-3. Fincas Singulares en núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00208"
+          ],
+          "quote": "Ordenanza N-3. Fincas Singulares en núcleo rural",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00120"
+          ],
+          "quote": "Ordenanza N-3. Fincas Singulares en núclé’ó (fur-al 0 ",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00223"
+          ],
+          "quote": "Ordenanza N-3. Fincas Singulares en núclé’ó (fur-al 0 ",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00013"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00208"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00120"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00223"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:N-3"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-1",
+      "officialName": "Solo rústico de Protección Ordinaria",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo rústico de Protección Ordinaria...............................................................................144",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00133"
+          ],
+          "quote": "Solo rústico de Protección Ordinaria",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo rústico de Protección Ordinaria..................................................................................................144",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00236"
+          ],
+          "quote": "Solo rústico de Protección Ordinaria",
+          "relation": "regulates",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:ordinance:R-1"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-2",
+      "officialName": "Solo Rústico de Especial Protección Agropecuaria",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección Agropecuaria",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00218"
+          ],
+          "locator": "Art. 130",
+          "quote": "Art. 130. Ordenanza R-2. Solo Rústico de Especial Protección Agropecuaria",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protecdón Agropecuaria...........................................................145",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "article",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00134"
+          ],
+          "locator": "Art. 130",
+          "quote": "Art. 130. Ordenanza R-2. Solo Rústico de Especial Protección Agropecuaria",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protecdón Agropecuaria.........................................................................145",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "article",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00237"
+          ],
+          "locator": "Art. 130",
+          "quote": "Art. 130. Ordenanza R-2. Solo Rústico de Especial Protección Agropecuaria",
+          "relation": "defines",
+          "confidence": "high"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00218"
+          ],
+          "article": "Art. 130",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00134"
+          ],
+          "article": "Art. 130",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00237"
+          ],
+          "article": "Art. 130",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-2"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-3",
+      "officialName": "Solo Rústico de Especial Protección Forestal",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección Forestal",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00219"
+          ],
+          "quote": "Solo Rústico de Especial Protección Forestal",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00220"
+          ],
+          "locator": "Art. 131",
+          "quote": "Art. 131. Ordenanza R-3. Solo Rústico de Especial Protección Forestal",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo Rústico de Espedai Protección Forestal...................................................................146",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo Rústico de Espedai Protección Forestal.................................................................................. 146",
+          "relation": "regulates",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00220"
+          ],
+          "article": "Art. 131",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-3"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-4",
+      "officialName": "Solo Rústico de Especial Protección de Infraestruturas",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección de Infraestruturas",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00223"
+          ],
+          "locator": "Art. 132",
+          "quote": "Art. 132. Ordenanza R-4. Solo Rústico de Especial Protección de Infraestruturas",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo Rústico de Espedai Protección de Infraestruturas.....................................................148",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo Rústico de Espedai Protección de Infraestruturas................................................................. 148",
+          "relation": "regulates",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00223"
+          ],
+          "article": "Art. 132",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-4"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-5",
+      "officialName": "Solo Rústico de Especial Protección das Augas",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección das Augas",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00223"
+          ],
+          "locator": "Art. 0133",
+          "quote": "Art. 0133. Ordenanza R-5. Solo Rústico de Especial Protección das Augas",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protección das Augas............................................................... 149",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "article",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00141"
+          ],
+          "locator": "Art. 133",
+          "quote": "Art. 133. Ordenanza R-5. Solo Rústico de Especial Protección das Augas",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protección das Augas.............................................................................. 149",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "article",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00244"
+          ],
+          "locator": "Art. 133",
+          "quote": "Art. 133. Ordenanza R-5. Solo Rústico de Especial Protección das Augas",
+          "relation": "defines",
+          "confidence": "high"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00223"
+          ],
+          "article": "Art. 0133",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00141"
+          ],
+          "article": "Art. 133",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00244"
+          ],
+          "article": "Art. 133",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-5"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-6",
+      "officialName": "Solo Rústico de Especial Protección de Espazos Naturais",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección de Espazos Naturais",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00225"
+          ],
+          "locator": "Art. 0134",
+          "quote": "Art. 0134. Ordenanza R-6. Solo Rústico de Especial Protección de Espazos Naturais",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protección de Espazos Naturais................................................ 151",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "article",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00143"
+          ],
+          "locator": "Art. 134",
+          "quote": "Art. 134. Ordenanza R-6. Solo Rústico de Especial Prglfiedon de Espazos Naturais",
+          "relation": "defines",
+          "confidence": "high"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00015"
+          ],
+          "quote": "Solo Rústico de Especial Protección de Espazos Naturais............................................................151",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "article",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00246"
+          ],
+          "locator": "Art. 134",
+          "quote": "Art. 134. Ordenanza R-6. Solo Rústico de Especial Prglfiedon de Espazos Naturais",
+          "relation": "defines",
+          "confidence": "high"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00225"
+          ],
+          "article": "Art. 0134",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00143"
+          ],
+          "article": "Art. 134",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00246"
+          ],
+          "article": "Art. 134",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-6"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "R-7",
+      "officialName": "Solo Rústico de Especial Protección Patrimonial, Artfstica ou Eiistórica",
+      "status": "ACCEPTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00014"
+          ],
+          "quote": "Solo Rústico de Especial Protección Patrimonial, Artfstica ou Eiistórica",
+          "relation": "regulates",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "article",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00227"
+          ],
+          "locator": "Art. 0135",
+          "quote": "Art. 0135. Ordenanza R-7. Solo Rústico de Especial Protección Patrimonial, Artística ou Histórica",
+          "relation": "defines",
+          "confidence": "high"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00227"
+          ],
+          "article": "Art. 0135",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        }
+      ],
+      "id": "27387:ordinance:R-7"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-1",
+      "officialName": "Residendal de balxa densldade en tipoloxla mixta........................................................... 101",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-1. Residendal de balxa densldade en tipoloxla mixta........................................................... 101",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00073"
+          ],
+          "quote": "Ordenanza U-1. Residencial de baixa densidade en tipoloxía mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-1. Residendal de balxa densldade en tipoloxla mixta..........................................................................101",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00176"
+          ],
+          "quote": "Ordenanza U-1. Residencial de baixa densidade en tipoloxía mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00073"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00176"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-1"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-2",
+      "officialName": "Residencial de media densidade en tipoloxfa mixta",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-2. Residencial de media densidade en tipoloxfa mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00162"
+          ],
+          "quote": "Ordenanza U-2. Residencial de media densidade en tipoloxía mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-2. Residendal de media densidade en tipoloxla mixta.......................................................... 104",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00077"
+          ],
+          "quote": "Ordenanza U-2. Residencial de medía densidade en tipoloxía mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-2. Residendal de media densidade en tipoloxla mixta........................................................................104",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00180"
+          ],
+          "quote": "Ordenanza U-2. Residencial de medía densidade en tipoloxía mixta",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00162"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00077"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00180"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-2"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-3",
+      "officialName": "Residencial de baixa densidade en tipoloxía exenta",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00168"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00082"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00185"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:ordinance:U-3"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-3A",
+      "officialName": "Residencial de baixa densidade en tipoloxía exenta",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00168"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00082"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00185"
+          ],
+          "locator": "Art. 106",
+          "quote": "Art. 106. Ordenanza U-3 e U-3a. Residencial de baixa densidade en tipoloxía exenta",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:ordinance:U-3A"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-4",
+      "officialName": "Casco tradicional",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-4: Casco tradicional",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-4: Casco tradicional......................................................................................................... 109",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00084"
+          ],
+          "quote": "Ordenanza U-4: Casco tradicional",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-4: Casco tradicional..................................................................................................................................109",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00187"
+          ],
+          "quote": "Ordenanza U-4: Casco tradicional",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00084"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00187"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-4"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-5",
+      "officialName": "Desenvolvemento lineal sobre vfa",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento lineal sobre vfa",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00176"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento lineal sobre vía",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento lineal sobre vía.................................................................................113",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00091"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento linea) sobre vía",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento lineal sobre vía....................................................................................................113",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00194"
+          ],
+          "quote": "Ordenanza U-5. Desenvolvemento linea) sobre vía",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00176"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00091"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00194"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-5"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-6",
+      "officialName": "Actuacións residenciáis unitarias consolidadas",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-6. Actuacións residenciáis unitarias consolidadas",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00179"
+          ],
+          "quote": "Ordenanza U-6. Actuacións residenciáis unitarias consolidadas",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00180"
+          ],
+          "quote": "Ordenanza U-6. Actuacións residenciáis unitarias consolidadas",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-6. Actuacións residendais unitarias consolidadas................................................................115",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-6. Actuacións residendais unitarias consolidadas...............................................................................115",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00179"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00180"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-6"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-7",
+      "officialName": "Industrial",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-7. Industrial",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00185"
+          ],
+          "quote": "Ordenanza U-7. Industrial",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-7. Industrial.................................................................................................................... 119",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00097"
+          ],
+          "quote": "Ordenanza U-7. Industria)",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-7. Industrial................................................................................................................................................ 119",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00200"
+          ],
+          "quote": "Ordenanza U-7. Industria)",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00185"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00097"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00200"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-7"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "ordinance",
+      "officialCode": "U-8",
+      "officialName": "Terciario",
+      "status": "REVIEW_REQUIRED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "quote": "Ordenanza U-8. Terciario",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00188"
+          ],
+          "quote": "Ordenanza U-8. Terciario",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "quote": "Ordenanza U-8. Terciario..................................................................................................................... 122",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00100"
+          ],
+          "quote": "Ordenanza U-8. Terciario ",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "quote": "Ordenanza U-8. Terciario................................................................................................................................................. 122",
+          "relation": "defines",
+          "confidence": "medium"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00203"
+          ],
+          "quote": "Ordenanza U-8. Terciario ",
+          "relation": "defines",
+          "confidence": "medium"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00012"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no101.pdf",
+          "chunkIds": [
+            "939bc9fc3898b3ce_00188"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no101.pdf"
+        },
+        {
+          "documentId": "27387no300.pdf",
+          "chunkIds": [
+            "02e181a04703791b_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no300.pdf"
+        },
+        {
+          "documentId": "27387no304.pdf",
+          "chunkIds": [
+            "92b10db60e176e24_00100"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no304.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00014"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        },
+        {
+          "documentId": "27387no306.pdf",
+          "chunkIds": [
+            "34993b24eadaaf09_00203"
+          ],
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:27387:27387no306.pdf"
+        }
+      ],
+      "id": "27387:ordinance:U-8"
+    },
+    {
+      "municipalityCode": "15082",
+      "instrumentId": "27387",
+      "semanticDimension": "qualification",
+      "officialCode": "SU-C",
+      "officialName": "Solo urbano SU-C",
+      "status": "REJECTED",
+      "validity": {
+        "from": "2010-06-04"
+      },
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:27387:27387ca403.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "27387ca403.pdf",
+          "chunkIds": [
+            "aaba33c67e705f32_00002"
+          ],
+          "locator": "Cualificación urbanística",
+          "quote": "CUALIFICACIÓN URBANÍSTICA: SOLO URBANO SU-C",
+          "relation": "mentions",
+          "confidence": "high"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "27387:qualification:SU-C"
+    }
+  ],
+  "metrics": {
+    "chunksScanned": 2308,
+    "totalCandidates": 26,
+    "accepted": 6,
+    "reviewRequired": 19,
+    "rejected": 1,
+    "duplicateCopiesNotCounted": true
+  },
+  "writes": false
+}

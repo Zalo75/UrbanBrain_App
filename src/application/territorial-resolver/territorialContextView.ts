@@ -1,3 +1,6 @@
+import { detectionSummary } from '@/application/parcel-context/detectionSummary'
+import type { TerritorialDetectionSummary } from '@/application/parcel-context/normalizeParcelContext'
+import type { ParcelAccounting } from '@/domain/territorial-resolver/parcelAccounting'
 import type {
   ActionAreaSelection,
   ClassificationResolution,
@@ -11,6 +14,9 @@ import type {
   UrbanisticRegimeFacts,
   TerritorialResourceCatalog,
   ContextDeterminationState,
+  OrdinanceProductStatus,
+  OrdinanceReviewMaterial,
+  OrdinanceCandidate,
 } from '@/domain/territorial-resolver/types';
 import { urbanisticFactsFromClassificationResolution } from '@/domain/territorial-resolver/urbanisticFacts';
 import { officialResourceLinks } from '@/application/territorial-resolver/officialResourceLinks';
@@ -24,8 +30,12 @@ import {
   territorialAffectKey,
 } from '@/application/territorial-resolver/manualTerritorialContext';
 import { applyActionAreaToUrbanisticFacts } from '@/application/territorial-resolver/actionAreaSelection';
+import { createAutomaticDetermination } from '@/domain/territorial-resolver/determinations';
+import { getInstrumentIdentityOptions } from '@/infrastructure/planning-knowledge/PlanningKnowledgeBase';
+import { runtimeCatalogStatus } from '@/domain/planning-knowledge/identityCatalog';
 
 export interface TerritorialContextView {
+  coverage?: ParcelAccounting;
   status: 'confirmed' | 'approximate' | 'provisional' | 'conflict' | 'undetermined';
   confidence: TerritorialResolution['confidence'];
   resolvedAt: string;
@@ -49,7 +59,56 @@ export interface TerritorialContextView {
   planningDocuments?: PlanningDocumentReference[];
   resources?: TerritorialResourceCatalog;
   planningStatus?: 'determined' | 'conflict' | 'not_determined' | 'partial';
-  ordinanceDetermination?: ContextDeterminationState<string>;
+  ordinanceDetermination?: ContextDeterminationState<string> & { candidates?: OrdinanceCandidate[]; status?: string };
+  /** Detailed zoning candidates, including multizone/review-required evidence. */
+  ordinanceCandidates?: Array<{
+    identity: string;
+    semanticDimension?: string;
+    coverage?: { percentage?: number; areaSquareMetres?: number; method?: string };
+    confidence?: string;
+    sourceRef?: string;
+    sourceDocument?: string;
+    graphicEvidence?: string;
+    legendEvidence?: string;
+    documentaryEvidence?: string;
+    provenance: string[];
+    alignmentMethod?: string;
+    estimatedErrorMeters?: number;
+    warning?: string;
+    identityId?: string;
+    catalogStatus?: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED';
+    normativeReferences?: Array<{ documentId: string; chunkIds: string[]; article?: string; relation: 'defines' | 'regulates' | 'mentions'; sourceId: string }>;
+  }>;
+  ordinanceCatalogOptions?: Array<{
+    identityId: string;
+    code: string;
+    label: string;
+    status: 'ACCEPTED' | 'REVIEW_REQUIRED' | 'REJECTED';
+    semanticDimension: string;
+  }>;
+  contextualCandidates?: Array<{
+    identity: string;
+    semanticDimension?: string;
+    confidence?: string;
+    sourceRef?: string;
+    provenance: string[];
+  }>;
+  ordinanceResolution?: {
+    status: OrdinanceProductStatus;
+    identity?: { code?: string; label?: string };
+    confidence?: string;
+    source?: string;
+    provenance: string[];
+    alignmentMethod?: string;
+    estimatedErrorMeters?: number;
+    warning?: string;
+    reviewMaterials?: OrdinanceReviewMaterial;
+    confirmationSource?: 'automatic' | 'user';
+    confirmedByUser?: boolean;
+    identityId?: string;
+    normativeReferences?: Array<{ documentId: string; chunkIds: string[]; article?: string; relation: 'defines' | 'regulates' | 'mentions'; sourceId: string }>;
+    hasEligibility?: any;
+  };
   areas: string[];
   instrument?: string;
   affects: Array<{
@@ -109,12 +168,96 @@ function isTerritorialResolution(value: unknown): value is TerritorialResolution
   );
 }
 
-export function buildTerritorialContextView(value: unknown): TerritorialContextView | null {
+function isCanonicalDetectionSummary(value: unknown): value is TerritorialDetectionSummary {
+  return Boolean(value && typeof value === 'object' && (value as TerritorialDetectionSummary).schemaVersion === 1)
+}
+
+function buildCanonicalContextView(summary: TerritorialDetectionSummary): TerritorialContextView {
+  const checks = (summary.planningSourceChecks ?? summary.reliability?.sourceChecks ?? []) as OfficialSourceCheck[]
+  const finalSelection = summary.classificationResolution?.finalSelection
+  const selectedCandidate = finalSelection?.candidateId
+    ? summary.classificationResolution?.candidates.find((candidate) => candidate.id === finalSelection.candidateId)
+    : undefined
+  const canonicalOperationalValue =
+    summary.classificationDetermination?.technician?.value ??
+    summary.classificationDetermination?.automatic?.value ??
+    summary.landClass ??
+    finalSelection?.operationalValue
+  const classification = selectedCandidate?.classification ?? (canonicalOperationalValue
+    ? { code: canonicalOperationalValue, label: canonicalOperationalValue, sourceFeatureIds: [] }
+    : undefined)
+  const manual = summary.manualContext
+  const manualOrdinance = summary.ordinanceDetermination?.technician
+  const status: TerritorialContextView['status'] = summary.locationStatus === 'confirmed' && summary.planningStatus === 'vigente'
+    ? 'confirmed'
+    : summary.planningApplicabilityStatus === 'conflict' || (summary.conflicts?.length ?? 0) > 0
+      ? 'conflict'
+      : summary.locationStatus === 'unresolved' ? 'undetermined' : 'provisional'
+  const affects = (summary.affects?.detected ?? []).map((affect) => ({
+    category: affect.category,
+    name: affect.name,
+    confidence: affect.confidence ?? 'unknown',
+    origin: 'automatic' as const,
+  }))
+  return {
+    coverage: summary.coverage,
+    status,
+    confidence: summary.locationConfidence ?? 'low',
+    resolvedAt: summary.resolvedAt ?? new Date(0).toISOString(),
+    inputMethod: (summary.inputMethod ?? 'unknown') as TerritorialResolution['inputMethod'],
+    cadastralReference: summary.cadastralReference ?? undefined,
+    parcelReference: summary.parcelReference ?? undefined,
+    address: summary.address ?? undefined,
+    coordinates: summary.lat != null && summary.lng != null ? { lat: summary.lat, lng: summary.lng } : undefined,
+    parcelGeometry: summary.parcelGeometry ?? undefined,
+    parcelSurfaceSquareMetres: summary.parcelSurfaceSquareMetres,
+    actionArea: summary.actionAreaSelection?.current,
+    municipality: summary.municipalityName ?? undefined,
+    municipalityCode: summary.municipalityCode ?? undefined,
+    province: summary.provinceName ?? undefined,
+    classification,
+    classificationOrigin: summary.classificationDetermination?.technician ? 'manual' : 'automatic',
+    automaticClassification: classification,
+    classificationResolution: summary.classificationResolution,
+    urbanisticFacts: summary.urbanisticFacts ?? undefined,
+    officialLinks: [],
+    planningDocuments: summary.planningDocuments ?? [],
+    resources: summary.planningResources,
+    planningStatus: summary.planningApplicabilityStatus === 'determined' ? 'determined' : summary.planningApplicabilityStatus === 'conflict' ? 'conflict' : summary.planningApplicabilityStatus === 'partial' ? 'partial' : 'not_determined',
+    ordinanceDetermination: summary.ordinanceDetermination,
+    ordinanceCandidates: summary.ordinanceCandidates,
+    contextualCandidates: summary.contextualCandidates,
+    ordinanceResolution: summary.ordinanceResolution as TerritorialContextView['ordinanceResolution'],
+    areas: summary.planningArea ? [summary.planningArea] : [],
+    instrument: summary.planningInstrument ?? undefined,
+    affects,
+    automaticAffects: affects.map((affect) => ({ ...affect, key: `${affect.category}:${affect.name}`, source: 'detection' })),
+    parcelAffects: affects.map((affect) => ({ ...affect, key: `${affect.category}:${affect.name}`, source: 'detection' })),
+    conflicts: summary.conflicts?.map((conflict) => conflict.reason) ?? [],
+    parcelConflicts: summary.parcelPlanningConflicts ?? [],
+    warnings: summary.warnings?.map((warning) => warning.message) ?? [],
+    sources: summary.planningEvidence ?? [],
+    canAnswerConcreteParameters: summary.planningCanAnswerConcreteParameters ?? false,
+    canRuleOutUndetectedAffects: false,
+    candidateCount: summary.ordinanceCandidates?.length ?? 0,
+    latestAttemptAt: summary.reliability?.latestAttemptAt ?? summary.resolvedAt ?? new Date(0).toISOString(),
+    officialContextResolvedAt: summary.reliability?.officialContextResolvedAt ?? undefined,
+    usingPreviousOfficialContext: summary.reliability?.usingPreviousOfficialContext ?? false,
+    manualContext: manual ? ({ ...manual, validatedBy: undefined } as Omit<ManualTerritorialContext, 'validatedBy'>) : undefined,
+    manualOrdinance: manualOrdinance ? ({ ...manualOrdinance, recordedAt: manualOrdinance.recordedAt } as Omit<ContextDetermination<string>, 'recordedBy' | 'validatedBy'>) : undefined,
+    technicallyReviewed: summary.reliability?.mode === 'technician_validated_manual',
+    sourceChecks: checks,
+  }
+}
+
+export function buildTerritorialContextView(value: unknown, persisted?: TerritorialDetectionSummary | null): TerritorialContextView | null {
+  if (isCanonicalDetectionSummary(value)) return buildCanonicalContextView(value)
   if (!isTerritorialResolution(value)) return null;
   const result = value;
+  const canonical = persisted?.schemaVersion === 1 ? persisted : detectionSummary(result);
   const effective = officialContextForUse(result);
   const manual = result.continuity?.manualContext;
-  const actionArea = manual?.actionAreaSelection?.current;
+  const actionArea = canonical.actionAreaSelection?.current;
   const actionAreaCandidate = actionArea?.selectedCandidateId
     ? effective?.planning.classificationResolution?.candidates.find(
         (candidate) => candidate.id === actionArea.selectedCandidateId
@@ -130,7 +273,19 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
           sourceFeatureIds: [],
         }
       : undefined);
-  const manualOrdinance = manual?.ordinanceDetermination?.technician;
+  // A few legacy contexts persisted the explicit ordinance value before the
+  // determination wrapper was introduced. Treat that value as the same
+  // user-originated decision; never let a later automatic attempt erase it.
+  const manualOrdinance = manual?.ordinanceDetermination?.technician ??
+    (manual?.ordinance
+      ? {
+          value: manual.ordinance,
+          origin: 'technician_selection' as const,
+          source: 'manual' as const,
+          verification: manual.verification,
+          recordedAt: manual.recordedAt,
+        }
+      : undefined);
   const sourceChecks = allSourceChecks(result);
   const incompleteSource = sourceChecks.some((check) =>
     ['partial', 'timeout', 'unavailable', 'malformed'].includes(check.status)
@@ -247,18 +402,101 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
   );
 
   const ordinanceCandidates = effective?.planning.ordinanceCandidates ?? [];
-  let ordStatus: 'automatically_determined' | 'assisted_confirmation_required' | 'manual_confirmation_required' | 'not_available' | undefined = undefined;
+  const catalogInstrumentId = effective?.planning.applicableInstruments?.find((item) => item.status === 'current')?.id ?? effective?.planning.instrument;
+  const ordinanceCatalogOptions = getInstrumentIdentityOptions(effective?.municipalityCode, catalogInstrumentId)
+    .map((identity) => ({
+      identityId: identity.id,
+      code: identity.officialCode,
+      label: identity.officialName,
+      status: runtimeCatalogStatus(identity.status),
+      semanticDimension: identity.semanticDimension,
+    }));
+  const contextualCandidates = effective?.planning.contextualCandidates ?? effective?.planning.ordinanceResolution?.contextualCandidates ?? [];
+  console.log('UB-E2E-TRACE territorial-context-view', JSON.stringify({
+    municipalityCode: effective?.municipalityCode ?? null,
+    planningInstrument: effective?.planning.instrument ?? null,
+    planningStatus: effective?.planning.status ?? null,
+    usingPreviousOfficialContext: result.continuity?.usingPreviousOfficialContext ?? false,
+    ordinanceCandidates: ordinanceCandidates.map((candidate) => ({
+      identity: candidate.identity,
+      semanticDimension: candidate.semanticDimension ?? null,
+      sourceRef: candidate.sourceRef,
+      sourceDocument: candidate.sourceDocument,
+      provenance: candidate.provenance,
+    })),
+    contextualCandidates: contextualCandidates.map((candidate) => ({
+      identity: candidate.identity,
+      semanticDimension: candidate.semanticDimension ?? null,
+      sourceRef: candidate.sourceRef,
+      provenance: candidate.provenance,
+    })),
+    manualOrdinance: manualOrdinance?.value ?? null,
+  }))
+  const productOrdinanceResolution = effective?.planning.ordinanceResolution ?? {
+    status: manualOrdinance ? 'USER_CONFIRMED' as const : 'REVIEW_REQUIRED' as const,
+    confidence: manualOrdinance ? 'high' : 'unknown',
+    provenance: manualOrdinance ? ['manual:ordinance-selection'] : [],
+    confirmationSource: manualOrdinance ? 'user' as const : undefined,
+  };
+  let ordStatus: 'automatically_determined' | 'assisted_confirmation_required' | 'manual_confirmation_required' | 'ambiguous' | 'multizone' | 'not_available' | undefined = undefined;
   if (effective?.planning.status === 'determined') {
-    ordStatus = ordinanceCandidates.length > 0 ? 'assisted_confirmation_required' : 'manual_confirmation_required';
+    ordStatus = effective.planning.ordinanceResolutionStatus ??
+      (ordinanceCandidates.length > 0 ? 'assisted_confirmation_required' : 'manual_confirmation_required');
   }
-  const ordinanceDetermination = manual?.ordinanceDetermination
-    ? { ...manual.ordinanceDetermination, candidates: ordinanceCandidates, status: ordStatus ?? manual.ordinanceDetermination.status }
-    : { candidates: ordinanceCandidates, status: ordStatus };
+  const ordinanceDeterminationState = manual?.ordinanceDetermination ??
+    (manualOrdinance ? { technician: manualOrdinance } : undefined);
+  const ordinanceDetermination = ordinanceDeterminationState
+    ? { ...ordinanceDeterminationState, candidates: ordinanceCandidates, status: ordStatus ?? (ordinanceDeterminationState as ContextDeterminationState<string> & { status?: string }).status }
+    : {
+        automatic:
+          ordStatus === 'automatically_determined' && ordinanceCandidates.length === 1
+            ? createAutomaticDetermination(ordinanceCandidates[0]!.identity, 'siotuga')
+            : undefined,
+        candidates: ordinanceCandidates,
+        status: ordStatus,
+      };
 
   return {
     status,
     planningStatus: effective?.planning.status ?? result.planning.status,
     ordinanceDetermination,
+    ordinanceCandidates: ordinanceCandidates.map((candidate) => ({
+      identity: candidate.identity,
+      semanticDimension: candidate.semanticDimension,
+      coverage: candidate.coverage,
+      confidence: candidate.confidence,
+      sourceRef: candidate.sourceRef,
+      sourceDocument: candidate.sourceDocument,
+      graphicEvidence: candidate.graphicEvidence,
+      legendEvidence: candidate.legendEvidence,
+      documentaryEvidence: candidate.documentaryEvidence,
+      provenance: candidate.provenance,
+      alignmentMethod: candidate.alignmentMethod,
+      estimatedErrorMeters: candidate.estimatedErrorMeters,
+      warning: candidate.warning,
+      identityId: candidate.identityId,
+      catalogStatus: candidate.catalogStatus,
+      normativeReferences: candidate.normativeReferences,
+    })),
+    contextualCandidates: contextualCandidates.map((candidate) => ({
+      identity: candidate.identity,
+      semanticDimension: candidate.semanticDimension,
+      confidence: candidate.confidence,
+      sourceRef: candidate.sourceRef,
+      provenance: candidate.provenance,
+    })),
+    ordinanceCatalogOptions,
+  ordinanceResolution: manualOrdinance
+      ? {
+          ...productOrdinanceResolution,
+          status: 'USER_CONFIRMED' as const,
+          confirmationSource: 'user' as const,
+          confirmedByUser: true,
+          identityId: productOrdinanceResolution.identityId,
+          normativeReferences: productOrdinanceResolution.normativeReferences,
+          hasEligibility: productOrdinanceResolution.hasEligibility,
+        }
+      : productOrdinanceResolution,
     confidence: effective?.confidence ?? result.confidence,
     resolvedAt: result.resolvedAt,
     inputMethod: result.inputMethod,
@@ -267,12 +505,14 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
     address: effective?.normalizedAddress ?? manual?.address,
     coordinates: effective?.coordinates ?? manual?.coordinates,
     parcelGeometry: effective?.parcelGeometry,
-    parcelSurfaceSquareMetres: actionArea?.parcelSurfaceSquareMetres,
+    parcelSurfaceSquareMetres: canonical.parcelSurfaceSquareMetres,
+    coverage: canonical.coverage,
     actionArea,
     municipality: effective?.municipality ?? manual?.municipality,
     municipalityCode: effective?.municipalityCode,
     province: effective?.province,
     classification:
+      canonical.classificationDetermination?.technician?.value ? { code: canonical.classificationDetermination.technician.value, label: canonical.classificationDetermination.technician.value, sourceFeatureIds: [] } :
       actionAreaClassification
         ? actionAreaClassification
         : manual?.classification
@@ -291,7 +531,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
         : undefined,
     automaticClassification: effective?.planning.classification,
     classificationResolution,
-    urbanisticFacts,
+    urbanisticFacts: canonical.urbanisticFacts ?? urbanisticFacts,
     officialLinks: effective ? officialResourceLinks(effective) : [],
     planningDocuments: effective?.planning.documents,
     resources: effective?.planning.resources ?? result.planning.resources,
@@ -301,7 +541,7 @@ export function buildTerritorialContextView(value: unknown): TerritorialContextV
         : manual?.area
           ? [manual.area]
           : (effective?.planning.areas?.map((area) => area.name) ?? []),
-    instrument: effective?.planning.instrument,
+    instrument: canonical.planningInstrument ?? effective?.planning.instrument,
     affects: affectResolution.effective.map((affect) => ({
       key: territorialAffectKey(affect),
       category: affect.category,

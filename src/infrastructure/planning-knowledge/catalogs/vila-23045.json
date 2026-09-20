@@ -1,0 +1,986 @@
+{
+  "schemaVersion": "catalog-identity-pilot.v2",
+  "generatedAt": "2026-08-27T12:35:57.959Z",
+  "municipalityCode": "36059",
+  "municipalityName": null,
+  "instrumentId": "23045",
+  "sourceKind": "V2",
+  "instrument": {
+    "name": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+    "approvalDate": null,
+    "sourceId": "siotuga:inventory:36059:23045"
+  },
+  "algorithm": {
+    "sourceScope": "public.normative_chunks_v2 joined normative_documents_v2 where metadata.municipalityCode='36059' and metadata.instrumentId='23045'",
+    "extraction": "explicit same-instrument headings/articles only; metadata ordinance candidates are non-authoritative; mentions are never promoted to ACCEPTED; duplicate official copies corroborate but do not create identities",
+    "authority": "official same-instrument documentary evidence; semantic/LLM output is not authoritative"
+  },
+  "officialSources": [
+    {
+      "documentId": "eac225cc-6036-5929-845a-dc0286645830",
+      "officialDocumentId": "54464",
+      "filename": "1002me011.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54464",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002me011.pdf",
+      "chunkCount": 254,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "dd39f8ae-572f-50d8-ac61-366c82a9d192",
+      "officialDocumentId": "54465",
+      "filename": "1002me012.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54465",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002me012.pdf",
+      "chunkCount": 249,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "7e49db8e-426b-593e-85df-b37c984b159d",
+      "officialDocumentId": "54466",
+      "filename": "1002me013.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54466",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002me013.pdf",
+      "chunkCount": 231,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "266daf57-7811-5f72-a0cf-6cc57f70481f",
+      "officialDocumentId": "54467",
+      "filename": "1002me101.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54467",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002me101.pdf",
+      "chunkCount": 356,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "1c50c3a0-4151-5b7f-ae37-849c83b3a5e2",
+      "officialDocumentId": "54468",
+      "filename": "1002me102.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54468",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002me102.pdf",
+      "chunkCount": 292,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "c521ace2-af1b-5534-81ec-1d5cf36e783f",
+      "officialDocumentId": "6345",
+      "filename": "1002no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "6345",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no001.pdf",
+      "chunkCount": 242,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "62e92da8-e5b6-556c-aec2-95002b45e77b",
+      "officialDocumentId": "6346",
+      "filename": "1002no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "6346",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no002.pdf",
+      "chunkCount": 256,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+      "officialDocumentId": "6347",
+      "filename": "1002no003.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "6347",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no003.pdf",
+      "chunkCount": 182,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "4fbe41ee-1a92-55cf-9e4a-560642475b36",
+      "officialDocumentId": "54512",
+      "filename": "1002no101.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54512",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no101.pdf",
+      "chunkCount": 253,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "626cabce-8da0-542e-b6d0-da37c2b09121",
+      "officialDocumentId": "54513",
+      "filename": "1002no102.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54513",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no102.pdf",
+      "chunkCount": 237,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "535553d4-7fda-5d4f-8197-892ef6a7c207",
+      "officialDocumentId": "54514",
+      "filename": "1002no103.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54514",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no103.pdf",
+      "chunkCount": 226,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "3a927e08-a5ec-5179-b26a-4487dd572b8e",
+      "officialDocumentId": "54515",
+      "filename": "1002no104.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54515",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no104.pdf",
+      "chunkCount": 267,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "8ca58c17-1f2b-5c2e-8bc1-427cbabbc338",
+      "officialDocumentId": "54516",
+      "filename": "1002no105.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54516",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no105.pdf",
+      "chunkCount": 316,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "5c73f1ed-5f74-5948-ad93-35e44755ba85",
+      "officialDocumentId": "54517",
+      "filename": "1002no106.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "54517",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no106.pdf",
+      "chunkCount": 270,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "0c49d12b-8531-50c1-96d7-f1c9724863a6",
+      "officialDocumentId": "15794",
+      "filename": "1003no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15794",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1003no001.pdf",
+      "chunkCount": 149,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "7d95afdf-1dd7-53af-9859-48fce3f27570",
+      "officialDocumentId": "17032",
+      "filename": "1003no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "17032",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1003no002.pdf",
+      "chunkCount": 116,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "42ad917f-60d0-54bc-8c2b-8233b317fc8f",
+      "officialDocumentId": "15804",
+      "filename": "1004no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15804",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1004no001.pdf",
+      "chunkCount": 69,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "17f631b3-3b3b-532e-ae97-20b5745da6ef",
+      "officialDocumentId": "15805",
+      "filename": "1004no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15805",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1004no002.pdf",
+      "chunkCount": 34,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "52c97a46-6bb9-5c8c-bb0b-e0230ab7b5e7",
+      "officialDocumentId": "15899",
+      "filename": "1005no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15899",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1005no001.pdf",
+      "chunkCount": 107,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "a64408f2-2096-530a-bfb8-153212347e42",
+      "officialDocumentId": "15900",
+      "filename": "1005no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15900",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1005no002.pdf",
+      "chunkCount": 179,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "0ccbe311-4da9-5e05-a205-cd594b64fd2b",
+      "officialDocumentId": "15935",
+      "filename": "1006no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15935",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1006no001.pdf",
+      "chunkCount": 163,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "224b5d98-7188-5927-a8cb-41469b2b9208",
+      "officialDocumentId": "15936",
+      "filename": "1006no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15936",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1006no002.pdf",
+      "chunkCount": 127,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "c9f86f66-7c5b-5888-957a-e342180711fe",
+      "officialDocumentId": "15937",
+      "filename": "1006no003.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15937",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1006no003.pdf",
+      "chunkCount": 111,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "851ca9d7-caf4-5e60-ac74-aaf48c8d0eef",
+      "officialDocumentId": "15998",
+      "filename": "1007no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15998",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1007no001.pdf",
+      "chunkCount": 86,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "a5befb2d-be80-58c6-841b-eea431ce7aad",
+      "officialDocumentId": "15999",
+      "filename": "1007no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "15999",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1007no002.pdf",
+      "chunkCount": 95,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "b678bc87-b991-569e-a9e6-a77c92542745",
+      "officialDocumentId": "16006",
+      "filename": "1008no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "16006",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1008no001.pdf",
+      "chunkCount": 63,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "f553daaf-b462-56fc-b680-2732207fdd10",
+      "officialDocumentId": "16008",
+      "filename": "1008no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "16008",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1008no002.pdf",
+      "chunkCount": 109,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "e9f8a686-fa43-53bc-a899-58ec7872ac99",
+      "officialDocumentId": "16896",
+      "filename": "2623no000.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "16896",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no000.pdf",
+      "chunkCount": 85,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "bc36f6d7-c75f-5e44-b75b-b693805bc50e",
+      "officialDocumentId": "35460",
+      "filename": "2623no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35460",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no001.pdf",
+      "chunkCount": 22,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "1ccfd845-d5aa-5cec-b9ad-8e195897b846",
+      "officialDocumentId": "35463",
+      "filename": "2623no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35461",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no002.pdf",
+      "chunkCount": 506,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "42558bb2-6527-53c4-924e-e35f0eae1b33",
+      "officialDocumentId": "35462",
+      "filename": "2623no003.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35462",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no003.pdf",
+      "chunkCount": 107,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "24256dad-a601-5934-a31c-95ea059ef68f",
+      "officialDocumentId": "36172",
+      "filename": "2623no004.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "36172",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no004.pdf",
+      "chunkCount": 16,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "c48ecaf2-835f-545c-af80-454db41b404e",
+      "officialDocumentId": "36173",
+      "filename": "2623no005.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "36173",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2623no005.pdf",
+      "chunkCount": 130,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+      "officialDocumentId": "35165",
+      "filename": "2624no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35165",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+      "chunkCount": 475,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "3014a6ed-1a71-5167-91aa-bdb289906b01",
+      "officialDocumentId": "35167",
+      "filename": "2624no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35167",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no002.pdf",
+      "chunkCount": 30,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "4b80e2be-8181-5ed1-8e8b-625e683d20d4",
+      "officialDocumentId": "35168",
+      "filename": "2624no003.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35168",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no003.pdf",
+      "chunkCount": 108,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "83b7914b-bf49-5343-a223-57a717e31a23",
+      "officialDocumentId": "35169",
+      "filename": "2624no004.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35169",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no004.pdf",
+      "chunkCount": 6,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "d4d980fb-e85e-5e23-8215-9a3704ca2be5",
+      "officialDocumentId": "35170",
+      "filename": "2624no005.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35170",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no005.pdf",
+      "chunkCount": 11,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "ba28b27a-4895-539e-863f-1ff7efe41b6d",
+      "officialDocumentId": "35172",
+      "filename": "2624no006.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35172",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no006.pdf",
+      "chunkCount": 49,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "7996ce95-19ad-5afe-9dd9-5753e2bddf4d",
+      "officialDocumentId": "35173",
+      "filename": "2624no007.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35173",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no007.pdf",
+      "chunkCount": 319,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "bb055059-d731-542b-b9da-d790af3f8c63",
+      "officialDocumentId": "35175",
+      "filename": "2624no008.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35175",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no008.pdf",
+      "chunkCount": 4,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "95e5dedd-8cfd-5e78-934b-65221cc0b6f3",
+      "officialDocumentId": "35176",
+      "filename": "2624no009.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35176",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no009.pdf",
+      "chunkCount": 17,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "73e42f2d-5129-5a8e-8cc0-2952c5865c8c",
+      "officialDocumentId": "35178",
+      "filename": "2624no010.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35178",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no010.pdf",
+      "chunkCount": 215,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "b268466e-6dc8-57e6-90a7-0856dd8b5227",
+      "officialDocumentId": "35180",
+      "filename": "2624no011.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35180",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no011.pdf",
+      "chunkCount": 23,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "99ebcffe-2f25-5341-b004-3094bbf6d4aa",
+      "officialDocumentId": "16897",
+      "filename": "2625no001.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "16897",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2625no001.pdf",
+      "chunkCount": 102,
+      "type": "normative_text"
+    },
+    {
+      "documentId": "231178b5-4284-524d-96fc-f7118036f09b",
+      "officialDocumentId": "35108",
+      "filename": "2625no002.pdf",
+      "title": "NORMAS SUBSIDIARIAS DE PLANEAMENTO",
+      "officialIdentifier": "35108",
+      "url": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2625no002.pdf",
+      "chunkCount": 147,
+      "type": "normative_text"
+    }
+  ],
+  "identities": [
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "0",
+      "officialName": "De conservación y protección de parques",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1002no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "4fbe41ee-1a92-55cf-9e4a-560642475b36",
+          "chunkIds": [
+            "41550bcd-c5c1-500d-b4de-8550a6172093"
+          ],
+          "quote": "Ordenanza 0. De conservación y protección de parques",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no101.pdf",
+          "officialDocumentId": "54512"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:0"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "1",
+      "officialName": "El de EDIFICACION",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no001.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+          "chunkIds": [
+            "a0dc113c-1723-554f-a7f0-b8dda1f80b58"
+          ],
+          "quote": "Regulado por la Ordenanza 1. El de EDIFICA",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+          "officialDocumentId": "35165"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no009.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "95e5dedd-8cfd-5e78-934b-65221cc0b6f3",
+          "chunkIds": [
+            "d962634a-289b-54fb-9a4a-dac4d5eddd65"
+          ],
+          "quote": "Regulado por la Ordenanza 1. El de EDIFICACION",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no009.pdf",
+          "officialDocumentId": "35176"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:1"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "2",
+      "officialName": "EC de EQUIPAMIENTO",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no001.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+          "chunkIds": [
+            "cdf71b30-b690-58f0-9449-8b632273929f"
+          ],
+          "quote": "Regulado por la Ordenanza 2. EC de EQUIPA",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+          "officialDocumentId": "35165"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no009.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "95e5dedd-8cfd-5e78-934b-65221cc0b6f3",
+          "chunkIds": [
+            "9b50f457-08d4-5433-8c4f-1573c7d2a012"
+          ],
+          "quote": "Regulado por la Ordenanza 2. EC de EQUIPAMIENTO",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no009.pdf",
+          "officialDocumentId": "35176"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:2"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "3",
+      "officialName": "ES de EQUIPA",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no001.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+          "chunkIds": [
+            "8c85e3d5-f6fa-5a10-97ef-9a2490fc9694"
+          ],
+          "quote": "Regulado por la Ordenanza 3. ES de EQUIPA",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+          "officialDocumentId": "35165"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:3"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "4",
+      "officialName": "ED de EQUIPAMIENTO",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no001.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+          "chunkIds": [
+            "36ab5f93-71f2-5111-a25b-d902939a8486"
+          ],
+          "quote": "Regulado por la Ordenanza 4. ED de EQUIPA",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+          "officialDocumentId": "35165"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no009.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "95e5dedd-8cfd-5e78-934b-65221cc0b6f3",
+          "chunkIds": [
+            "9ba2dd3e-915e-5f2d-b86b-6889f0fa857d"
+          ],
+          "quote": "Regulado por la Ordenanza 4. ED de EQUIPAMIENTO",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no009.pdf",
+          "officialDocumentId": "35176"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:4"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "5",
+      "officialName": "ZV de ZONAS VERDES",
+      "status": "REVIEW_REQUIRED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no001.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "08bc02d5-ff32-57c7-92f6-8669f0ebc829",
+          "chunkIds": [
+            "dbcddf20-1397-552b-a192-c7a684007845"
+          ],
+          "quote": "Regulado por la Ordenanza 5. ZV de ZONAS",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no001.pdf",
+          "officialDocumentId": "35165"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2624no009.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "95e5dedd-8cfd-5e78-934b-65221cc0b6f3",
+          "chunkIds": [
+            "c994b652-2ab4-5406-a834-d093cbfeeb33"
+          ],
+          "quote": "Regulado por la Ordenanza 5. ZV de ZONAS VERDES.",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2624no009.pdf",
+          "officialDocumentId": "35176"
+        }
+      ],
+      "normativeReferences": [],
+      "id": "23045:ordinance:5"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "6",
+      "officialName": "Del suelo no urbanizable de los núcleos rurales tradicionales",
+      "status": "ACCEPTED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2625no001.pdf",
+          "sourceType": "article",
+          "documentId": "99ebcffe-2f25-5341-b004-3094bbf6d4aa",
+          "chunkIds": [
+            "6b5b985c-7800-5d5f-8753-9ed5baa2122d"
+          ],
+          "locator": "Art. 70",
+          "quote": "Art. 70. Ordenanza 6. Del suelo no urbanizable",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2625no001.pdf",
+          "officialDocumentId": "16897"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:2625no002.pdf",
+          "sourceType": "article",
+          "documentId": "231178b5-4284-524d-96fc-f7118036f09b",
+          "chunkIds": [
+            "ed3b175f-6327-5ceb-9b55-07847944e376"
+          ],
+          "locator": "Art. 70",
+          "quote": "Art. 70. Ordenanza 6. Del suelo no urbanizable de los núcleos rurales tradicionales.",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/2625no002.pdf",
+          "officialDocumentId": "35108"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "99ebcffe-2f25-5341-b004-3094bbf6d4aa",
+          "chunkIds": [
+            "6b5b985c-7800-5d5f-8753-9ed5baa2122d"
+          ],
+          "article": "Art. 70",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:2625no001.pdf"
+        },
+        {
+          "documentId": "231178b5-4284-524d-96fc-f7118036f09b",
+          "chunkIds": [
+            "ed3b175f-6327-5ceb-9b55-07847944e376"
+          ],
+          "article": "Art. 70",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:2625no002.pdf"
+        }
+      ],
+      "id": "23045:ordinance:6"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "7",
+      "officialName": "De regimen normal del suelo no",
+      "status": "ACCEPTED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf",
+          "sourceType": "article",
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "fedb0a87-5ab3-55e9-ba65-20606c25a5d9"
+          ],
+          "locator": "Art. 71",
+          "quote": "ART. 71 ORDENANZA 7. DE REXIME NOR",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no003.pdf",
+          "officialDocumentId": "6347"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1003no001.pdf",
+          "sourceType": "article",
+          "documentId": "0c49d12b-8531-50c1-96d7-f1c9724863a6",
+          "chunkIds": [
+            "7fd4a65a-faae-582d-9f8b-9cc82616e62e"
+          ],
+          "locator": "Art. 71",
+          "quote": "\" Art. 71. Ordenanza 7. De regimen normal del suelo no",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1003no001.pdf",
+          "officialDocumentId": "15794"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "fedb0a87-5ab3-55e9-ba65-20606c25a5d9"
+          ],
+          "article": "Art. 71",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf"
+        },
+        {
+          "documentId": "0c49d12b-8531-50c1-96d7-f1c9724863a6",
+          "chunkIds": [
+            "7fd4a65a-faae-582d-9f8b-9cc82616e62e"
+          ],
+          "article": "Art. 71",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1003no001.pdf"
+        }
+      ],
+      "id": "23045:ordinance:7"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "8",
+      "officialName": "De conservación y protección de",
+      "status": "ACCEPTED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf",
+          "sourceType": "article",
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "c38d0445-0242-5a42-aca3-e3b70f4f3747"
+          ],
+          "locator": "Art. 72",
+          "quote": "ART. 72. ORDENANZA 8. DE CONSERVA",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no003.pdf",
+          "officialDocumentId": "6347"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1003no001.pdf",
+          "sourceType": "article",
+          "documentId": "0c49d12b-8531-50c1-96d7-f1c9724863a6",
+          "chunkIds": [
+            "edd3600c-d905-55ed-be98-9115957759e7"
+          ],
+          "locator": "Art. 72",
+          "quote": "\"Art. 72 Ordenanza 8. De conservación y protección de",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1003no001.pdf",
+          "officialDocumentId": "15794"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1003no002.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "7d95afdf-1dd7-53af-9859-48fce3f27570",
+          "chunkIds": [
+            "bae07946-9bb3-5938-a156-4cd8cab20e68"
+          ],
+          "quote": "\"Art, 72 Ordenanza 8. De conservación e protección",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1003no002.pdf",
+          "officialDocumentId": "17032"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1005no001.pdf",
+          "sourceType": "article",
+          "documentId": "52c97a46-6bb9-5c8c-bb0b-e0230ab7b5e7",
+          "chunkIds": [
+            "72502a1b-8376-567e-8d3f-7edc1a087929"
+          ],
+          "locator": "Art. 72",
+          "quote": "ART. 72 ORDENANZA 8. DE CONSERVACION",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1005no001.pdf",
+          "officialDocumentId": "15899"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "c38d0445-0242-5a42-aca3-e3b70f4f3747"
+          ],
+          "article": "Art. 72",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf"
+        },
+        {
+          "documentId": "0c49d12b-8531-50c1-96d7-f1c9724863a6",
+          "chunkIds": [
+            "edd3600c-d905-55ed-be98-9115957759e7"
+          ],
+          "article": "Art. 72",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1003no001.pdf"
+        },
+        {
+          "documentId": "52c97a46-6bb9-5c8c-bb0b-e0230ab7b5e7",
+          "chunkIds": [
+            "72502a1b-8376-567e-8d3f-7edc1a087929"
+          ],
+          "article": "Art. 72",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1005no001.pdf"
+        }
+      ],
+      "id": "23045:ordinance:8"
+    },
+    {
+      "municipalityCode": "36059",
+      "instrumentId": "23045",
+      "semanticDimension": "ordinance",
+      "officialCode": "9",
+      "officialName": "De protección de cauces y riberas",
+      "status": "ACCEPTED",
+      "validity": {},
+      "evidence": [
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf",
+          "sourceType": "article",
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "bc047629-ee8b-52df-b806-701a1ff4fe53"
+          ],
+          "locator": "Art. 73",
+          "quote": "ART. 73 ORDENANZA 9. DE PROTECCION",
+          "relation": "defines",
+          "confidence": "high",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no003.pdf",
+          "officialDocumentId": "6347"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1002no101.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "4fbe41ee-1a92-55cf-9e4a-560642475b36",
+          "chunkIds": [
+            "3b61bcf1-0cbe-550e-b550-5e8e0ac3ad29"
+          ],
+          "quote": "Ordenanza 9. De protección de cauces y riberas.",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1002no101.pdf",
+          "officialDocumentId": "54512"
+        },
+        {
+          "sourceId": "siotuga:instrument-documents:23045:1005no002.pdf",
+          "sourceType": "normative_heading",
+          "documentId": "a64408f2-2096-530a-bfb8-153212347e42",
+          "chunkIds": [
+            "2071d1ba-c381-5b5c-aff5-62721cbd89f9"
+          ],
+          "quote": "3.3.- ORDENANZA 9 - DE PROTECCION DE CAUCES Y RIBERAS.",
+          "relation": "defines",
+          "confidence": "medium",
+          "officialUrl": "https://siotuga.xunta.gal/siotuga/documentos/urbanismo/VILADECRUCES/documents/1005no002.pdf",
+          "officialDocumentId": "15900"
+        }
+      ],
+      "normativeReferences": [
+        {
+          "documentId": "5f5e3e26-f984-5c2e-b498-566a77bf5110",
+          "chunkIds": [
+            "bc047629-ee8b-52df-b806-701a1ff4fe53"
+          ],
+          "article": "Art. 73",
+          "relation": "defines",
+          "sourceId": "siotuga:instrument-documents:23045:1002no003.pdf"
+        }
+      ],
+      "id": "23045:ordinance:9"
+    }
+  ],
+  "metrics": {
+    "chunksScanned": 7411,
+    "documentsScanned": 46,
+    "totalCandidates": 10,
+    "accepted": 4,
+    "reviewRequired": 6,
+    "rejected": 0,
+    "duplicateCopiesNotCounted": true,
+    "observedTerms": {
+      "ordinance": 250,
+      "ueu": 26,
+      "peri": 145,
+      "classification": 91,
+      "category": 186
+    }
+  },
+  "writes": false
+}

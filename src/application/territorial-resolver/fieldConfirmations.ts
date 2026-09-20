@@ -15,11 +15,11 @@ export interface TerritorialFieldConfirmations {
 
 function hasOfficialEvidence(result: TerritorialResolution, source: 'catastro' | 'siotuga') {
   return result.evidence.some((item) => item.source === source) ||
-    result.planning.evidence.some((item) => item.source === source)
+    (result.planning.evidence ?? []).some((item) => item.source === source)
 }
 
 function hasOfficialPlanningEvidence(result: TerritorialResolution) {
-  return result.planning.evidence.some(
+  return (result.planning.evidence ?? []).some(
     (item) =>
       item.source === 'siotuga' &&
       item.scope === 'planning_instrument' &&
@@ -29,7 +29,7 @@ function hasOfficialPlanningEvidence(result: TerritorialResolution) {
 }
 
 function hasOfficialClassificationEvidence(result: TerritorialResolution) {
-  return result.planning.evidence.some(
+  return (result.planning.evidence ?? []).some(
     (item) => item.source === 'siotuga' && item.scope === 'planning_classification'
   )
 }

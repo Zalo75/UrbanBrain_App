@@ -1,6 +1,7 @@
+import type { ParcelAccounting } from '@/domain/territorial-resolver/parcelAccounting'
+import { geometrySurface } from '@/domain/territorial-resolver/parcelAccounting'
 import {
   allMunicipalities,
-  getMunicipalityNameById,
   getProvinceNameById,
   resolveMunicipalityIdentity,
 } from '@/shared/territory'
@@ -11,6 +12,10 @@ import type {
   TerritorialConflict,
   TerritorialWarning,
   UrbanisticRegimeFacts,
+  OrdinanceCandidate,
+  OrdinanceResolutionMetadata,
+  VisualResolutionState,
+  VisualZoningObservation,
 } from '@/domain/territorial-resolver/types'
 import { deriveParcelRegimeIdentity } from './parcelRegimeIdentity'
 import type {
@@ -46,6 +51,19 @@ export interface ParcelExpedienteInput {
  * merging their provenance.
  */
 export interface TerritorialDetectionSummary {
+  schemaVersion?: 1
+  cartographicSourceChecks?: import('@/domain/territorial-resolver/types').PlanningApplicability['cartographicSourceChecks']
+  unknownReasons?: Record<string, string>
+  planningEvidence?: import('@/domain/territorial-resolver/types').TerritorialEvidence[]
+  planningDocuments?: import('@/domain/territorial-resolver/types').PlanningDocumentReference[]
+  planningResources?: import('@/domain/territorial-resolver/types').TerritorialResourceCatalog
+  planningSourceChecks?: import('@/domain/territorial-resolver/types').OfficialSourceCheck[]
+  classificationResolution?: import('@/domain/territorial-resolver/types').ClassificationResolution
+  applicableInstruments?: import('@/domain/territorial-resolver/types').PlanningApplicability['applicableInstruments']
+  contextualCandidates?: OrdinanceCandidate[]
+  coverage?: ParcelAccounting
+  parcelSurfaceSquareMetres?: number
+
   cadastralReference?: string | null
   parcelReference?: string | null
   parcelGeometry?: ParcelGeometry | null
@@ -82,6 +100,15 @@ export interface TerritorialDetectionSummary {
   conflicts?: TerritorialConflict[] | null
   classificationDetermination?: ContextDeterminationState<string>
   categoryDetermination?: ContextDeterminationState<string>
+  /** Detailed identities preserved from the territorial result for chat and factual contracts. */
+  ordinanceCandidates?: OrdinanceCandidate[]
+  /** Visual observations/proposals remain available for technical review. */
+  visualResolutionState?: VisualResolutionState | null
+  visualObservations?: VisualZoningObservation[] | null
+  visualExplanation?: string | null
+  visualCandidates?: OrdinanceCandidate[] | null
+  /** Product-level status of the selected/confirmed ordinance, when available. */
+  ordinanceResolution?: OrdinanceResolutionMetadata
   ordinanceDetermination?: ContextDeterminationState<string>
   affects?: {
     analysisGeometry?: 'parcel' | 'point' | 'none'
@@ -109,6 +136,7 @@ export interface TerritorialDetectionSummary {
   actionAreaSelection?: ActionAreaSelectionState | null
   actionAreaAutomaticallyConfirmed?: boolean | null
   resolvedAt?: string | null
+  inputMethod?: string | null
   fieldConfirmations?: TerritorialFieldConfirmations | null
   reliability?: {
     mode:
@@ -167,6 +195,52 @@ export function normalizeComparable(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+function hydratedOrdinanceCandidates(detected: TerritorialDetectionSummary | null | undefined) {
+  const all = [
+    ...(detected?.ordinanceCandidates ?? []),
+    ...(detected?.ordinanceDetermination?.candidates ?? []),
+  ]
+  const byKey = new Map<string, OrdinanceCandidate>()
+  for (const candidate of all) {
+    const key = [candidate.instrumentId.trim(), candidate.semanticDimension ?? 'unknown', normalizeComparable(candidate.identity)].join('|')
+    const existingEntry = [...byKey.entries()].find(([, existingCandidate]) =>
+      existingCandidate.instrumentId.trim() === candidate.instrumentId.trim() &&
+      normalizeComparable(existingCandidate.identity) === normalizeComparable(candidate.identity) &&
+      (!existingCandidate.semanticDimension || !candidate.semanticDimension ||
+        existingCandidate.semanticDimension === candidate.semanticDimension)
+    )
+    const existing = existingEntry?.[1]
+    if (!existing) {
+      byKey.set(key, candidate)
+      continue
+    }
+    const mergedStatus = existing.status === 'user_confirmed' || candidate.status === 'user_confirmed'
+      ? 'user_confirmed'
+      : existing.status === 'active' || candidate.status === 'active'
+        ? 'active'
+        : existing.status === 'review' || candidate.status === 'review'
+          ? 'review'
+          : undefined
+    byKey.set(existingEntry![0], {
+      ...existing,
+      ...Object.fromEntries(
+        Object.entries(candidate).filter(([field, value]) =>
+          value !== undefined && existing[field as keyof OrdinanceCandidate] === undefined
+        )
+      ),
+      provenance: [...new Set([...existing.provenance, ...candidate.provenance])],
+      status: mergedStatus,
+      competingCandidates: existing.competingCandidates || candidate.competingCandidates
+        ? [...new Set([
+            ...(existing.competingCandidates ?? []),
+            ...(candidate.competingCandidates ?? []),
+          ])]
+        : undefined,
+    })
+  }
+  return [...byKey.values()]
 }
 
 function landClassFamily(value: string) {
@@ -360,11 +434,27 @@ export function buildNormalizedParcelContext(
   const detectedLocationVerification: ParcelContextVerification =
     hasConfirmedOfficialLocation ? 'confirmed' : 'inferred'
 
+  const sourceOrdinanceCandidates = hydratedOrdinanceCandidates(detected)
+  const confirmedOrdinanceCode =
+    detected?.ordinanceResolution?.status === 'USER_CONFIRMED'
+      ? detected.ordinanceResolution.identity?.code?.trim() ||
+        detected.ordinanceResolution.identity?.label?.trim()
+      : undefined
+  const ordinanceCandidates = sourceOrdinanceCandidates.map((candidate) =>
+    confirmedOrdinanceCode &&
+    candidate.identity.trim().toLocaleUpperCase() === confirmedOrdinanceCode.toLocaleUpperCase()
+      ? { ...candidate, status: 'user_confirmed' as const, confirmationSource: 'user' as const }
+      : candidate
+  )
+
   const context: NormalizedParcelContext = {
+    ordinanceCandidates,
     canAnswerConcreteParameters: detected?.planningCanAnswerConcreteParameters === true,
     urbanisticFacts: detected?.urbanisticFacts ?? undefined,
     parcelUrbanisticFacts: detected?.urbanisticFacts ?? undefined,
-    parcelGeometry: detected?.parcelGeometry ?? undefined,
+    parcelGeometry: detected?.parcelGeometry ?? input.expediente.parcelGeometry ?? undefined,
+    parcelSurfaceSquareMetres: detected?.parcelSurfaceSquareMetres ?? geometrySurface(detected?.parcelGeometry ?? input.expediente.parcelGeometry),
+    coverage: detected?.coverage,
     knownConstraints: [],
     conflicts: [],
     pendingValidation: [],
@@ -385,6 +475,8 @@ export function buildNormalizedParcelContext(
         }
       : undefined,
   }
+
+  if (context.reliability) context.reliability.sourceIssues.push(...(detected?.cartographicSourceChecks ?? []).filter(check => check.status === 'unavailable').map(check => `${check.provider}: ${check.reason ?? 'unavailable'}`))
 
   const detectedRc = normalizeCadastralReference(detected?.cadastralReference)
   const expedienteRc = normalizeCadastralReference(expediente.refCatastral)
@@ -489,10 +581,10 @@ export function buildNormalizedParcelContext(
   }
 
   const municipalityId = expediente.municipio?.trim() || undefined
-  const municipalityName = municipalityId ? getMunicipalityNameById(municipalityId) : undefined
   const knownMunicipality = municipalityId
-    ? allMunicipalities.find((municipality) => municipality.id === municipalityId)
+    ? allMunicipalities.find((municipality) => municipality.id === municipalityId || municipality.ineCode === municipalityId)
     : undefined
+  const municipalityName = knownMunicipality ? knownMunicipality.name : municipalityId
   if (detected?.municipalityName?.trim() && hasConfirmedOfficialLocation) {
     const municipalityCode = detected.municipalityCode?.trim()
     const knownDetectedMunicipality = resolveMunicipalityIdentity({
@@ -539,13 +631,15 @@ export function buildNormalizedParcelContext(
   }
 
   if (municipalityName && detected?.municipalityName) {
-    addConflict(
-      context,
-      'municipality',
-      municipalityName,
-      detected.municipalityName,
-      'Catastro y el expediente indican municipios distintos.'
-    )
+    if (municipalityId !== detected.municipalityCode) {
+      addConflict(
+        context,
+        'municipality',
+        municipalityName,
+        detected.municipalityName,
+        'Catastro y el expediente indican municipios distintos.'
+      )
+    }
   }
   if (municipalityName && conversation.municipalityName) {
     addConflict(
@@ -592,7 +686,7 @@ export function buildNormalizedParcelContext(
     ? detected?.landClass
     : expediente.landClass || detected?.landClass || conversation.landClass
 
-  const classDet = detected?.classificationDetermination
+  const classDet = detected?.classificationDetermination ?? detected?.manualContext?.classificationDetermination
   const effectiveLandClassDet = getEffectiveDetermination(classDet)
   const resolvedLandClass = effectiveLandClassDet?.value ?? legacyLandClass
   const landClass = resolvedLandClass ?? undefined
@@ -617,6 +711,37 @@ export function buildNormalizedParcelContext(
           ? expedienteVerification
           : effectiveLandClassDet?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
     )
+  }
+  // Project the canonical classification into the structured facts once, at
+  // the normalization boundary. Consumers must read this projection instead
+  // of independently reconstructing classification from legacy candidates.
+  if (context.urbanisticFacts && context.landClass && context.urbanisticFacts.classification.status !== 'conflict') {
+    const canonicalClassification = context.landClass
+    const canonicalOrigin = effectiveLandClassDet?.origin === 'technician_selection'
+      ? effectiveLandClassDet.origin
+      : canonicalClassification.source === 'manual'
+        ? 'technician_selection' as const
+        : canonicalClassification.source === 'siotuga'
+          ? 'automatic_source' as const
+          : 'official_document' as const
+    const canonicalStatus = canonicalClassification.verification === 'confirmed'
+      ? canonicalOrigin === 'technician_selection' ? 'technician_validated' as const : 'automatic_confirmed' as const
+      : canonicalClassification.verification === 'inferred'
+        ? 'automatic_probable' as const
+        : 'manual_review_required' as const
+    context.urbanisticFacts = {
+      ...context.urbanisticFacts,
+      classification: {
+        ...context.urbanisticFacts.classification,
+        value: { code: canonicalClassification.value, label: canonicalClassification.value },
+        label: canonicalClassification.value,
+        status: canonicalStatus,
+        origin: canonicalOrigin,
+        confidence: canonicalClassification.confidence >= 0.9 ? 'high' : canonicalClassification.confidence >= 0.7 ? 'medium' : 'low',
+        resolvedAt: detected?.resolvedAt ?? context.urbanisticFacts.classification.resolvedAt,
+      },
+    }
+    context.parcelUrbanisticFacts = context.urbanisticFacts
   }
   if (
     expediente.landClass &&
@@ -645,13 +770,16 @@ export function buildNormalizedParcelContext(
     )
   }
 
-  const legacyQualification =
-    expediente.urbanPlanningZone?.trim() ||
-    detected?.qualification?.trim() ||
-    conversation.qualification
+  let legacyQualification = expediente.urbanPlanningZone?.trim()
+  if (legacyQualification && detected?.planningArea && normalizeComparable(legacyQualification) === normalizeComparable(detected.planningArea)) {
+    legacyQualification = undefined
+  }
+  legacyQualification = legacyQualification || detected?.qualification?.trim() || conversation.qualification
   const ordDet = detected?.ordinanceDetermination
   const effectiveOrdDet = getEffectiveDetermination(ordDet)
-  const resolvedQualification = effectiveOrdDet?.value ?? legacyQualification
+  const userConfirmedOrdinance = detected?.ordinanceResolution?.status === 'USER_CONFIRMED'
+  const resolvedQualification = effectiveOrdDet?.value ?? legacyQualification ??
+    (userConfirmedOrdinance ? confirmedOrdinanceCode : undefined)
   const qualification = resolvedQualification ?? undefined
   const qualificationMirrorsConfirmedAutomaticArea = Boolean(
     actionAreaAutomaticallyConfirmed &&
@@ -665,7 +793,7 @@ export function buildNormalizedParcelContext(
     const isManual = effectiveOrdDet?.origin === 'technician_selection'
     const source = (qualificationMirrorsConfirmedAutomaticArea
       ? (detected?.planningSource ?? 'siotuga')
-      : isManual ? 'manual' :
+      : userConfirmedOrdinance ? 'manual' : isManual ? 'manual' :
       (effectiveOrdDet?.source ?? (expediente.urbanPlanningZone
       ? 'expediente'
       : detected?.qualification
@@ -679,7 +807,9 @@ export function buildNormalizedParcelContext(
         ? 'confirmed'
         : source === 'expediente'
           ? expedienteVerification
-          : effectiveOrdDet?.verification === 'technician_validated' ? 'confirmed' : 'unverified'
+          : userConfirmedOrdinance || effectiveOrdDet?.verification === 'technician_validated'
+            ? 'confirmed'
+            : 'unverified'
     )
   }
   if (expediente.urbanPlanningZone?.trim() && detected?.qualification?.trim()) {
@@ -901,9 +1031,7 @@ export function buildNormalizedParcelContext(
   }
   if (!context.landClass && manual?.classification?.trim()) {
     context.landClass = field(
-      manual.category?.trim()
-        ? `${manual.classification.trim()} (${manual.category.trim()})`
-        : manual.classification.trim(),
+      manual.classification.trim(),
       'manual',
       manualConfidence,
       manualVerification,
@@ -959,7 +1087,11 @@ export function buildNormalizedParcelContext(
       actionAreaVerification,
       actionArea.selectedAt
     )
-    context.parcelSurfaceSquareMetres = actionArea.parcelSurfaceSquareMetres
+    context.parcelSurfaceSquareMetres = actionArea.parcelSurfaceSquareMetres > 0 ? actionArea.parcelSurfaceSquareMetres : context.parcelSurfaceSquareMetres
+    const measuredActionArea = geometrySurface(actionArea.geometry)
+    if (!(actionArea.surfaceSquareMetres > 0) && measuredActionArea) {
+      context.actionArea.value = { ...actionArea, surfaceSquareMetres: measuredActionArea }
+    }
 
     if (actionArea.selectionType === 'detected_zone') {
       const selectedLandClass = actionAreaAutomaticallyConfirmed && detected?.landClass

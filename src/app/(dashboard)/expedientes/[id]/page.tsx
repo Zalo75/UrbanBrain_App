@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { db } from '@/infrastructure/db/client'
-import { contextDetections, documents } from '@/infrastructure/db/schema'
+import { documents } from '@/infrastructure/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { MapPin, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,7 @@ import { ChatInterface } from './ChatInterface'
 import { getExpedienteAccess } from '@/application/authorization/expedienteAccess'
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView'
 import { TerritorialContextPanel } from './TerritorialContextPanel'
-import { latestContextDetectionOrder } from '@/infrastructure/db/contextDetectionOrdering'
+import { loadAuthorizedParcelInputs } from '@/infrastructure/db/parcelContextRepository'
 import { buildTerritorialPresentation } from './territorialPresentation'
 import { ExpedienteActions } from '@/components/expedientes/ExpedienteActions'
 
@@ -32,22 +32,15 @@ export default async function ExpedienteWorkspacePage({ params }: { params: Prom
 
   const { expediente, membershipRole } = access
 
-  const [expedienteDocs, latestDetections] = await Promise.all([
+  const [expedienteDocs, parcelInputs] = await Promise.all([
     db
       .select()
       .from(documents)
       .where(eq(documents.expedienteId, expediente.id))
       .orderBy(desc(documents.uploadedAt)),
-    db
-      .select({ rawResponse: contextDetections.rawResponse })
-      .from(contextDetections)
-      .where(eq(contextDetections.expedienteId, expediente.id))
-      .orderBy(...latestContextDetectionOrder())
-      .limit(1),
+    loadAuthorizedParcelInputs(expediente.id, access.userId),
   ])
-  const territorialContext = buildTerritorialContextView(
-    latestDetections[0]?.rawResponse ?? null
-  )
+  const territorialContext = buildTerritorialContextView(parcelInputs?.detected)
   const presentation = buildTerritorialPresentation(
     {
       province: expediente.province ? getProvinceNameById(expediente.province) : '',

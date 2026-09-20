@@ -140,12 +140,36 @@ export function parseSiotugaDocumentInventory(
   expectedInstrumentId: string,
   sourceId: string
 ): PlanningNormativeDocument[] {
+  return parseSiotugaDocumentInventoryWithDiagnostics(content, expectedInstrumentId, sourceId).documents
+}
+
+const EMPTY_COMPONENTS_CONTRACT_VARIANT = /("componentes"\s*:\s*)\]/g
+
+function parseJsonWithKnownSiotugaContractVariant(content: string) {
   let parsed: unknown
   try {
     parsed = JSON.parse(content)
+    return { parsed, contractVariantRecovered: false }
   } catch {
-    throw new Error('SIOTUGA document inventory contract changed: invalid JSON')
+    if (!/("componentes"\s*:\s*)\]/.test(content)) {
+      throw new Error('SIOTUGA document inventory contract changed: invalid JSON')
+    }
+    const repaired = content.replace(EMPTY_COMPONENTS_CONTRACT_VARIANT, '$1[]')
+    try {
+      parsed = JSON.parse(repaired)
+      return { parsed, contractVariantRecovered: true }
+    } catch {
+      throw new Error('SIOTUGA document inventory contract changed: invalid JSON')
+    }
   }
+}
+
+export function parseSiotugaDocumentInventoryWithDiagnostics(
+  content: string,
+  expectedInstrumentId: string,
+  sourceId: string
+) {
+  const { parsed, contractVariantRecovered } = parseJsonWithKnownSiotugaContractVariant(content)
 
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('SIOTUGA document inventory contract changed: object expected')
@@ -173,7 +197,9 @@ export function parseSiotugaDocumentInventory(
     return group.componentes.flatMap((componentValue) => {
       const component = componentValue as SiotugaDocumentComponent
       const fileName = requiredString(component['path' + 'esperado'], 'componentes.pathesperado')
-      if (!/\.pdf$/i.test(fileName)) return []
+      // Keep official ordering plans available for manual review. They are
+      // often published as JPG/PNG files rather than PDFs.
+      if (!/\.(?:pdf|png|jpe?g|tiff?)$/i.test(fileName)) return []
       const officialDocumentId = requiredString(component.id, 'componentes.id')
       const description = optionalString(component.descripcion) ?? groupName
       return [{
@@ -191,7 +217,7 @@ export function parseSiotugaDocumentInventory(
   })
 
   const ids = new Set<string>()
-  return documents
+  return { documents: documents
     .filter((document) => {
       if (ids.has(document.officialDocumentId)) {
         throw new Error(
@@ -201,11 +227,35 @@ export function parseSiotugaDocumentInventory(
       ids.add(document.officialDocumentId)
       return true
     })
-    .sort((left, right) => left.officialDocumentId.localeCompare(right.officialDocumentId))
+    .sort((left, right) => left.officialDocumentId.localeCompare(right.officialDocumentId)), contractVariantRecovered }
 }
 
 function source(input: Omit<RawOfficialSource, 'provider'>): RawOfficialSource {
   return { provider: 'siotuga', ...input }
+}
+
+export interface SiotugaFetchFailure extends Error {
+  url: string
+  operation: string
+  cause?: unknown
+}
+
+async function fetchExternal(
+  fetcher: typeof fetch,
+  url: string,
+  operation: string,
+  init?: RequestInit,
+) {
+  try {
+    return await fetcher(url, init)
+  } catch (error) {
+    const failure = new Error(`${operation} fetch failed: ${error instanceof Error ? error.message : String(error)}`) as SiotugaFetchFailure
+    failure.name = 'SiotugaFetchFailure'
+    failure.url = url
+    failure.operation = operation
+    failure.cause = error
+    throw failure
+  }
 }
 
 export class SiotugaPlanningKnowledgeSource {
@@ -213,7 +263,7 @@ export class SiotugaPlanningKnowledgeSource {
 
   private async collectInventory(municipalityCode: string, retrievedAt: string) {
     const pageUrl = `${SIOTUGA_BASE_URL}inventario.php?inv=1&idconcello=${municipalityCode}`
-    const pageResponse = await this.fetcher(pageUrl, { headers: REQUEST_HEADERS })
+    const pageResponse = await fetchExternal(this.fetcher, pageUrl, `inventory page ${municipalityCode}`, { headers: REQUEST_HEADERS })
     const pageContent = await responseText(pageResponse, `SIOTUGA inventory ${municipalityCode}`)
     const cookie = sessionCookie(pageResponse)
     const token = inventoryToken(pageContent)
@@ -221,6 +271,7 @@ export class SiotugaPlanningKnowledgeSource {
     // for this session and is deliberately excluded from versioned snapshots.
     const rawSources: RawOfficialSource[] = []
     const instruments: PlanningInstrumentKnowledge[] = []
+    const contractVariantRecoveries: string[] = []
 
     for (const inventoryClass of INVENTORY_CLASSES) {
       const endpoint = `${SIOTUGA_BASE_URL}assets/inventario/query_document.php`
@@ -229,7 +280,7 @@ export class SiotugaPlanningKnowledgeSource {
         token,
         idclase: inventoryClass.id,
       })
-      const response = await this.fetcher(endpoint, {
+      const response = await fetchExternal(this.fetcher, endpoint, `${inventoryClass.kind} inventory ${municipalityCode}`, {
         method: 'POST',
         headers: {
           ...REQUEST_HEADERS,
@@ -267,7 +318,7 @@ export class SiotugaPlanningKnowledgeSource {
         lang: 'es_ES',
         token,
       })
-      const response = await this.fetcher(endpoint, {
+      const response = await fetchExternal(this.fetcher, endpoint, `document inventory ${instrument.officialId}`, {
         method: 'POST',
         headers: {
           ...REQUEST_HEADERS,
@@ -291,12 +342,12 @@ export class SiotugaPlanningKnowledgeSource {
           content,
         })
       )
-      normativeDocuments.push(
-        ...parseSiotugaDocumentInventory(content, instrument.officialId, sourceId)
-      )
+      const parsed = parseSiotugaDocumentInventoryWithDiagnostics(content, instrument.officialId, sourceId)
+      if (parsed.contractVariantRecovered) contractVariantRecoveries.push(instrument.officialId)
+      normativeDocuments.push(...parsed.documents)
     }
 
-    return { instruments, normativeDocuments, rawSources }
+    return { instruments, normativeDocuments, rawSources, contractVariantRecoveries }
   }
 
 
@@ -306,12 +357,12 @@ export class SiotugaPlanningKnowledgeSource {
     retrievedAt: string
   ) {
     const pageUrl = `${SIOTUGA_BASE_URL}inventario.php?inv=1&idconcello=${municipalityCode}`
-    const pageResponse = await this.fetcher(pageUrl, { headers: REQUEST_HEADERS })
+    const pageResponse = await fetchExternal(this.fetcher, pageUrl, `inventory page ${municipalityCode}`, { headers: REQUEST_HEADERS })
     const pageContent = await responseText(pageResponse, `SIOTUGA inventory ${municipalityCode}`)
     const cookie = sessionCookie(pageResponse)
     const token = inventoryToken(pageContent)
     const endpoint = `${SIOTUGA_BASE_URL}assets/inventario/getIOTPU.php`
-    const response = await this.fetcher(endpoint, {
+    const response = await fetchExternal(this.fetcher, endpoint, `document inventory ${instrumentId}`, {
       method: 'POST',
       headers: {
         ...REQUEST_HEADERS,
@@ -323,8 +374,10 @@ export class SiotugaPlanningKnowledgeSource {
     })
     const content = await responseText(response, `SIOTUGA document inventory ${instrumentId}`)
     const sourceId = `siotuga:instrument-documents:${instrumentId}`
+    const parsed = parseSiotugaDocumentInventoryWithDiagnostics(content, instrumentId, sourceId)
     return {
-      documents: parseSiotugaDocumentInventory(content, instrumentId, sourceId),
+      documents: parsed.documents,
+      contractVariantRecovered: parsed.contractVariantRecovered,
       rawSource: source({
         id: sourceId,
         url: `${endpoint}#iddoc=${instrumentId}`,
@@ -337,7 +390,7 @@ export class SiotugaPlanningKnowledgeSource {
 
   async collectMunicipality(municipalityCode: string, retrievedAt: string) {
     const capabilitiesUrl = `${SIOTUGA_BASE_URL}ws?codine=${municipalityCode}&SERVICE=WFS&VERSION=1.1.0&REQUEST=GetCapabilities`
-    const capabilitiesResponse = await this.fetcher(capabilitiesUrl, { headers: REQUEST_HEADERS })
+    const capabilitiesResponse = await fetchExternal(this.fetcher, capabilitiesUrl, `WFS capabilities ${municipalityCode}`, { headers: REQUEST_HEADERS })
     const capabilitiesXml = await responseText(
       capabilitiesResponse,
       `SIOTUGA WFS capabilities ${municipalityCode}`
@@ -361,7 +414,7 @@ export class SiotugaPlanningKnowledgeSource {
       name.includes('_3CLAS_')
     )) {
       const describeUrl = `${SIOTUGA_BASE_URL}ws?codine=${municipalityCode}&SERVICE=WFS&VERSION=1.1.0&REQUEST=DescribeFeatureType&TYPENAME=${encodeURIComponent(layerName)}`
-      const describeResponse = await this.fetcher(describeUrl, { headers: REQUEST_HEADERS })
+      const describeResponse = await fetchExternal(this.fetcher, describeUrl, `WFS schema ${municipalityCode}/${layerName}`, { headers: REQUEST_HEADERS })
       const xml = await responseText(
         describeResponse,
         `SIOTUGA DescribeFeatureType ${municipalityCode}/${layerName}`
@@ -388,6 +441,7 @@ export class SiotugaPlanningKnowledgeSource {
       capabilitiesXml,
       inventory: inventory.instruments,
       normativeDocuments: inventory.normativeDocuments,
+      contractVariantRecoveries: inventory.contractVariantRecoveries,
       layerSchemas,
       sourceIds: rawSources.map((item) => item.id),
       rawSources,
@@ -451,6 +505,7 @@ export async function collectCorunaPlanningKnowledgeInput(options?: {
       capabilitiesXml: municipality.capabilitiesXml,
       inventory: municipality.inventory,
       normativeDocuments: municipality.normativeDocuments,
+      contractVariantRecoveries: municipality.contractVariantRecoveries,
       layerSchemas: municipality.layerSchemas,
       sourceIds: municipality.sourceIds,
     })),

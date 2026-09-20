@@ -77,6 +77,26 @@ describe('V3-E relevance and semantic composition', () => {
     expect(evaluateClaimRelevance(occupationClaim, 'parcel_parameter', '¿Cuánto retranqueo hay que dejar?', [source], applicability).code).toBe('IRRELEVANT')
   })
 
+  it('prioritizes the parcel regime before secondary normative topics', () => {
+    const regimeSource: NormativeCandidate = { id: 'regime', content: 'SNR, SNRC, ámbito Chanteiro.' }
+    const parkingSource: NormativeCandidate = { id: 'parking', content: 'Debe reservarse aparcamiento.' }
+    const applicability = { ...baseApplicability, applicable: [regimeSource, parkingSource] }
+    const result = composeSemanticAnswer(
+      output,
+      [
+        claim({ id: 'regime-fact', type: 'territorial_fact', text: 'La parcela está clasificada como SNR, categoría SNRC y ámbito Chanteiro.', appliesToParcel: true, sourceRefs: [1] }),
+        claim({ id: 'parking-fact', type: 'normative_fact', text: 'La normativa exige aparcamiento.', sourceRefs: [2] }),
+      ],
+      '¿Cuál es el régimen urbanístico de esta parcela?',
+      'parcel_regime',
+      [regimeSource, parkingSource],
+      applicability,
+      []
+    )
+    expect(result.answer.indexOf('clasificada como SNR')).toBeGreaterThan(result.answer.indexOf('CONCLUSIÓN'))
+    expect(result.answer.indexOf('aparcamiento')).toBeGreaterThan(result.answer.indexOf('FUNDAMENTO'))
+  })
+
   it('does not turn a supported sanction into a viability conclusion', () => {
     const source: NormativeCandidate = { id: 'applicable-1', content: 'La multa es del 15 % al 30 % del valor de la obra.' }
     const applicability = { ...baseApplicability, applicable: [source], canAnswerConditionalViability: true }

@@ -46,6 +46,7 @@ function candidate(overrides: Partial<NormativeCandidate> = {}): NormativeCandid
     content: 'Ordenanza Z-4. Suelo urbano consolidado. La altura máxima será de 7 m.',
     hierarchy: 'ordenanza',
     status: 'vigente',
+    regimeMetadata: { kind: 'ordinance', code: overrides.ordinance ?? overrides.title?.replace('Ordenanza ', '') ?? 'Z-4', municipalityCode: overrides.municipalityCode },
     ...overrides,
   }
 }
@@ -102,6 +103,51 @@ describe('requiresDeterminedParcelRegime', () => {
     })], true)
     expect(result.applicable).toHaveLength(0)
     expect(result.review).toHaveLength(1)
+  })
+
+  it('no vuelve a exigir validación del régimen cuando la ordenanza ya fue confirmada por el usuario', () => {
+    const context = completeContext()
+    context.canAnswerConcreteParameters = false
+    context.qualification = { value: 'R-2', source: 'manual', confidence: 0.55, verification: 'unverified' }
+    context.ordinanceCandidates = [{
+      ...candidate({ ordinance: 'R-2' }),
+      status: 'user_confirmed',
+      confirmationSource: 'user',
+    }]
+
+    const result = evaluateApplicability(context, [candidate({ ordinance: 'R-2' })], true)
+
+    expect(result.missingData).not.toContain('MISSING_REGIME_VALIDATION')
+  })
+
+  it('mantiene aplicable la evidencia canónica confirmada aunque la categoría territorial sea distinta', () => {
+    const context = completeContext()
+    context.canAnswerConcreteParameters = false
+    context.qualification = { value: 'SRPAU', source: 'siotuga', confidence: 0.95, verification: 'confirmed' }
+    context.ordinanceCandidates = [{
+      ...candidate({ ordinance: 'R-2' }),
+      identity: 'R-2',
+      status: 'user_confirmed',
+      confirmationSource: 'user',
+      identityId: '27387:ordinance:R-2',
+    }]
+
+    const result = evaluateApplicability(context, [{
+      ...candidate({ ordinance: 'R-2' }),
+      identityId: '27387:ordinance:R-2',
+      catalogStatus: 'ACCEPTED',
+      normativeReferences: [{
+        documentId: '27387no304.pdf',
+        chunkIds: ['chunk-r2'],
+        article: 'Art. 130',
+        relation: 'defines',
+        sourceId: 'catalog',
+      }],
+    }], true)
+
+    expect(result.applicable).toHaveLength(1)
+    expect(result.review).toHaveLength(0)
+    expect(result.missingData).not.toContain('MISSING_REGIME_VALIDATION')
   })
 
   it('no permite metadata normativa de confianza baja por sí sola', () => {
@@ -340,13 +386,14 @@ describe('evaluateApplicability', () => {
           planningArea: null,
           title: 'Regulaci\u00f3n general de retranqueos',
           content: 'Las separaciones se regulan en las determinaciones particulares.',
+          regimeMetadata: { kind: 'general' }
         }),
       ],
       true
     )
 
-    expect(result.applicable).toHaveLength(0)
-    expect(result.review).toHaveLength(1)
+    expect(result.applicable).toHaveLength(1)
+    expect(result.review).toHaveLength(0)
     expect(result.rejected).toHaveLength(0)
   })
 
@@ -360,11 +407,11 @@ describe('evaluateApplicability', () => {
     }
     const result = evaluateApplicability(
       context,
-      [candidate({ planningArea: 'Z-7', content: 'Ordenanza Z-4. Regulaci\u00f3n general.' })],
+      [candidate({ planningArea: 'Z-7', content: 'Ordenanza Z-4. Regulaci\u00f3n general.', regimeMetadata: { kind: 'planning_area', code: 'Z-7' } })],
       true
     )
 
     expect(result.applicable).toHaveLength(0)
-    expect(result.rejected[0].reason).toMatch(/otro \u00e1mbito/i)
+    expect(result.rejected[0].reason).toMatch(/coincide/i)
   })
 })

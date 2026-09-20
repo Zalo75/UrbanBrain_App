@@ -156,17 +156,16 @@ function structuredIdentityMatch(
   const metadata = candidate.regimeMetadata
   if (!metadata) return null
   if (metadata.confidence === 'low') return null
-  if (metadata.kind === 'general') return true
+  if (metadata.kind === 'general' || metadata.kind === 'equivalent') return true
   const scopes = identity.scopes.filter((scope) => scope.status === 'effective' || scope.status === 'automatic')
   if (scopes.length === 0) return null
 
   const matchesScope = (scope: ParcelRegimeIdentityScope) => {
     if (metadata.kind === 'ordinance') {
-      const expected = scope.qualification
-      return Boolean(expected && (
-        normalizeComparable(expected) === normalizeComparable(metadata.code ?? '') ||
-        normalizeComparable(expected) === normalizeComparable(metadata.label ?? '')
-      ))
+      const codeMatches = (expected: string) => normalizeComparable(expected) === normalizeComparable(metadata.code ?? '') || normalizeComparable(expected) === normalizeComparable(metadata.label ?? '')
+      const matchesQualification = scope.qualification && codeMatches(scope.qualification)
+      const matchesOrdinanceArray = scope.ordinances?.some(ord => codeMatches(ord.identity))
+      return Boolean(matchesQualification || matchesOrdinanceArray)
     }
     if (metadata.kind === 'planning_area') {
       const expected = scope.planningArea
@@ -186,6 +185,27 @@ function structuredIdentityMatch(
   }
 
   return scopes.some(matchesScope)
+}
+
+function isAuthoritativeCanonicalCandidate(
+  candidate: NormativeCandidate,
+  context: NormalizedParcelContext,
+) {
+  if (
+    candidate.catalogStatus !== 'ACCEPTED' ||
+    !candidate.identityId ||
+    (candidate.normativeReferences?.length ?? 0) === 0
+  ) return false
+
+  const confirmed = context.ordinanceCandidates?.find(
+    (item) => item.status === 'user_confirmed' && item.identity.trim()
+  )
+  if (!confirmed) return false
+
+  return Boolean(
+    (confirmed.identityId && confirmed.identityId === candidate.identityId) ||
+    (candidate.ordinance && normalizeComparable(candidate.ordinance) === normalizeComparable(confirmed.identity))
+  )
 }
 
 function normalizeOrdinanceIdentifier(value: string) {
@@ -310,6 +330,10 @@ export function evaluateApplicability(
   const expectedLandClass = context.landClass?.value
   const expectedQualification = context.qualification?.value
   const expectedArea = context.planningArea?.value
+  const userConfirmedOrdinance = Boolean(
+    context.ordinanceCandidates?.some((candidate) => candidate.status === 'user_confirmed') ||
+    (context.qualification?.source === 'manual' && context.qualification.verification === 'confirmed')
+  )
 
   if (!expectedMunicipality) result.missingData.push('municipio')
   if (!context.cadastralReference && !context.address && !context.coordinates) {
@@ -317,21 +341,21 @@ export function evaluateApplicability(
   }
   if (concreteParameterRequested) {
     if (!expectedLandClass) result.missingData.push('clasificación del suelo')
-    if (!expectedQualification && !expectedArea) {
+    if (!expectedQualification && !expectedArea && !context.ordinanceCandidates?.length) {
       result.missingData.push('calificación, ordenanza, ámbito o ficha')
     }
     if (!context.planningInstrument) result.missingData.push('instrumento de planeamiento')
     if (!context.validity) result.missingData.push('vigencia del instrumento')
   } else if (conditionalViabilityRequested) {
     if (!expectedLandClass) result.missingData.push('clasificación del suelo')
-    if (!expectedQualification && !expectedArea) {
+    if (!expectedQualification && !expectedArea && !context.ordinanceCandidates?.length) {
       result.missingData.push('categoría, ordenanza, ámbito o ficha aplicable')
     }
     if (!context.planningInstrument) result.missingData.push('instrumento de planeamiento')
     if (!context.validity) result.missingData.push('vigencia del instrumento')
   }
 
-  const determiningZone = context.qualification ?? context.planningArea
+  const determiningZone = context.ordinanceCandidates?.length ? { verification: 'confirmed' } : (context.qualification ?? context.planningArea)
   const requiredFieldsAreConfirmed = Boolean(
     context.canAnswerConcreteParameters &&
     context.municipality?.verification === 'confirmed' &&
@@ -339,23 +363,16 @@ export function evaluateApplicability(
       determiningZone?.verification === 'confirmed' &&
       context.planningInstrument?.verification === 'confirmed' &&
       context.validity?.verification === 'confirmed'
-  )
+  ) || userConfirmedOrdinance
   if (concreteParameterRequested && result.missingData.length === 0 && !requiredFieldsAreConfirmed) {
     result.missingData.push('MISSING_REGIME_VALIDATION')
   }
 
-  const hasCompleteParcelRegime = Boolean(
-    expectedMunicipality &&
-      (context.cadastralReference || context.address || context.coordinates) &&
-      expectedLandClass &&
-      (expectedQualification || expectedArea) &&
-      context.planningInstrument &&
-      context.validity &&
-      requiredFieldsAreConfirmed
-  )
+  // const hasCompleteParcelRegime = Boolean(...) removed as unused
 
   for (const candidate of candidates) {
     let structuredIdentityAccepted = false
+    const authoritativeCanonicalCandidate = isAuthoritativeCanonicalCandidate(candidate, context)
     const municipalDetailed = isMunicipalDetailedCandidate(candidate)
     if (municipalDetailed) {
       if (!candidate.municipalityName) {
@@ -388,14 +405,23 @@ export function evaluateApplicability(
       continue
     }
 
-    if (municipalDetailed && concreteParameterRequested) {
+    if (municipalDetailed && authoritativeCanonicalCandidate) {
+      // Canonical evidence for a confirmed identity is authoritative for the
+      // normative rule. It must not be downgraded to spatial review merely
+      // because the parcel may contain other territorial categories.
+      structuredIdentityAccepted = true
+    } else if (municipalDetailed) {
       const structuredMatch = structuredIdentityMatch(candidate, parcelRegime)
       if (structuredMatch === false && (parcelRegime.status === 'effective' || parcelRegime.status === 'automatic')) {
         result.rejected.push({ candidate, reason: 'El régimen normativo no coincide con la identidad efectiva de la parcela.' })
         continue
       }
-      if (structuredMatch === null && ['review', 'conflict', 'unresolved'].includes(parcelRegime.status)) {
+      if (concreteParameterRequested && structuredMatch === null && ['review', 'conflict', 'unresolved'].includes(parcelRegime.status)) {
         result.review.push(candidate)
+        continue
+      }
+      if (structuredMatch === false) {
+        result.rejected.push({ candidate, reason: 'El chunk no coincide con la calificación estructurada validada de la parcela.' })
         continue
       }
       structuredIdentityAccepted = structuredMatch === true
@@ -428,6 +454,7 @@ export function evaluateApplicability(
       municipalDetailed &&
       expectedQualification &&
       !structuredIdentityAccepted &&
+      !authoritativeCanonicalCandidate &&
       (candidate.regimeMetadata || extractOrdinances(candidate).length > 0) &&
       !hasCompatibleOrdinance(candidate, expectedQualification)
     ) {
@@ -453,7 +480,8 @@ export function evaluateApplicability(
       concreteParameterRequested &&
       (expectedQualification || expectedArea) &&
       !candidate.regimeMetadata &&
-      !(
+      !authoritativeCanonicalCandidate &&
+      !( 
         (expectedQualification && hasCompatibleOrdinance(candidate, expectedQualification)) ||
         (expectedArea && hasCompatiblePlanningArea(candidate, expectedArea))
       )

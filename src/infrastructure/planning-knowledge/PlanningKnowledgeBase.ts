@@ -4,6 +4,7 @@ import {
 } from './corunaP1PlanningKnowledge'
 import { CORUNA_P1_DOCUMENTS_BY_INSTRUMENT } from './corunaP1PlanningDocuments.generated'
 import { BETANZOS_REGISTRY } from '@/municipal-pilots/betanzos/registry'
+export { getInstrumentIdentityCatalog, getInstrumentIdentityOptions, findInstrumentIdentity, findAcceptedInstrumentIdentity, enrichOrdinanceCandidate, isAutomaticallyAuthoritative } from './instrumentIdentityCatalog'
 
 const MUNICIPAL_PILOTS = [BETANZOS_REGISTRY]
 
@@ -58,6 +59,12 @@ export function getActiveP1PlanningMunicipalities() {
 export function getPlanningDocumentsByInstrument(instrumentId?: string) {
   if (!instrumentId) return []
   return [...(CORUNA_P1_DOCUMENTS_BY_INSTRUMENT[instrumentId as keyof typeof CORUNA_P1_DOCUMENTS_BY_INSTRUMENT] ?? [])]
+}
+
+export function getDetailedPlanningLayer(municipalityCode?: string) {
+  return municipalityCode
+    ? ACTIVE_P1_BY_CODE.get(municipalityCode)?.detailedPlanningLayer
+    : undefined
 }
 
 export function getOfficialPlanningDocumentUrl(instrumentId?: string | null, filename?: string | null) {

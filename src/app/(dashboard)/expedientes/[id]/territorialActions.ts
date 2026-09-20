@@ -20,6 +20,7 @@ import {
   revokeActionAreaSelection,
 } from '@/application/territorial-resolver/actionAreaSelection';
 import { buildTerritorialContextView } from '@/application/territorial-resolver/territorialContextView';
+import { detectionSummary } from '@/application/parcel-context/detectionSummary';
 import type {
   ManualAffectDecision,
   ManualTerritorialContext,
@@ -60,6 +61,10 @@ function textValue(formData: FormData, name: string) {
 
 function limitedText(formData: FormData, name: string, maxLength = 160) {
   return textValue(formData, name).slice(0, maxLength);
+}
+
+function normalizeOrdinanceSelection(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
 export async function resolveTerritorialContextAction(
@@ -129,6 +134,7 @@ export async function resolveTerritorialContextAction(
     };
   }
 
+  const candidateConfirmation = formData.get('candidateConfirmation') === 'on';
   let result;
   try {
     const engine = new ContextDetectionEngine();
@@ -138,7 +144,27 @@ export async function resolveTerritorialContextAction(
       address: address || undefined,
     };
 
-    if (intent === 'manual') {
+    if (intent === 'manual' && candidateConfirmation) {
+      if (!manualOrdinance || revokeManualOrdinance) {
+        return {
+          status: 'error',
+          message: 'Seleccione una identidad de ordenanza acreditada por el mismo instrumento.',
+        };
+      }
+      result = await engine.confirmOrdinanceCandidate(
+        expedienteId,
+        access.userId,
+        input,
+        manualOrdinance,
+        attemptStartedAt,
+      );
+      if (!result) {
+        return {
+          status: 'error',
+          message: 'La candidata seleccionada ya no está disponible en el contexto oficial actual.',
+        };
+      }
+    } else if (intent === 'manual') {
       const recordedAt = attemptStartedAt;
       const requestedTechnicianValidation = formData.get('technicianValidated') === 'on';
       const technicianValidated = requestedTechnicianValidation &&
@@ -150,18 +176,34 @@ export async function resolveTerritorialContextAction(
         };
       }
       const authorizedInputs = await loadAuthorizedParcelInputs(expedienteId, access.userId);
-      const previousRaw = authorizedInputs?.latestDetectionRaw as TerritorialResolution | undefined;
-      const previousManual = previousRaw?.continuity?.manualContext;
-      const effectiveOfficial = previousRaw ? officialContextForUse(previousRaw) : undefined;
+      const previousRaw = authorizedInputs?.legacyAuditRaw as TerritorialResolution | undefined;
+      const detected = authorizedInputs?.detected;
+      const previousManual = detected?.manualContext;
+      const officialOrdinanceCandidates = detected?.ordinanceCandidates ?? [];
+      if (manualOrdinance && officialOrdinanceCandidates.length > 0 && !revokeManualOrdinance) {
+        const selected = normalizeOrdinanceSelection(manualOrdinance);
+        const allowed = officialOrdinanceCandidates.some((candidate) =>
+          normalizeOrdinanceSelection(candidate.identity) === selected
+        );
+        if (!allowed) {
+          return {
+            status: 'error',
+            message: 'Seleccione una identidad de ordenanza acreditada por el mismo instrumento.',
+          };
+        }
+      }
       let affectDecisions: ManualAffectDecision[] = previousManual?.affectDecisions ?? [];
       if (formData.get('manualAffectsEdited') === '1') {
-        const automaticAffects = effectiveOfficialContext(previousRaw)?.affects.detected ?? [];
+        const automaticAffects = (detected?.affects?.detected ?? []).map((affect) => ({
+          ...affect,
+          evidence: { source: 'canonical' },
+        }));
         const previousByTarget = new Map(
           affectDecisions.map((decision) => [decision.targetKey ?? decision.id, decision])
         );
         const reviewed: ManualAffectDecision[] = [];
         for (const [index, affect] of automaticAffects.entries()) {
-          const targetKey = territorialAffectKey(affect);
+          const targetKey = `canonical:${affect.category}:${affect.name}`;
           const requestedAction = textValue(formData, `manualAffectAction.${index}`);
           const reason = limitedText(formData, `manualAffectReason.${index}`, 500);
           const previous = previousByTarget.get(targetKey);
@@ -272,7 +314,7 @@ export async function resolveTerritorialContextAction(
         const areaVerification = actionAreaValidated ? 'technician_validated' : 'unverified';
         if (actionAreaMode === 'detected_zone') {
           const candidateId = textValue(formData, 'actionAreaCandidateId');
-          const candidate = effectiveOfficial?.planning.classificationResolution?.candidates.find(
+          const candidate = detected?.classificationResolution?.candidates.find(
             (item) => item.id === candidateId
           );
           if (!candidate?.parcelCoverage?.intersectionGeometry) {
@@ -301,8 +343,8 @@ export async function resolveTerritorialContextAction(
           actionAreaChanged =
             previousManual?.actionAreaSelection?.current?.selectedCandidateId !== candidateId;
         } else if (actionAreaMode === 'whole_parcel') {
-          const geometry = effectiveOfficial?.parcelGeometry;
-          const surfaceSquareMetres = actionAreaParcelSurface(effectiveOfficial);
+          const geometry = detected?.parcelGeometry ?? undefined;
+          const surfaceSquareMetres = detected?.parcelSurfaceSquareMetres;
           if (!geometry || !surfaceSquareMetres) {
             return {
               status: 'error',
@@ -315,7 +357,15 @@ export async function resolveTerritorialContextAction(
             selectedBy: access.userId,
             selectedAt: recordedAt,
             verification: areaVerification,
-            affects: effectiveOfficial.affects,
+            affects: {
+              analysisGeometry: detected?.affects?.analysisGeometry ?? 'none',
+              canRuleOutUndetectedAffects: false,
+              warnings: detected?.affects?.warnings ?? [],
+              sourceChecks: detected?.affects?.sourceChecks ?? [],
+              detected: detected?.affects?.detected ?? [],
+              automatic: detected?.affects?.automatic ?? [],
+              parcel: detected?.affects?.parcel ?? [],
+            } as any,
             previous: previousManual?.actionAreaSelection,
           });
           actionAreaChanged =
@@ -442,7 +492,9 @@ export async function resolveTerritorialContextAction(
   if (intent === 'manual') {
     return {
       status: 'success',
-      message:
+      message: candidateConfirmation
+        ? 'Ordenanza confirmada por el usuario a partir de la evidencia oficial existente.'
+        :
         result.continuity?.manualContext?.verification === 'technician_validated'
           ? 'Datos manuales guardados como validados por el t\u00e9cnico, diferenciados de las fuentes oficiales.'
           : 'Datos manuales guardados como provisionales y pendientes de validaci\u00f3n.',
@@ -461,7 +513,7 @@ export async function resolveTerritorialContextAction(
   }
   const message =
     result.status === 'confirmed'
-      ? buildTerritorialContextView(result)?.status === 'confirmed'
+      ? buildTerritorialContextView(detectionSummary(result))?.status === 'confirmed'
         ? 'Ubicación confirmada y contexto territorial actualizado.'
         : 'Ubicación catastral confirmada, pero el contexto territorial sigue parcial y requiere completar municipio, planeamiento o clasificación.'
       : result.status === 'probable' || result.status === 'ambiguous'

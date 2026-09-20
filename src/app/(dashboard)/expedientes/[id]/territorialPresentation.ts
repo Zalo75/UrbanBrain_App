@@ -55,8 +55,10 @@ export function buildTerritorialPresentation(
   detected: TerritorialContextView | null
 ) {
   const planning = detected ? detected.instrument : stored.planning ?? undefined
+  const detailedOrdinances = detected?.ordinanceCandidates?.map((candidate) => candidate.identity).filter(Boolean) ?? []
   const zone = detected
     ? detected.areas.join(', ') ||
+      detailedOrdinances.join(', ') ||
       detected.manualContext?.ordinance?.trim() ||
       detected.manualContext?.area?.trim() ||
       undefined

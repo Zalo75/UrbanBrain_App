@@ -8,6 +8,7 @@ import {
   buildDeterministicMissingFacts,
   buildMunicipalSafetyPrompt,
   buildReviewSafetyPrompt,
+  renderValidatedClaimsNeutral,
 } from './responseSafety'
 import type { ReasonerOutput, NormativeCandidate, ApplicabilityResult, NormalizedParcelContext } from '@/domain/parcel-context/types'
 
@@ -74,6 +75,28 @@ describe('V3-B Claim-level validation & rendering', () => {
       expect(res.invalidClaimCount).toBe(0)
     })
 
+    it('ignores citation metadata echoed in numericTokens', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'conditional',
+        missingFacts: [],
+        claims: [{
+          id: '1',
+          type: 'normative_fact',
+          text: 'La Ordenanza R-2 se regula en el artículo 130, página 145 del documento 27387no306.pdf.',
+          sourceRefs: [1],
+          appliesToParcel: 'conditional',
+          numericTokens: ['27387', '130', '145', '152'],
+        }],
+      }
+      const result = validateReasonerOutput(output, [{
+        id: 'source-1',
+        content: 'La Ordenanza R-2 se regula en el artículo 130.',
+        title: 'article',
+      }], app)
+      expect(result.validClaims).toHaveLength(1)
+      expect(result.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBeUndefined()
+    })
+
     it('rejects if defensive number is not in source', () => {
       const output: ReasonerOutput = {
         answerMode: 'definitive',
@@ -101,6 +124,52 @@ describe('V3-B Claim-level validation & rendering', () => {
         const res = validateReasonerOutput(out, complexSources, app)
         expect(res).toBeDefined()
       }
+    })
+
+    it('accepts grouped thousands written with spaces', () => {
+      const source: NormativeCandidate[] = [{ id: 'source-1', content: 'Superficie mínima: 1.000,50 m²', title: 'article' }]
+      const output: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La superficie mínima es 1 000,50 m²', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }]
+      }
+      const result = validateReasonerOutput(output, source, app)
+      expect(result.validClaims).toHaveLength(1)
+    })
+
+    it('does not equate compatible numbers with incompatible units', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La superficie es de 5 m', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }]
+      }
+      const result = validateReasonerOutput(output, [{ id: 'source-1', content: 'La superficie es de 5 m²' }], app)
+      expect(result.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1)
+    })
+
+    it('normalizes Spanish and Galician number words with units', () => {
+      const source: NormativeCandidate[] = [{ id: 'source-1', content: 'A altura máxima será de dúas plantas e 7 metros; noutras zonas, unha planta e 3,50 metros.' }]
+      const output: ReasonerOutput = {
+        answerMode: 'conditional', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La altura máxima es de dos plantas y 7 m; en otras zonas, una planta y 3,50 m', sourceRefs: [1], appliesToParcel: 'conditional', numericTokens: ['dos plantas', '7 m', 'una planta', '3,50 m'] }]
+      }
+      const result = validateReasonerOutput(output, source, app)
+      expect(result.validClaims).toHaveLength(1)
+    })
+
+    it('rejects a different decimal or percentage even when another source contains it', () => {
+      const source: NormativeCandidate[] = [
+        { id: 'source-1', content: 'La ocupación es 30 % y la superficie 98,53 m²' },
+        { id: 'source-2', content: 'La ocupación es 40 % y la superficie 98,54 m²' },
+      ]
+      const output: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La ocupación es 31 %', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }]
+      }
+      const result = validateReasonerOutput(output, source, app)
+      expect(result.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1)
+
+      const wrongDecimal = { ...output, claims: [{ ...output.claims[0], text: 'La superficie es 98,54 m²', sourceRefs: [1] }] }
+      const decimalResult = validateReasonerOutput(wrongDecimal, source, app)
+      expect(decimalResult.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1)
     })
   })
 
@@ -136,7 +205,106 @@ describe('V3-B Claim-level validation & rendering', () => {
       expect(res.validClaims.length).toBe(0)
 
       const fallback = buildSafeAbstention(app, undefined, undefined, ['Dato faltante'])
-      expect(fallback).toContain('Me abstengo')
+      expect(fallback).toContain('No puede determinarse con seguridad el régimen urbanístico')
+    })
+
+    it('does not ask again for known parcel facts in a documentary fallback', () => {
+      const context = {
+        cadastralReference: { value: '36059A03900148', verification: 'confirmed' },
+        municipality: { value: { name: 'Vila de Cruces', ineCode: '36059' }, verification: 'confirmed' },
+        landClass: { value: 'urbano_no_consolidado', verification: 'confirmed' },
+        planningInstrument: { value: 'NORMAS SUBSIDIARIAS DE PLANEAMENTO', verification: 'confirmed' },
+        urbanisticFacts: {
+          classification: { status: 'automatic_confirmed', value: { code: 'SU', label: 'Suelo urbano' }, discrepancies: [] },
+          category: { status: 'automatic_confirmed', value: { code: 'SUSC', label: 'Suelo urbano sin consolidar' }, discrepancies: [] },
+        },
+        knownConstraints: [],
+        conflicts: [],
+        pendingValidation: [],
+      } as unknown as NormalizedParcelContext
+      const fallback = buildSafeAbstention(
+        { ...app, missingData: ['referencia catastral, dirección o coordenadas', 'clasificación del suelo', 'categoría, ordenanza, ámbito o ficha aplicable'], applicable: [], rejected: [{ candidate: sources[0], reason: 'evidencia documental insuficiente' }] },
+        context,
+        '¿Qué establece la normativa para el suelo urbano sin consolidar?'
+      )
+      expect(fallback).not.toContain('Necesito referencia catastral')
+      expect(fallback).not.toContain('Faltan estos datos:')
+      expect(fallback).toContain('La normativa localizada no permite confirmar todavía')
+      expect(fallback).not.toContain('no pueden vincularse de forma segura con esta parcela')
+    })
+
+    it('conserva una ordenanza confirmada cuando faltan sus parámetros normativos', () => {
+      const confirmedContext = {
+        municipality: { value: { name: 'Teo', ineCode: '15082' }, verification: 'confirmed' },
+        planningInstrument: { value: 'PXOM de Teo', verification: 'confirmed' },
+        qualification: { value: 'R-2', source: 'manual', verification: 'confirmed' },
+        ordinanceCandidates: [{
+          identity: 'R-2',
+          instrumentId: 'instrument-current',
+          status: 'user_confirmed',
+          provenance: ['Extraído de la leyenda oficial WMS'],
+        }],
+        knownConstraints: [],
+        conflicts: [],
+        pendingValidation: [],
+      } as unknown as NormalizedParcelContext
+      const applicability = {
+        ...app,
+        canAnswerConcreteParameters: false,
+        missingData: [
+          'MISSING_REGIME_VALIDATION',
+          'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
+        ],
+        applicable: [],
+        rejected: [],
+      }
+
+      expect(buildDeterministicMissingFacts(applicability, confirmedContext)).toEqual([
+        'evidencia documental suficiente para respaldar las afirmaciones normativas solicitadas',
+      ])
+      const fallback = buildSafeAbstention(
+        applicability,
+        confirmedContext,
+        '¿Cuál es la ordenanza aplicable a esta parcela y qué condiciones urbanísticas establece para ella?'
+      )
+      expect(fallback).toContain('Ordenanza aplicable: R-2 (confirmada por el usuario).')
+      expect(fallback).toContain('No dispongo de evidencia normativa suficiente para afirmar sus parámetros.')
+      expect(fallback).not.toContain('Faltan estos datos: ordenanza o zona normativa aplicable')
+    })
+
+    it('keeps a general normative fact when the model tags it as parcel-related', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'partial',
+        missingFacts: ['ordenanza pormenorizada'],
+        claims: [{
+          id: 'general-su-sc',
+          type: 'normative_fact',
+          text: 'Las NNSS de Vila de Cruces establecen el régimen general del suelo urbano sin consolidar.',
+          sourceRefs: [1],
+          appliesToParcel: true,
+          numericTokens: [],
+        }],
+      }
+      const context = {
+        municipality: { value: { name: 'Vila de Cruces', ineCode: '36059' }, verification: 'confirmed' },
+        planningInstrument: { value: 'NORMAS SUBSIDIARIAS DE PLANEAMENTO', verification: 'confirmed' },
+        landClass: { value: 'urbano_no_consolidado', verification: 'confirmed' },
+      } as unknown as NormalizedParcelContext
+      const applicability = {
+        ...app,
+        canAnswerConcreteParameters: false,
+        applicable: [sources[0]],
+        rejected: [],
+      }
+      const result = validateReasonerOutput(
+        output,
+        [{ ...sources[0], content: 'Las NNSS establecen el régimen general del suelo urbano sin consolidar.' }],
+        applicability,
+        context,
+        'independent'
+      )
+      expect(result.validClaims).toHaveLength(1)
+      expect(result.invalidClaimReasonCounts.UNAUTHORIZED_CONCLUSION).toBeUndefined()
     })
 
     it('rejects a parcel conclusion when concrete parameters are not authorized', () => {
@@ -201,6 +369,16 @@ describe('V3-B Claim-level validation & rendering', () => {
       expect(res.invalidClaimCount).toBe(0);
     });
 
+    it('accepts an exact cadastral reference already present in context', () => {
+      const ctx = { cadastralReference: { value: '15009A01300255' } } as NormalizedParcelContext
+      const out: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'territorial_fact', text: 'La referencia es 15009A01300255', sourceRefs: [], appliesToParcel: true, numericTokens: ['15009A01300255'] }]
+      }
+      const res = validateReasonerOutput(out, [], { canAnswerConcreteParameters: true }, ctx)
+      expect(res.validClaims).toHaveLength(1)
+    })
+
     it('rejects unsupported numbers normally', () => {
       
       const out = {
@@ -210,6 +388,7 @@ describe('V3-B Claim-level validation & rendering', () => {
       const res = validateReasonerOutput(out, [{ id: 's1', content: 'El área es de 200 m2' }], { canAnswerConcreteParameters: true });
       expect(res.invalidClaimReasonCounts.UNSUPPORTED_NUMBER).toBe(1);
     });
+
   });
 
   describe('Citation and provenance guarantees', () => {
@@ -233,6 +412,18 @@ describe('V3-B Claim-level validation & rendering', () => {
       const result = validateReasonerOutput(output, sources, app)
       expect(result.validClaims).toHaveLength(1)
       expect(renderFinalAnswer(output, result.validClaims)).toContain('No se ha localizado')
+    })
+
+    it('removes internal context markers from the final answer', () => {
+      const output: ReasonerOutput = {
+        answerMode: 'definitive', missingFacts: [],
+        claims: [{ id: '1', type: 'normative_fact', text: 'La parcela está en SNR [contexto] y consta en el expediente [context].', sourceRefs: [1], appliesToParcel: 'unknown', numericTokens: [] }],
+      }
+      const result = validateReasonerOutput(output, sources, app)
+      const rendered = renderFinalAnswer(output, result.validClaims)
+      expect(rendered).not.toContain('[context]')
+      expect(rendered).not.toContain('[contexto]')
+      expect(rendered).toContain('La parcela está en SNR')
     })
 
     it('preserves every validated citation when rendering a claim', () => {
@@ -308,6 +499,43 @@ describe('V3-B Claim-level validation & rendering', () => {
   })
 
   describe('V3-D review evidence and deterministic missing facts', () => {
+    it('preserves validated V2 claim wording without semantic templates', () => {
+      const claims = [
+        { id: 'r2', type: 'normative_fact' as const, text: 'La ordenanza aplicable es R-2.', sourceRefs: [1], appliesToParcel: 'conditional' as const, numericTokens: [] },
+        { id: 'art130', type: 'normative_fact' as const, text: 'El Artículo 130 establece una superficie mínima de 5.000 m².', sourceRefs: [1], appliesToParcel: 'conditional' as const, numericTokens: ['5000'] },
+        { id: 'limit', type: 'limitation' as const, text: 'La distribución espacial dentro de la parcela requiere comprobación.', sourceRefs: [1], appliesToParcel: 'unknown' as const, numericTokens: [] },
+      ]
+      const rendered = renderValidatedClaimsNeutral(claims)
+      expect(rendered).toContain('La ordenanza aplicable es R-2.')
+      expect(rendered).toContain('El Artículo 130 establece una superficie mínima de 5.000 m².')
+      expect(rendered).toContain('La distribución espacial dentro de la parcela requiere comprobación.')
+      expect(rendered).not.toContain('No puede fijarse todavía')
+      expect(rendered).not.toContain('Normativa localizada cuya aplicación concreta')
+      expect(rendered).not.toContain('Información cuya vinculación concreta')
+    })
+
+    it('keeps specific normative claims when territorial review marks the source', () => {
+      const source: NormativeCandidate = {
+        id: 'r2-source',
+        content: 'Artículo 130. La parcela mínima es la establecida por la ordenanza.',
+        evidenceSpecificity: 'SPECIFIC',
+      }
+      const output: ReasonerOutput = {
+        answerMode: 'conditional',
+        missingFacts: [],
+        claims: [{
+          id: 'r2-claim',
+          type: 'normative_conditional',
+          text: 'La ordenanza establece la parcela mínima si el ámbito espacial coincide.',
+          sourceRefs: [1],
+          appliesToParcel: 'conditional',
+          numericTokens: [],
+        }],
+      }
+      const applicability = { ...app, status: 'CONFLICTIVO' as const, review: [source], applicable: [], canAnswerConcreteParameters: false }
+      expect(validateReasonerOutput(output, [source], applicability, undefined, undefined, true).validClaims).toHaveLength(1)
+    })
+
     const reviewSource: NormativeCandidate = {
       id: 'review-1',
       content: 'La separación será de 3 m para zona residencial aislada.',
@@ -318,6 +546,50 @@ describe('V3-B Claim-level validation & rendering', () => {
       content: 'El retranqueo aplicable es de 5 m.',
       hierarchy: 'municipal',
     }
+
+    it('separates confirmed ordinance, accepted normative evidence and territorial uncertainty', () => {
+      const canonicalSource: NormativeCandidate = {
+        id: 'r2-130',
+        content: 'Artículo 130. Ordenanza R-2. La parcela mínima es 5.000 m².',
+        parentInstrument: '27387',
+        identityId: '27387:ordinance:R-2',
+        catalogStatus: 'ACCEPTED',
+        evidenceSpecificity: 'SPECIFIC',
+        normativeReferences: [{ documentId: '27387no101.pdf', chunkIds: ['r2-130'], article: 'Art. 130', relation: 'defines', sourceId: 'catalog' }],
+      }
+      const context = {
+        qualification: { value: 'R-2', source: 'manual', verification: 'confirmed' },
+        actionArea: { value: { surfaceSquareMetres: 100, selectionType: 'whole_parcel' }, verification: 'unverified' },
+        knownConstraints: [], conflicts: [], pendingValidation: [],
+      } as unknown as NormalizedParcelContext
+      const prompt = buildMunicipalSafetyPrompt(
+        context,
+        { ...app, status: 'CONFLICTIVO', missingData: ['MISSING_REGIME_VALIDATION'] },
+        [canonicalSource],
+        'regime'
+      )
+      expect(prompt).toContain('Ordenanza aplicable confirmada en el expediente: R-2.')
+      expect(prompt).toContain('identidad canónica validada 27387:ordinance:R-2; referencias Art. 130')
+      expect(prompt).toContain('La situación territorial presenta heterogeneidad o una delimitación espacial pendiente.')
+      expect(prompt).toContain('Identidad canónica validada y evidencia normativa específica')
+      expect(prompt).toContain('Una incertidumbre parcial no invalida hechos independientes confirmados')
+      expect(prompt).not.toContain('CONFLICTIVO')
+      expect(prompt).not.toContain('MISSING_REGIME_VALIDATION')
+      expect(prompt).not.toContain('USER_CONFIRMED')
+      expect(prompt).not.toContain('actionAreaValidated')
+      for (const internalState of [
+        'DETERMINADO',
+        'PARCIAL',
+        'retrievalApplicabilityStatus',
+        'hardStopReasonCodes',
+        'mustAbstainBeforeLlm',
+        'applicable',
+        'rejected',
+      ]) {
+        expect(prompt).not.toContain(internalState)
+      }
+      expect(prompt).not.toContain('Aplicabilidad: REVISIÓN (no acreditada como aplicable a la parcela)')
+    })
 
     it('rejects a parcel parameter supported only by review evidence but keeps a safe limitation', () => {
       const reviewApplicability: ApplicabilityResult = {
@@ -350,6 +622,42 @@ describe('V3-B Claim-level validation & rendering', () => {
       }
       const result = validateReasonerOutput(output, [reviewSource], reviewApplicability)
       expect(result.validClaims).toHaveLength(1)
+    })
+
+    it('rejects a parcel conclusion sourced only from non-specific document fallback', () => {
+      const nonSpecificSource: NormativeCandidate = {
+        ...applicableSource,
+        evidenceSpecificity: 'NON_SPECIFIC',
+      }
+      const output: ReasonerOutput = {
+        answerMode: 'definitive',
+        missingFacts: [],
+        claims: [{
+          id: 'unsafe',
+          type: 'parcel_conclusion',
+          text: 'La ordenanza aplicable a esta parcela establece un retranqueo de 5 m',
+          sourceRefs: [1],
+          appliesToParcel: true,
+          numericTokens: [],
+        }],
+      }
+      const result = validateReasonerOutput(output, [nonSpecificSource], app)
+      expect(result.validClaims).toHaveLength(0)
+      expect(result.invalidClaimReasonCounts.NON_SPECIFIC_EVIDENCE).toBe(1)
+    })
+
+    it('labels document fallback as non-specific in the production prompt', () => {
+      const nonSpecificSource: NormativeCandidate = {
+        ...applicableSource,
+        evidenceSpecificity: 'NON_SPECIFIC',
+      }
+      const prompt = buildMunicipalSafetyPrompt(
+        {} as NormalizedParcelContext,
+        app,
+        [nonSpecificSource]
+      )
+      expect(prompt).toContain('Contenido general del instrumento/documentos')
+      expect(prompt).toContain('no demuestra por sí solo la ordenanza')
     })
 
     it('allows an applicable parcel parameter and mixed applicable plus review evidence', () => {
@@ -409,8 +717,22 @@ describe('V3-B Claim-level validation & rendering', () => {
     it('labels review evidence explicitly in both safety prompts', () => {
       const context = { knownConstraints: [], conflicts: [], pendingValidation: [] } as NormalizedParcelContext
       const reviewApplicability = { ...app, status: 'PARCIAL' as const, applicable: [], review: [reviewSource], canAnswerConcreteParameters: false }
-      expect(buildMunicipalSafetyPrompt(context, reviewApplicability, [reviewSource], 'regime')).toContain('Aplicabilidad: REVISIÓN')
-      expect(buildReviewSafetyPrompt(context, [reviewSource], 'regime')).toContain('Aplicabilidad: REVISIÓN')
+      const municipalPrompt = buildMunicipalSafetyPrompt(context, reviewApplicability, [reviewSource], 'regime')
+      const reviewPrompt = buildReviewSafetyPrompt(context, [reviewSource], 'regime')
+      expect(municipalPrompt).toContain('Correspondencia de la fuente: La correspondencia espacial con la parcela requiere verificación adicional.')
+      expect(reviewPrompt).toContain('Aplicabilidad: REVISIÓN')
+      expect(municipalPrompt).toContain('Instrumento:')
+      expect(municipalPrompt).toContain('Fuente:')
+      expect(reviewPrompt).toContain('Instrumento:')
+    })
+
+    it('exposes provisional trust without exposing the internal enum', () => {
+      const context = { knownConstraints: [], conflicts: [], pendingValidation: [] } as NormalizedParcelContext
+      const provisional = { ...reviewSource, trustLevel: 'OFFICIAL_SCOPED_PROVISIONAL' as const }
+      const prompt = buildMunicipalSafetyPrompt(context, { ...app, review: [], canAnswerConcreteParameters: false }, [provisional])
+      expect(prompt).toContain('Fuente oficial acotada; pendiente de revisión jurídica humana')
+      expect(prompt).toContain('nunca debe presentarse como revisada jurídicamente')
+      expect(prompt).not.toContain('OFFICIAL_SCOPED_PROVISIONAL')
     })
   })
 })

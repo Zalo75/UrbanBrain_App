@@ -1,4 +1,5 @@
 import type { NormativeRegimeIdentity } from '@/domain/parcel-context/types'
+import { extractSemanticMetadataFromTexts, TypedIdentity } from './semanticReasoner'
 
 export interface ChunkForBackfill {
   id: string
@@ -25,6 +26,7 @@ export interface EnrichedChunkMetadata {
   id: string
   metadata: {
     regime?: NormativeRegimeIdentity
+    typedIdentities?: TypedIdentity[]
     hierarchy?: {
       title?: string
       chapter?: string
@@ -232,5 +234,61 @@ export function processDocumentChunks(chunks: ChunkForBackfill[]): EnrichedChunk
     }
     results.push({ id: chunk.id, metadata: { ...(chunkRegime ? { regime: chunkRegime } : {}), hierarchy } })
   }
+  return results
+}
+
+export async function processDocumentChunksSemantic(chunks: ChunkForBackfill[]): Promise<EnrichedChunkMetadata[]> {
+  const sortedChunks = [...chunks].sort((a, b) => (a.chunkIndex ?? 0) - (b.chunkIndex ?? 0))
+  // Keep the fast heuristic hierarchy extraction
+  const heuristicResults = processDocumentChunks(sortedChunks)
+
+  const results: EnrichedChunkMetadata[] = []
+
+  for (let i = 0; i < sortedChunks.length; i++) {
+    const chunk = sortedChunks[i]
+    const prevChunk = i > 0 ? sortedChunks[i - 1] : null
+    const nextChunk = i < sortedChunks.length - 1 ? sortedChunks[i + 1] : null
+
+    const prevText = prevChunk ? prevChunk.content : ''
+    const targetText = chunk.content
+    const nextText = nextChunk ? nextChunk.content : ''
+
+    try {
+      const semanticResult = await extractSemanticMetadataFromTexts(prevText, targetText, nextText)
+      
+      const heuristicMeta = heuristicResults.find((r) => r.id === chunk.id)?.metadata ?? {}
+      
+      // Derive ordinanceCode ONLY if it's strictly an ordinance AND relationship is belonging
+      let regimeFromSemantic = undefined;
+      const primaryOrdinance = semanticResult.identifiedCodes.find(c => 
+        c.documentaryType === 'ordinance' && c.relationship === 'belonging'
+      );
+      
+      if (primaryOrdinance) {
+        regimeFromSemantic = {
+          kind: 'ordinance' as const,
+          code: primaryOrdinance.code ?? undefined,
+          label: primaryOrdinance.label ?? primaryOrdinance.code ?? undefined,
+          provenance: 'ai_assisted' as const,
+          confidence: 'high' as const
+        };
+      }
+
+      results.push({
+        id: chunk.id,
+        metadata: {
+          hierarchy: heuristicMeta.hierarchy,
+          typedIdentities: semanticResult.identifiedCodes,
+          ...(regimeFromSemantic ? { regime: regimeFromSemantic } : {})
+        }
+      })
+    } catch (e) {
+      console.error('Failed to extract semantic metadata for chunk', chunk.id, e)
+      // Fallback to heuristic
+      const heuristicMeta = heuristicResults.find((r) => r.id === chunk.id)?.metadata ?? {}
+      results.push({ id: chunk.id, metadata: heuristicMeta })
+    }
+  }
+
   return results
 }

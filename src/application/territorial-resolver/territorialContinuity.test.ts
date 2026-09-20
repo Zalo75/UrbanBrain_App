@@ -8,6 +8,7 @@ import {
   attachContinuity,
   createManualAttempt,
 } from './territorialContinuity'
+import { createTechnicianDetermination } from '@/domain/territorial-resolver/determinations'
 
 function official(reference = '1234567NH4913S'): TerritorialResolution {
   return {
@@ -396,4 +397,351 @@ describe('territorial continuity', () => {
       expect(result.planning.canAnswerConcreteParameters).toBe(false)
     }
   )
+
+  it('preserves a confirmed ordinance when a later automatic recalculation succeeds', () => {
+    const previous = official()
+    const manual: ManualTerritorialContext = {
+      municipality: 'Betanzos',
+      ordinance: 'R-2',
+      ordinanceDetermination: {
+        technician: createTechnicianDetermination('R-2', 'architect-a', undefined, {
+          now: () => new Date('2026-07-14T12:00:00.000Z'),
+        }),
+      },
+      provenance: 'manual',
+      verification: 'technician_validated',
+      recordedAt: '2026-07-14T12:00:00.000Z',
+    }
+    previous.continuity = {
+      usingPreviousOfficialContext: false,
+      sameParcelAsPrevious: true,
+      manualContext: manual,
+    }
+    const current = clearOfficial()
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.continuity?.manualContext?.ordinanceDetermination?.technician?.value).toBe('R-2')
+    expect(recalculated.continuity?.manualContext?.ordinanceDetermination?.technician?.origin).toBe('technician_selection')
+  })
+
+  it('preserves prior detailed candidates when a recalculation only degrades their semantic labels', () => {
+    const previous = clearOfficial()
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'PXOM',
+      semanticDimension: 'ordinance',
+      normalizedIdentity: 'R-2',
+      sourceRef: 'official:previous-sheet',
+      provenance: ['official:previous-sheet'],
+      instrumentMembership: true,
+      confidence: 'high',
+      status: 'active',
+    }]
+    previous.planning.ordinanceResolutionStatus = 'automatically_determined'
+
+    const current = clearOfficial()
+    current.planning.classification = {
+      code: 'SU',
+      categoryCode: 'SU-C',
+      label: 'Suelo urbano',
+      categoryLabel: 'Suelo urbano consolidado',
+      sourceFeatureIds: ['official:classification'],
+    }
+    current.planning.ordinanceCandidates = []
+    current.planning.contextualCandidates = [
+      { ...previous.planning.ordinanceCandidates[0]!, semanticDimension: 'category' },
+      { ...previous.planning.ordinanceCandidates[0]!, identity: 'SU-C', normalizedIdentity: 'SU-C', semanticDimension: 'category' },
+    ]
+    current.planning.ordinanceResolutionStatus = 'manual_confirmation_required'
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates?.map((candidate) => candidate.identity)).toEqual(['R-2'])
+    expect(recalculated.planning.ordinanceResolutionStatus).toBe('automatically_determined')
+  })
+
+  it('does not carry detailed candidates across a changed planning instrument', () => {
+    const previous = clearOfficial()
+    previous.planning.applicableInstruments = [{
+      id: 'instrument-before',
+      name: 'Previous plan',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:previous-plan',
+    }]
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-before',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-sheet'],
+      status: 'active',
+    }]
+
+    const current = clearOfficial()
+    current.planning.applicableInstruments = [{
+      id: 'instrument-after',
+      name: 'Current plan',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:current-plan',
+    }]
+    current.planning.classification = {
+      code: 'SU',
+      categoryCode: 'SU-C',
+      label: 'Suelo urbano',
+      categoryLabel: 'Suelo urbano consolidado',
+      sourceFeatureIds: ['official:classification'],
+    }
+    current.planning.ordinanceCandidates = []
+    current.planning.contextualCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-after',
+      semanticDimension: 'category',
+      provenance: ['official:current-sheet'],
+      status: 'active',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates).toEqual([])
+  })
+
+  it('preserves prior planning evidence when a zoning source fails transiently', () => {
+    const previous = clearOfficial()
+    previous.planning.applicableInstruments = [{
+      id: 'instrument-teo',
+      name: 'Plan oficial',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:plan',
+    }]
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+      confidence: 'high',
+      status: 'active',
+    }]
+    previous.planning.contextualCandidates = [{
+      identity: 'SU-C',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'category',
+      provenance: ['official:previous-classification'],
+      confidence: 'medium',
+      status: 'active',
+    }]
+
+    const current = clearOfficial()
+    current.planning.applicableInstruments = previous.planning.applicableInstruments
+    current.planning.ordinanceCandidates = []
+    current.planning.contextualCandidates = []
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'unavailable',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'fetch failed',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates?.map((candidate) => candidate.identity)).toEqual(['R-2'])
+    expect(recalculated.planning.contextualCandidates?.map((candidate) => candidate.identity)).toEqual(['SU-C'])
+    expect(recalculated.planning.status).toBe('partial')
+    expect(recalculated.planning.sourceChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'siotuga', status: 'unavailable' }),
+    ]))
+    expect(recalculated.continuity?.usingPreviousOfficialContext).toBe(true)
+  })
+
+  it('keeps a prior USER_CONFIRMED determination through a transient failure', () => {
+    const previous = clearOfficial()
+    previous.planning.applicableInstruments = [{
+      id: 'instrument-teo',
+      name: 'Plan oficial',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:plan',
+    }]
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-teo',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+      confidence: 'high',
+      status: 'user_confirmed',
+    }]
+    previous.planning.ordinanceResolution = {
+      status: 'USER_CONFIRMED',
+      identity: { code: 'R-2', label: 'R-2' },
+      confidence: 'high',
+      provenance: ['technician:architect-a'],
+      confirmationSource: 'user',
+      confirmedByUser: true,
+    }
+
+    const current = clearOfficial()
+    current.planning.applicableInstruments = previous.planning.applicableInstruments
+    current.planning.ordinanceCandidates = []
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'timeout',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'timeout',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceResolution).toMatchObject({
+      status: 'USER_CONFIRMED',
+      confirmedByUser: true,
+      identity: { code: 'R-2' },
+    })
+    expect(recalculated.planning.ordinanceCandidates?.[0]?.status).toBe('user_confirmed')
+  })
+
+  it('does not inherit planning evidence when the instrument changes', () => {
+    const previous = clearOfficial()
+    previous.planning.applicableInstruments = [{
+      id: 'instrument-before',
+      name: 'Previous plan',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:previous-plan',
+    }]
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'instrument-before',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+    }]
+
+    const current = clearOfficial()
+    current.planning.applicableInstruments = [{
+      id: 'instrument-after',
+      name: 'Current plan',
+      kind: 'general',
+      status: 'current',
+      sourceUrl: 'official:current-plan',
+    }]
+    current.planning.ordinanceCandidates = []
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'unavailable',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'fetch failed',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates).toEqual([])
+    expect(recalculated.continuity?.usingPreviousOfficialContext).toBe(false)
+  })
+
+  it('does not inherit planning evidence when the municipality changes', () => {
+    const previous = clearOfficial()
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'PXOM',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+    }]
+    const current = clearOfficial()
+    current.municipality = 'Another municipality'
+    current.municipalityCode = '15999'
+    current.planning.ordinanceCandidates = []
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'unavailable',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'fetch failed',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates).toEqual([])
+    expect(recalculated.continuity?.usingPreviousOfficialContext).toBe(false)
+  })
+
+  it('keeps a new valid result ahead of the previous result', () => {
+    const previous = clearOfficial()
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'PXOM',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+    }]
+    const current = clearOfficial()
+    current.planning.ordinanceCandidates = [{
+      identity: 'R-3',
+      instrumentId: 'PXOM',
+      semanticDimension: 'ordinance',
+      provenance: ['official:current-zoning'],
+    }]
+    current.planning.sourceChecks = [{
+      source: 'siotuga',
+      status: 'unavailable',
+      checkedAt: '2026-08-27T10:00:00.000Z',
+      message: 'auxiliary source unavailable',
+    }]
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates?.map((candidate) => candidate.identity)).toEqual(['R-3'])
+  })
+
+  it('does not treat a legitimate empty result as a transient failure', () => {
+    const previous = clearOfficial()
+    previous.planning.ordinanceCandidates = [{
+      identity: 'R-2',
+      instrumentId: 'PXOM',
+      semanticDimension: 'ordinance',
+      provenance: ['official:previous-zoning'],
+    }]
+    const current = clearOfficial()
+    current.planning.ordinanceCandidates = []
+    current.planning.contextualCandidates = []
+    current.planning.sourceChecks = []
+
+    const recalculated = attachContinuity(
+      current,
+      { cadastralReference: '1234567NH4913S' },
+      previous,
+    )
+
+    expect(recalculated.planning.ordinanceCandidates).toEqual([])
+    expect(recalculated.continuity?.usingPreviousOfficialContext).toBe(false)
+  })
 })
