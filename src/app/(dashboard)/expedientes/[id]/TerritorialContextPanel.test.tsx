@@ -580,6 +580,30 @@ describe('TerritorialContextPanel', () => {
     expect(screen.queryByText('CONFIRMADO POR USUARIO')).toBeNull()
   })
 
+  it('no propone ni preselecciona una única identidad documental pendiente de revisión sin cobertura parcelaria', () => {
+    render(
+      <TerritorialContextPanel
+        expedienteId="exp-documentary-only"
+        initialInput={{}}
+        context={{
+          ...contextWithPlanning,
+          planningStatus: 'determined',
+          ordinanceResolution: { status: 'REVIEW_REQUIRED', confidence: 'unknown', provenance: ['official:instrument'] },
+          ordinanceCandidates: [{
+            identity: 'Z3',
+            catalogStatus: 'REVIEW_REQUIRED',
+            documentaryEvidence: 'SECCIÓN 3a: ORDENANZA Z3 - RESIDENCIAL DE VIVIENDA',
+            provenance: ['official:instrument'],
+          }],
+        }}
+      />
+    )
+
+    expect(screen.queryByText(/PROPUESTA DE URBANBRAIN/i)).toBeNull()
+    expect(screen.getByRole('radio', { name: /Z3/ })).not.toBeChecked()
+    expect(screen.queryByText(/Z3 · PROPUESTA/i)).toBeNull()
+  })
+
   it('no preselecciona una candidata cuando la cobertura no identifica una dominante', () => {
     render(
       <TerritorialContextPanel

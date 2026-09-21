@@ -55,7 +55,14 @@ function confidenceLabel(confidence: TerritorialContextView['confidence']) {
 
 function ordinanceProposal(candidates: TerritorialContextView['ordinanceCandidates']) {
   if (!candidates?.length) return undefined
-  if (candidates.length === 1) return candidates[0]
+  // A sole identity from the instrument catalogue is not parcel applicability.
+  // Only preselect a proposal when the candidate carries positive parcel coverage.
+  if (candidates.length === 1) {
+    const candidate = candidates[0]!
+    return Number.isFinite(candidate.coverage?.percentage) && candidate.coverage!.percentage! > 0
+      ? candidate
+      : undefined
+  }
   if (!candidates.every((candidate) => Number.isFinite(candidate.coverage?.percentage))) return undefined
   const ranked = [...candidates].sort((a, b) => b.coverage!.percentage! - a.coverage!.percentage!)
   return ranked[0]!.coverage!.percentage! > ranked[1]!.coverage!.percentage! ? ranked[0] : undefined
