@@ -672,7 +672,7 @@ export function TerritorialContextPanel({
                         <p className="mt-1 text-xs">
                           {ordinanceUndetermined
                             ? 'UrbanBrain no ha encontrado evidencia parcelaria suficiente para asociar una ordenanza concreta a esta parcela o zona.'
-                            : 'UrbanBrain no puede determinar autom&aacute;ticamente la ordenanza con suficiente precisi&oacute;n para esta cartograf&iacute;a.'}
+                            : 'UrbanBrain no puede determinar automáticamente la ordenanza con suficiente precisión para esta cartografía.'}
                         </p>
                         {ordinanceReviewMaterials?.precisionWarning && (
                           <p className="mt-2 text-xs font-medium">{ordinanceReviewMaterials.precisionWarning}</p>
@@ -738,7 +738,7 @@ export function TerritorialContextPanel({
                         <p className="text-xs font-semibold text-slate-800">
                           {parcelOrdinanceCandidates.length > 0
                             ? 'Identidades detectadas por el plano detallado'
-                            : 'Identidades documentales del instrumento (sin v&iacute;nculo parcelario acreditado)'}
+                            : 'Identidades documentales del instrumento (sin vínculo parcelario acreditado)'}
                         </p>
                         <div className="mt-2 grid gap-2 sm:grid-cols-2">
                           {context.ordinanceCandidates!.map((candidate) => (
