@@ -517,7 +517,7 @@ describe('TerritorialContextPanel', () => {
     expect(getHiddenInput('lng').value).toBe('-8.1')
   })
 
-  it('muestra revisión asistida y sólo permite seleccionar candidatas acreditadas', () => {
+  it('mantiene la identidad no determinada cuando sólo hay evidencia documental', () => {
     render(
       <TerritorialContextPanel
         expedienteId="exp-review"
@@ -548,13 +548,14 @@ describe('TerritorialContextPanel', () => {
       />
     )
 
-    expect(screen.getByText(/no puede determinar autom.ticamente/i)).toBeTruthy()
-    expect(screen.getByText('CONFIRMAR ORDENANZA')).toBeTruthy()
-    expect(screen.getByRole('radio', { name: /ORD-1/ })).toBeTruthy()
-    expect(screen.getByRole('radio', { name: /ORD-2/ })).toBeTruthy()
+    expect(screen.getByText(/no ha encontrado evidencia parcelaria suficiente/i)).toBeTruthy()
+    expect(screen.getByText('ORDENANZA / ZONA NORMATIVA: NO DETERMINADA')).toBeTruthy()
+    expect(screen.queryByRole('radio', { name: /ORD-1/ })).toBeNull()
+    expect(screen.queryByRole('radio', { name: /ORD-2/ })).toBeNull()
+    expect(screen.getByText(/Identidades documentales del instrumento/i)).toBeTruthy()
+    expect(screen.getAllByText(/no hay evidencia que permita relacionarla con esta parcela o zona/i)).toHaveLength(2)
     expect(screen.getByText('NO PUEDO DETERMINARLA')).toBeTruthy()
-    const confirmationForm = screen.getByRole('button', { name: 'CONFIRMAR ORDENANZA' }).closest('form')
-    expect(confirmationForm?.querySelector('input[name="candidateConfirmation"]')?.getAttribute('value')).toBe('on')
+    expect(screen.queryByRole('button', { name: 'CONFIRMAR ORDENANZA' })).toBeNull()
   })
 
   it('preselecciona como propuesta la candidata con cobertura dominante sin presentarla como confirmada', () => {
@@ -600,7 +601,9 @@ describe('TerritorialContextPanel', () => {
     )
 
     expect(screen.queryByText(/PROPUESTA DE URBANBRAIN/i)).toBeNull()
-    expect(screen.getByRole('radio', { name: /Z3/ })).not.toBeChecked()
+    expect(screen.queryByRole('radio', { name: /Z3/ })).toBeNull()
+    expect(screen.getByText('ORDENANZA / ZONA NORMATIVA: NO DETERMINADA')).toBeTruthy()
+    expect(screen.getByText(/no hay evidencia que permita relacionarla con esta parcela o zona/i)).toBeTruthy()
     expect(screen.queryByText(/Z3 · PROPUESTA/i)).toBeNull()
   })
 

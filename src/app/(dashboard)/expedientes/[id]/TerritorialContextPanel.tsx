@@ -68,6 +68,10 @@ function ordinanceProposal(candidates: TerritorialContextView['ordinanceCandidat
   return ranked[0]!.coverage!.percentage! > ranked[1]!.coverage!.percentage! ? ranked[0] : undefined
 }
 
+function hasParcelEvidence(candidate: NonNullable<TerritorialContextView['ordinanceCandidates']>[number]) {
+  return Number.isFinite(candidate.coverage?.percentage) && candidate.coverage!.percentage! > 0
+}
+
 export function TerritorialContextPanel({
   expedienteId,
   initialInput,
@@ -139,6 +143,8 @@ export function TerritorialContextPanel({
   const ordinanceResolutionStatus = context?.ordinanceResolution?.status;
   const ordinanceReviewMaterials = context?.ordinanceResolution?.reviewMaterials;
   const proposedOrdinance = ordinanceProposal(context?.ordinanceCandidates);
+  const parcelOrdinanceCandidates = context?.ordinanceCandidates?.filter(hasParcelEvidence) ?? [];
+  const ordinanceUndetermined = ordinanceResolutionStatus === 'REVIEW_REQUIRED' && parcelOrdinanceCandidates.length === 0;
   const affectsFullyChecked = context?.sourceChecks.some(
     (check) => check.source === 'ideg' && check.status === 'available'
   );
@@ -602,6 +608,9 @@ export function TerritorialContextPanel({
                     <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center justify-between">
                       <div>
                         <h3 className="font-semibold text-blue-900">CALIFICACI&Oacute;N / ZONA NORMATIVA</h3>
+                        {ordinanceUndetermined && (
+                          <p className="mt-1 text-xs font-semibold text-slate-700">ORDENANZA / ZONA NORMATIVA: NO DETERMINADA</p>
+                        )}
                         {ordinanceResolutionStatus === 'USER_CONFIRMED' ? (
                           <p className="text-xs font-medium text-emerald-700 flex items-center gap-1 mt-1">
                             <CheckCircle2 className="h-3 w-3" /> CONFIRMADO POR USUARIO
@@ -661,7 +670,9 @@ export function TerritorialContextPanel({
                       <div className="border-b border-amber-200 bg-amber-50 px-4 py-4 text-amber-950">
                         <p className="text-sm font-semibold">Revisi&oacute;n t&eacute;cnica necesaria</p>
                         <p className="mt-1 text-xs">
-                          UrbanBrain no puede determinar autom&aacute;ticamente la ordenanza con suficiente precisi&oacute;n para esta cartograf&iacute;a.
+                          {ordinanceUndetermined
+                            ? 'UrbanBrain no ha encontrado evidencia parcelaria suficiente para asociar una ordenanza concreta a esta parcela o zona.'
+                            : 'UrbanBrain no puede determinar autom&aacute;ticamente la ordenanza con suficiente precisi&oacute;n para esta cartograf&iacute;a.'}
                         </p>
                         {ordinanceReviewMaterials?.precisionWarning && (
                           <p className="mt-2 text-xs font-medium">{ordinanceReviewMaterials.precisionWarning}</p>
@@ -679,7 +690,7 @@ export function TerritorialContextPanel({
                             <p className="mt-2 text-xs font-medium text-blue-800">HAS recomendada para esta revisión por la evidencia disponible.</p>
                           </div>
                         )}
-                        {(context.ordinanceCandidates?.length ?? 0) > 0 || (context.ordinanceCatalogOptions?.length ?? 0) > 0 ? (
+                        {(!ordinanceUndetermined && (parcelOrdinanceCandidates.length > 0 || (ordinanceResolutionStatus !== 'REVIEW_REQUIRED' && (context.ordinanceCatalogOptions?.length ?? 0) > 0))) ? (
                           <form action={formAction} className="mt-3 space-y-3">
                             <input type="hidden" name="intent" value="manual" />
                             <input type="hidden" name="candidateConfirmation" value="on" />
@@ -701,7 +712,7 @@ export function TerritorialContextPanel({
                                 ))}
                               </select>
                             ) : <div className="grid gap-2 sm:grid-cols-2">
-                              {context.ordinanceCandidates!.map((candidate) => (
+                              {parcelOrdinanceCandidates.map((candidate) => (
                                 <label key={`review-${candidate.identity}`} className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-white p-2 text-xs has-[:checked]:border-amber-700 has-[:checked]:ring-1 has-[:checked]:ring-amber-700">
                                   <input type="radio" name="manualOrdinance" value={candidate.identity} required defaultChecked={candidate.identity === proposedOrdinance?.identity} className="mt-0.5" />
                                   <span><span className="block font-medium">{candidate.identity}{candidate.identity === proposedOrdinance?.identity ? ' · PROPUESTA' : ''}</span><span className="text-slate-600">{candidate.documentaryEvidence ?? 'Evidencia del instrumento'}</span></span>
@@ -725,7 +736,9 @@ export function TerritorialContextPanel({
                     {(context.ordinanceCandidates?.length ?? 0) > 0 && (
                       <div className="border-b bg-slate-50 px-4 py-3">
                         <p className="text-xs font-semibold text-slate-800">
-                          Identidades detectadas por el plano detallado
+                          {parcelOrdinanceCandidates.length > 0
+                            ? 'Identidades detectadas por el plano detallado'
+                            : 'Identidades documentales del instrumento (sin v&iacute;nculo parcelario acreditado)'}
                         </p>
                         <div className="mt-2 grid gap-2 sm:grid-cols-2">
                           {context.ordinanceCandidates!.map((candidate) => (
@@ -745,6 +758,11 @@ export function TerritorialContextPanel({
                                 Confianza: {candidate.confidence ?? 'no determinada'}
                                 {candidate.sourceDocument ? ` · ${candidate.sourceDocument}` : ''}
                               </p>
+                              {!hasParcelEvidence(candidate) && (
+                                <p className="mt-1 text-[10px] font-medium text-amber-700">
+                                  Identificada en la documentaci&oacute;n del instrumento; no hay evidencia que permita relacionarla con esta parcela o zona.
+                                </p>
+                              )}
                               {candidate.provenance.length > 0 && (
                                 <details className="mt-2 text-[10px] text-slate-500">
                                   <summary className="cursor-pointer">Ver procedencia</summary>
